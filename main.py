@@ -14,13 +14,17 @@ import config
 # logging
 # --------------------------------------------------------------------------
 config.LOG_DIR.mkdir(exist_ok=True)
+_log_handlers = [logging.StreamHandler()]
+try:
+    _log_handlers.append(
+        logging.FileHandler(config.LOG_DIR / "noodle.log", encoding="utf-8")
+    )
+except OSError as exc:
+    print(f"warning: cannot write log file, logging to console only: {exc}")
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL.upper(), logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler(config.LOG_DIR / "noodle.log", encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
+    handlers=_log_handlers,
 )
 logger = logging.getLogger("noodle")
 

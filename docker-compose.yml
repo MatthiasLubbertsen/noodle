@@ -6,8 +6,3 @@ services:
     # secrets come from the gitignored .env on the host (not baked into the image)
     env_file:
       - .env
-    volumes:
-      - noodle-logs:/app/logs
-
-volumes:
-  noodle-logs:
