@@ -70,9 +70,14 @@ no nested `noodle/noodle` folder.
   web api, exposed to the model as an openai-style **function/tool call**
   (`search_slack_messages`). the model decides when to call it; results are fed
   back as context and are **never** posted raw to slack.
+- search runs **as the token's user** (logged as `searching_as=...`). it can
+  only find messages that user is allowed to see, so the `SLACK_USER_TOKEN`
+  must belong to the same user that can see the messages you want searched.
 - requires the slack user token to have the `search:read` scope.
 - tool-calling needs a model that supports function calls; if the configured
   `MODEL` does not, the search tool simply will not trigger.
+- verbose logs: each search logs its query, the first two words of the user's
+  prompt, `searching_as`, the match count, and a snippet of the top matches.
 
 ### 4c. never send reasoning to slack
 - noodle only ever forwards the model's final `content` to slack. any

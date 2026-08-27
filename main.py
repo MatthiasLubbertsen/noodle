@@ -62,9 +62,11 @@ def _mention_in_text(text: str) -> bool:
 
 
 def _clean_text(text: str) -> str:
-    # strip @-mentions so the model does not echo them
-    for mid in MENTION_IDS:
-        text = text.replace(f"<@{mid}>", "")
+    # turn user mentions <@U123> into plain ids so the model can use from:U123
+    text = re.sub(r"<@([A-Z0-9]+)>", r"\1", text)
+    # turn channel mentions <#C123|name> / <#C123> into plain ids for in:C123
+    text = re.sub(r"<#([A-Z0-9]+)\|[^>]+>", r"\1", text)
+    text = re.sub(r"<#([A-Z0-9]+)>", r"\1", text)
     return text.strip()
 
 
@@ -195,14 +197,35 @@ def _trim_memory(history: list[dict], max_groups: int = 12) -> None:
     history[:] = [m for g in groups for m in g]
 
 
-def _search_slack_messages(query: str) -> str:
+def _search_slack_messages(query: str, user_prompt: str = "") -> str:
+    first2 = " ".join(user_prompt.split()[:2])
+    logger.info(
+        "search_slack_messages query=%r (user prompt: %r) searching_as=%s",
+        query, first2, AUTH_USER_ID,
+    )
     try:
         resp = app.client.search_messages(query=query, count=5)
         if not resp.get("ok"):
+            logger.warning(
+                "search_slack_messages FAILED ok=%s error=%s (user: %r) searching_as=%s",
+                resp.get("ok"), resp.get("error"), first2, AUTH_USER_ID,
+            )
             return f"slack search error: {resp.get('error')}"
         matches = (resp.get("messages") or {}).get("matches", [])
+        logger.info(
+            "search_slack_messages got %d matches (user: %r) searching_as=%s",
+            len(matches), first2, AUTH_USER_ID,
+        )
         if not matches:
             return "no slack messages found for that query"
+        for i, m in enumerate(matches[:3]):
+            chan = m.get("channel", {}) or {}
+            cid = chan.get("id") if isinstance(chan, dict) else chan
+            logger.info(
+                "  match %d: channel=%s user=%s ts=%s text=%r",
+                i, cid, m.get("user"), m.get("ts"),
+                (m.get("text") or "")[:120],
+            )
         lines = []
         for m in matches:
             body = (m.get("text") or "").replace("\n", " ")
@@ -217,12 +240,14 @@ def _search_slack_messages(query: str) -> str:
             lines.append(f"- in {chan_link} from {user} at {ts}: {body}")
         return "\n".join(lines)
     except Exception as exc:
-        logger.exception("slack search failed")
+        logger.exception("slack search failed (user: %r)", first2)
         return f"slack search failed: {exc}"
 
 
 def _ask_noodle(conv_key: str, user_text: str) -> str:
     user_text = user_text or "hello"
+    first2 = " ".join(user_text.split()[:2])
+    logger.info("ai request for user prompt: %r", first2)
     history = MEMORY.setdefault(conv_key, [])
     history.append({"role": "user", "content": user_text})
 
@@ -264,7 +289,9 @@ def _ask_noodle(conv_key: str, user_text: str) -> str:
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
-            result = _search_slack_messages(args.get("query", ""))
+            result = _search_slack_messages(
+                args.get("query", ""), user_prompt=user_text
+            )
             history.append(
                 {"role": "tool", "tool_call_id": tc.id, "content": result}
             )
