@@ -242,64 +242,40 @@ def _resolve_from_handle(query: str):
 
 def _search_slack_messages(query: str, user_prompt: str = "") -> str:
     first2 = " ".join(user_prompt.split()[:2])
-    logger.info(
-        "search_slack_messages query=%r (user prompt: %r) searching_as=%s",
-        query, first2, AUTH_USER_ID,
-    )
+    logger.debug("search query=%r (user: %r) searching_as=%s", query, first2, AUTH_USER_ID)
     try:
         resp = app.client.search_messages(query=query, count=5)
         if not resp.get("ok"):
-            logger.warning(
-                "search_slack_messages FAILED ok=%s error=%s (user: %r) searching_as=%s",
-                resp.get("ok"), resp.get("error"), first2, AUTH_USER_ID,
-            )
+            logger.warning("search FAILED error=%s", resp.get("error"))
             return f"slack search error: {resp.get('error')}"
         matches = (resp.get("messages") or {}).get("matches", [])
-        logger.info(
-            "search_slack_messages got %d matches (user: %r) searching_as=%s",
-            len(matches), first2, AUTH_USER_ID,
-        )
+        logger.info("search %r -> %d matches", query, len(matches))
         if not matches:
             # slack search 'from:' sometimes matches better on the @handle than
             # the internal user id; try resolving the id to a handle.
             handle_q = _resolve_from_handle(query)
             if handle_q:
-                logger.info(
-                    "search retry (from-handle) query=%r searching_as=%s",
-                    handle_q, AUTH_USER_ID,
-                )
+                logger.debug("search retry (from-handle) %r", handle_q)
                 try:
                     resp_h = app.client.search_messages(query=handle_q, count=5)
                     if resp_h.get("ok"):
                         matches = (resp_h.get("messages") or {}).get("matches", [])
-                        logger.info("from-handle search got %d matches", len(matches))
                 except Exception:
                     logger.exception("from-handle search failed")
         if not matches:
             # one broader retry: drop the from: filter and any quotes
             broader = re.sub(r"from:\S+\s*", "", query).strip().strip('"').strip()
             if broader and broader != query:
-                logger.info(
-                    "search retry (broader) query=%r searching_as=%s",
-                    broader, AUTH_USER_ID,
-                )
+                logger.debug("search retry (broader) %r", broader)
                 try:
                     resp2 = app.client.search_messages(query=broader, count=5)
                     if resp2.get("ok"):
                         matches = (resp2.get("messages") or {}).get("matches", [])
-                        logger.info("broader search got %d matches", len(matches))
                 except Exception:
                     logger.exception("broader search failed")
         if not matches:
             return "no slack messages found for that query"
-        for i, m in enumerate(matches[:3]):
-            chan = m.get("channel", {}) or {}
-            cid = chan.get("id") if isinstance(chan, dict) else chan
-            logger.info(
-                "  match %d: channel=%s user=%s ts=%s text=%r",
-                i, cid, m.get("user"), m.get("ts"),
-                (m.get("text") or "")[:120],
-            )
+        logger.debug("top match: %r", (matches[0].get("text") or "")[:120])
         lines = []
         for m in matches:
             body = (m.get("text") or "").replace("\n", " ")
@@ -335,11 +311,27 @@ def _parse_slack_ref(ref: str):
     return None, None
 
 
+def _channel_link(cid: str) -> str:
+    # resolve a channel id to a slack-renderable link (<#C123|name>)
+    try:
+        info = app.client.conversations_info(channel=cid)
+        if info.get("ok"):
+            ch = info.get("channel", {}) or {}
+            if ch.get("is_im"):
+                return "dm"
+            name = ch.get("name")
+            if name:
+                return f"<#{cid}|{name}>"
+    except Exception:
+        logger.exception("conversations_info failed for %s", cid)
+    return f"<#{cid}>"
+
+
 def _fetch_slack_message(ref: str) -> str:
     cid, ts = _parse_slack_ref(ref)
     if not cid or not ts:
         return "could not parse a slack channel/timestamp from that reference"
-    logger.info("fetch_slack_message channel=%s ts=%s searching_as=%s", cid, ts, AUTH_USER_ID)
+    logger.info("fetch %s %s", cid, ts)
     try:
         resp = app.client.conversations_history(
             channel=cid, latest=ts, inclusive=True, limit=1
@@ -350,12 +342,12 @@ def _fetch_slack_message(ref: str) -> str:
             resp2 = app.client.conversations_replies(channel=cid, ts=ts, limit=1)
             msgs = (resp2.get("messages") or []) if resp2.get("ok") else []
         if not msgs:
-            return f"no message found at <#{cid}> {ts}"
+            return f"no message found at {_channel_link(cid)} {ts}"
         msg = msgs[0]
         text = msg.get("text", "")
         user = msg.get("user", "unknown")
-        logger.info("fetched message from %s at %s: %r", user, ts, text[:160])
-        return f"message in <#{cid}> from {user} at {ts}: {text}"
+        logger.debug("fetched from %s at %s: %r", user, ts, text[:160])
+        return f"message in {_channel_link(cid)} from {user} at {ts}: {text}"
     except Exception as exc:
         logger.exception("fetch_slack_message failed")
         return f"fetch failed: {exc}"
@@ -364,7 +356,7 @@ def _fetch_slack_message(ref: str) -> str:
 def _ask_noodle(conv_key: str, user_text: str) -> str:
     user_text = user_text or "hello"
     first2 = " ".join(user_text.split()[:2])
-    logger.info("ai request for user prompt: %r", first2)
+    logger.debug("ai request for user prompt: %r", first2)
     history = MEMORY.setdefault(conv_key, [])
     history.append({"role": "user", "content": user_text})
 
