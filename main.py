@@ -63,12 +63,17 @@ def _mention_in_text(text: str) -> bool:
 
 def _clean_text(text: str) -> str:
     # drop our OWN mention entirely (e.g. "@noodle") so the model never parrots
-    # its own ping back. keep other user/channel mentions in slack's canonical
-    # syntax (<@U123> / <#C123>) so it can build from:<@U123> / in:<#C123> queries.
+    # its own ping back.
     for mid in MENTION_IDS:
         text = re.sub(rf"<@{mid}(?:\|[A-Z0-9]+)?>", "", text)
-    text = re.sub(r"<@([A-Z0-9]+)\|[^>]+>", r"<@\1>", text)
-    text = re.sub(r"<#([A-Z0-9]+)\|[^>]+>", r"<#\1>", text)
+    # render channel mentions as friendly #name so the model doesn't mangle raw
+    # <#C123> tokens. slack search accepts in:#channel-name, so the id is not
+    # needed in the prompt. keep the bare <#C123> form only when no name present.
+    text = re.sub(r"<#([A-Z0-9]+)\|([^>]+)>", r"#\2", text)
+    # render user mentions as @name when a label is present (from:@name works).
+    text = re.sub(r"<@([A-Z0-9]+)\|([^>]+)>", r"@\2", text)
+    # anything still wrapped in <...> (bare ids) gets unwrapped to avoid leakage
+    text = re.sub(r"<([^>]+)>", r"\1", text)
     return re.sub(r"\s{2,}", " ", text).strip()
 
 
@@ -155,10 +160,10 @@ TOOLS = [
             "name": "search_slack_messages",
                 "description": (
                 "search slack for messages across channels, dms and threads. "
-                "build a query with slack's modifiers: from:<@USERID> to filter "
-                "by a user (e.g. from:<@U09UE480JHH>), in:<#CHANNELID> or "
-                "in:#channel-name to filter by channel, and wrap exact phrases in "
-                "double quotes. example: from:<@U09UE480JHH> \"i want to cheese\""
+                "build a query with slack's modifiers: from:@username or "
+                "from:<@USERID> to filter by a user, in:#channel-name or "
+                "in:<#CHANNELID> to filter by channel, and wrap exact phrases in "
+                "double quotes. example: from:@zrl \"i want to cheese\""
             ),
             "parameters": {
                 "type": "object",
