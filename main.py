@@ -169,7 +169,29 @@ TOOLS = [
                 "required": ["query"],
             },
         },
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_slack_message",
+            "description": (
+                "fetch the actual text of a specific slack message. pass a slack "
+                "permalink/url (e.g. https://hackclub.slack.com/archives/C123/p12345... ) "
+                "or a 'channel:timestamp' reference. use this when the user pastes a "
+                "slack link or asks what a particular message actually says."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "a slack permalink/url or channel:timestamp",
+                    }
+                },
+                "required": ["ref"],
+            },
+        },
+    },
 ]
 
 
@@ -296,6 +318,49 @@ def _search_slack_messages(query: str, user_prompt: str = "") -> str:
         return f"slack search failed: {exc}"
 
 
+def _parse_slack_ref(ref: str):
+    # archive url: https://x.slack.com/archives/Cxxxx/p<10 digits><6 digits>
+    m = re.search(r"archives/(C[0-9A-Z]+)/p(\d{10})(\d{1,6})", ref)
+    if m:
+        return m.group(1), f"{m.group(2)}.{m.group(3)}"
+    # query-string form: ?thread_ts=1493223429.243531&cid=C0C78SG9L
+    m2 = re.search(r"cid=([C0-9A-Z]+)", ref)
+    m3 = re.search(r"thread_ts=(\d+\.\d+)", ref)
+    if m2 and m3:
+        return m2.group(1), m3.group(1)
+    # raw "C123:1493223429.243531"
+    m4 = re.match(r"(C[0-9A-Z]+):(\d+\.\d+)", ref.strip())
+    if m4:
+        return m4.group(1), m4.group(2)
+    return None, None
+
+
+def _fetch_slack_message(ref: str) -> str:
+    cid, ts = _parse_slack_ref(ref)
+    if not cid or not ts:
+        return "could not parse a slack channel/timestamp from that reference"
+    logger.info("fetch_slack_message channel=%s ts=%s searching_as=%s", cid, ts, AUTH_USER_ID)
+    try:
+        resp = app.client.conversations_history(
+            channel=cid, latest=ts, inclusive=True, limit=1
+        )
+        msgs = (resp.get("messages") or []) if resp.get("ok") else []
+        if not msgs:
+            # maybe a reply inside a thread
+            resp2 = app.client.conversations_replies(channel=cid, ts=ts, limit=1)
+            msgs = (resp2.get("messages") or []) if resp2.get("ok") else []
+        if not msgs:
+            return f"no message found at <#{cid}> {ts}"
+        msg = msgs[0]
+        text = msg.get("text", "")
+        user = msg.get("user", "unknown")
+        logger.info("fetched message from %s at %s: %r", user, ts, text[:160])
+        return f"message in <#{cid}> from {user} at {ts}: {text}"
+    except Exception as exc:
+        logger.exception("fetch_slack_message failed")
+        return f"fetch failed: {exc}"
+
+
 def _ask_noodle(conv_key: str, user_text: str) -> str:
     user_text = user_text or "hello"
     first2 = " ".join(user_text.split()[:2])
@@ -341,9 +406,15 @@ def _ask_noodle(conv_key: str, user_text: str) -> str:
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
-            result = _search_slack_messages(
-                args.get("query", ""), user_prompt=user_text
-            )
+            name = tc.function.name
+            if name == "search_slack_messages":
+                result = _search_slack_messages(
+                    args.get("query", ""), user_prompt=user_text
+                )
+            elif name == "fetch_slack_message":
+                result = _fetch_slack_message(args.get("ref", ""))
+            else:
+                result = f"unknown tool: {name}"
             history.append(
                 {"role": "tool", "tool_call_id": tc.id, "content": result}
             )

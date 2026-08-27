@@ -76,6 +76,15 @@ no nested `noodle/noodle` folder.
 - requires the slack user token to have the `search:read` scope.
 - tool-calling needs a model that supports function calls; if the configured
   `MODEL` does not, the search tool simply will not trigger.
+
+### 4b-i. fetch_slack_message tool
+- a second tool lets noodle read the **actual text** of one specific message
+  by its permalink/url or `channel:timestamp`, using `conversations.history`
+  (falling back to `conversations.replies` for thread replies).
+- this is how noodle can answer "what does this message say?" when given a
+  slack link, instead of only seeing search snippets/links.
+- requires `channels:history` (or `groups:history`/`im:history`) on the token,
+  and the bot user must be a member of that channel.
 - verbose logs: each search logs its query, the first two words of the user's
   prompt, `searching_as`, the match count, and a snippet of the top matches.
 
