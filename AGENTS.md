@@ -39,7 +39,11 @@ no nested `noodle/noodle` folder.
 - responds when:
   - it is a **direct message (DM)**, or
   - a message in an **allowed channel** mentions "noodle" (case-insensitive)
-    or `@noodle` (the app/bot user id).
+    or `@noodle` (the app/bot user id), or
+  - a message arrives in a **thread noodle has joined** (it keeps answering
+    inside threads it has replied to, even without a fresh mention).
+- when replying inside a thread, noodle posts into that thread
+  (`thread_ts`), so conversations stay grouped.
 - allowed channels come from `ALLOWED_CHANNELS` in `.env` (comma separated).
   set it to `*` to allow mentions in any channel, or leave it empty to disable
   channel replies entirely (DMs still work).
@@ -52,10 +56,28 @@ no nested `noodle/noodle` folder.
 
 ### 4. persona & system prompt
 - the persona lives in `prompts/system_prompt.md` and is loaded at startup.
-- style rules: very informal, no capital letters (except real proper names),
-  no periods/formal punctuation, uwuified language, they/them, ends with ":3".
+- style rules (strict): lowercase ONLY, no capitals ever; replace every "r"
+  and "l" with "w"; sprinkle "uwu"/"owo"/"7w7"; no periods/colons/semicolons;
+  every sentence ends with `<3` or `~`; the `:3` face only appears once every
+  few sentences when extra happy (never on every sentence); ends the message
+  with a cute `*action*` in asterisks; they/them; shy and cute.
 - the prompt also tells the model to put **one thought per line** so the bot
   can chunk the reply.
+
+### 4b. tools (slack search)
+- noodle can search slack using its own user token via the `search_messages`
+  web api, exposed to the model as an openai-style **function/tool call**
+  (`search_slack_messages`). the model decides when to call it; results are fed
+  back as context and are **never** posted raw to slack.
+- requires the slack user token to have the `search:read` scope.
+- tool-calling needs a model that supports function calls; if the configured
+  `MODEL` does not, the search tool simply will not trigger.
+
+### 4c. never send reasoning to slack
+- noodle only ever forwards the model's final `content` to slack. any
+  chain-of-thought / `<think:6124c78e>...</think:6124c78e>` blocks are stripped before chunking,
+  and tool results are used as context only (never posted). reasoning, debug
+  logs, or raw tool output are never sent to a channel or thread.
 
 ### 5. message chunking
 - after the ai replies, `_chunk_response()` splits the text into small
