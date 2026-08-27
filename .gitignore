@@ -1,0 +1,5 @@
+# environment
+.env
+logs/
+__pycache__/
+*.pyc
