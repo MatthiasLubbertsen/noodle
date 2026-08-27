@@ -217,6 +217,21 @@ def _search_slack_messages(query: str, user_prompt: str = "") -> str:
             len(matches), first2, AUTH_USER_ID,
         )
         if not matches:
+            # one broader retry: drop the from: filter and any quotes
+            broader = re.sub(r"from:\S+\s*", "", query).strip().strip('"').strip()
+            if broader and broader != query:
+                logger.info(
+                    "search retry (broader) query=%r searching_as=%s",
+                    broader, AUTH_USER_ID,
+                )
+                try:
+                    resp2 = app.client.search_messages(query=broader, count=5)
+                    if resp2.get("ok"):
+                        matches = (resp2.get("messages") or {}).get("matches", [])
+                        logger.info("broader search got %d matches", len(matches))
+                except Exception:
+                    logger.exception("broader search failed")
+        if not matches:
             return "no slack messages found for that query"
         for i, m in enumerate(matches[:3]):
             chan = m.get("channel", {}) or {}
