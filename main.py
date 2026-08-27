@@ -197,6 +197,27 @@ def _trim_memory(history: list[dict], max_groups: int = 12) -> None:
     history[:] = [m for g in groups for m in g]
 
 
+def _resolve_from_handle(query: str):
+    # slack search 'from:' often matches on the @handle rather than the U-id,
+    # so rewrite from:Uxxxx -> from:@handle when we can resolve it
+    m = re.search(r"from:(U[A-Z0-9]+)", query)
+    if not m:
+        return None
+    uid = m.group(1)
+    try:
+        info = app.client.users_info(user=uid)
+        if not info.get("ok"):
+            return None
+        user = info.get("user", {}) or {}
+        handle = user.get("name") or (user.get("profile") or {}).get("display_name")
+        if not handle:
+            return None
+        return re.sub(r"from:" + re.escape(uid), f"from:@{handle}", query)
+    except Exception:
+        logger.exception("users_info failed for %s", uid)
+        return None
+
+
 def _search_slack_messages(query: str, user_prompt: str = "") -> str:
     first2 = " ".join(user_prompt.split()[:2])
     logger.info(
@@ -216,6 +237,22 @@ def _search_slack_messages(query: str, user_prompt: str = "") -> str:
             "search_slack_messages got %d matches (user: %r) searching_as=%s",
             len(matches), first2, AUTH_USER_ID,
         )
+        if not matches:
+            # slack search 'from:' sometimes matches better on the @handle than
+            # the internal user id; try resolving the id to a handle.
+            handle_q = _resolve_from_handle(query)
+            if handle_q:
+                logger.info(
+                    "search retry (from-handle) query=%r searching_as=%s",
+                    handle_q, AUTH_USER_ID,
+                )
+                try:
+                    resp_h = app.client.search_messages(query=handle_q, count=5)
+                    if resp_h.get("ok"):
+                        matches = (resp_h.get("messages") or {}).get("matches", [])
+                        logger.info("from-handle search got %d matches", len(matches))
+                except Exception:
+                    logger.exception("from-handle search failed")
         if not matches:
             # one broader retry: drop the from: filter and any quotes
             broader = re.sub(r"from:\S+\s*", "", query).strip().strip('"').strip()
