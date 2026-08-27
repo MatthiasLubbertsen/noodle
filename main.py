@@ -62,11 +62,11 @@ def _mention_in_text(text: str) -> bool:
 
 
 def _clean_text(text: str) -> str:
-    # turn user mentions <@U123> into plain ids so the model can use from:U123
-    text = re.sub(r"<@([A-Z0-9]+)>", r"\1", text)
-    # turn channel mentions <#C123|name> / <#C123> into plain ids for in:C123
-    text = re.sub(r"<#([A-Z0-9]+)\|[^>]+>", r"\1", text)
-    text = re.sub(r"<#([A-Z0-9]+)>", r"\1", text)
+    # keep slack's canonical mention syntax so the model knows both the id AND
+    # the type: <@U123> for users, <#C123> for channels. just drop the display
+    # name label. this lets the model build from:<@U123> / in:<#C123> queries.
+    text = re.sub(r"<@([A-Z0-9]+)\|[^>]+>", r"<@\1>", text)
+    text = re.sub(r"<#([A-Z0-9]+)\|[^>]+>", r"<#\1>", text)
     return text.strip()
 
 
@@ -151,12 +151,12 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_slack_messages",
-            "description": (
+                "description": (
                 "search slack for messages across channels, dms and threads. "
-                "build a good slack search query: use from:<user> to filter by a "
-                "user (a user id like U123 works), in:<channel> to filter by "
-                "channel, and wrap exact phrases in double quotes. "
-                "example: from:U12345 \"i want to cheese\""
+                "build a query with slack's modifiers: from:<@USERID> to filter "
+                "by a user (e.g. from:<@U09UE480JHH>), in:<#CHANNELID> or "
+                "in:#channel-name to filter by channel, and wrap exact phrases in "
+                "double quotes. example: from:<@U09UE480JHH> \"i want to cheese\""
             ),
             "parameters": {
                 "type": "object",
@@ -295,10 +295,18 @@ def _search_slack_messages(query: str, user_prompt: str = "") -> str:
 
 
 def _parse_slack_ref(ref: str):
-    # archive url: https://x.slack.com/archives/Cxxxx/p<10 digits><6 digits>
+    # message permalink: archives/Cxxxx/p<10 digits><6 digits>
     m = re.search(r"archives/(C[0-9A-Z]+)/p(\d{10})(\d{1,6})", ref)
     if m:
         return m.group(1), f"{m.group(2)}.{m.group(3)}"
+    # a channel mention pasted directly: <#Cxxxx> or <#Cxxxx|name>
+    m_c = re.search(r"<#(C[0-9A-Z]+)", ref)
+    if m_c:
+        return m_c.group(1), None
+    # bare channel id
+    m_b = re.match(r"(C[0-9A-Z]+)$", ref.strip())
+    if m_b:
+        return m_b.group(1), None
     # query-string form: ?thread_ts=1493223429.243531&cid=C0C78SG9L
     m2 = re.search(r"cid=([C0-9A-Z]+)", ref)
     m3 = re.search(r"thread_ts=(\d+\.\d+)", ref)
@@ -308,6 +316,10 @@ def _parse_slack_ref(ref: str):
     m4 = re.match(r"(C[0-9A-Z]+):(\d+\.\d+)", ref.strip())
     if m4:
         return m4.group(1), m4.group(2)
+    # channel url without a specific message: archives/Cxxxx
+    m5 = re.search(r"archives/(C[0-9A-Z]+)(?!/\w)", ref)
+    if m5:
+        return m5.group(1), None
     return None, None
 
 
@@ -329,8 +341,13 @@ def _channel_link(cid: str) -> str:
 
 def _fetch_slack_message(ref: str) -> str:
     cid, ts = _parse_slack_ref(ref)
-    if not cid or not ts:
+    if not cid:
         return "could not parse a slack channel/timestamp from that reference"
+    if not ts:
+        return (
+            f"that looks like channel <#{cid}> but no specific message was given; "
+            f"try a search with in:<#{cid}>"
+        )
     logger.info("fetch %s %s", cid, ts)
     try:
         resp = app.client.conversations_history(
