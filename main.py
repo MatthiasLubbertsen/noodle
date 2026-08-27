@@ -42,6 +42,8 @@ BOT_ID = auth.get("bot_id")
 MENTION_IDS = {mid for mid in (AUTH_USER_ID, BOT_ID) if mid}
 # threads noodle has joined (by replying) so it keeps answering in them
 PARTICIPATING_THREADS: set[str] = set()
+# short-term conversation memory (in-memory, resets on restart)
+MEMORY: dict[str, list[dict]] = {}
 logger.info("noodle online as user=%s bot=%s", AUTH_USER_ID, BOT_ID)
 
 # load persona
@@ -148,17 +150,18 @@ TOOLS = [
         "function": {
             "name": "search_slack_messages",
             "description": (
-                "search slack for messages across channels, dms and threads "
-                "using a free-text query. use this whenever the user asks about "
-                "something that might have been said before, or wants you to look "
-                "something up."
+                "search slack for messages across channels, dms and threads. "
+                "build a good slack search query: use from:<user> to filter by a "
+                "user (a user id like U123 works), in:<channel> to filter by "
+                "channel, and wrap exact phrases in double quotes. "
+                "example: from:U12345 \"i want to cheese\""
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "the search query, e.g. 'deploy downtime last week'",
+                        "description": "the slack search query, e.g. from:U12345 \"i want to cheese\"",
                     }
                 },
                 "required": ["query"],
@@ -168,32 +171,62 @@ TOOLS = [
 ]
 
 
+def _conv_key(event: dict) -> str:
+    thread_ts = event.get("thread_ts")
+    if thread_ts:
+        return f"thread:{thread_ts}"
+    return f"chan:{event.get('channel')}"
+
+
+def _trim_memory(history: list[dict], max_groups: int = 12) -> None:
+    # keep history grouped by user turns so tool_call/tool pairs stay intact
+    groups: list[list[dict]] = []
+    current: list[dict] | None = None
+    for m in history:
+        if m["role"] == "user":
+            current = [m]
+            groups.append(current)
+        elif current is not None:
+            current.append(m)
+        else:
+            groups.append([m])
+    while len(groups) > max_groups:
+        groups.pop(0)
+    history[:] = [m for g in groups for m in g]
+
+
 def _search_slack_messages(query: str) -> str:
     try:
         resp = app.client.search_messages(query=query, count=5)
-        matches = (resp.get("messages") or {}).get("matches", []) if resp else []
+        if not resp.get("ok"):
+            return f"slack search error: {resp.get('error')}"
+        matches = (resp.get("messages") or {}).get("matches", [])
         if not matches:
             return "no slack messages found for that query"
         lines = []
         for m in matches:
             body = (m.get("text") or "").replace("\n", " ")
             user = m.get("user", "unknown")
-            channel = m.get("channel", {})
-            chan = channel.get("name") if isinstance(channel, dict) else channel
-            permalink = m.get("permalink", "")
-            lines.append(f"- in #{chan} by {user}: {body} ({permalink})")
+            channel = m.get("channel", {}) or {}
+            cid = channel.get("id") if isinstance(channel, dict) else channel
+            cname = channel.get("name") if isinstance(channel, dict) else None
+            chan_link = (
+                f"<#{cid}|{cname}>" if cname else (f"<#{cid}>" if cid else "dm")
+            )
+            ts = m.get("ts", "")
+            lines.append(f"- in {chan_link} from {user} at {ts}: {body}")
         return "\n".join(lines)
     except Exception as exc:
         logger.exception("slack search failed")
         return f"slack search failed: {exc}"
 
 
-def _ask_noodle(user_text: str) -> str:
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_text or "hello"},
-    ]
-    # tool-calling loop (max a few rounds so we never spin forever)
+def _ask_noodle(conv_key: str, user_text: str) -> str:
+    user_text = user_text or "hello"
+    history = MEMORY.setdefault(conv_key, [])
+    history.append({"role": "user", "content": user_text})
+
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
     for _ in range(5):
         response = client.chat.completions.create(
             model=config.MODEL,
@@ -205,9 +238,11 @@ def _ask_noodle(user_text: str) -> str:
         )
         message = response.choices[0].message
         if not message.tool_calls:
-            return _clean_reply(message.content or "")
-        # record the assistant turn (with its tool calls) for context
-        messages.append(
+            final = _clean_reply(message.content or "")
+            history.append({"role": "assistant", "content": final})
+            _trim_memory(history)
+            return final
+        history.append(
             {
                 "role": "assistant",
                 "content": message.content or "",
@@ -230,26 +265,33 @@ def _ask_noodle(user_text: str) -> str:
             except json.JSONDecodeError:
                 args = {}
             result = _search_slack_messages(args.get("query", ""))
-            messages.append(
+            history.append(
                 {"role": "tool", "tool_call_id": tc.id, "content": result}
             )
-    # safety net: produce a final answer without tools if we hit the cap
-    response = client.chat.completions.create(
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
+
+    # safety net: answer without tools if we hit the round cap
+    final_resp = client.chat.completions.create(
         model=config.MODEL,
         messages=messages,
         temperature=0.9,
         max_tokens=1000,
     )
-    return _clean_reply(response.choices[0].message.content or "")
+    final = _clean_reply(final_resp.choices[0].message.content or "")
+    history.append({"role": "assistant", "content": final})
+    _trim_memory(history)
+    return final
 
 
-def _process(channel: str, prompt: str, thread_ts: str | None) -> None:
+def _process(channel: str, prompt: str, thread_ts: str | None, conv_key: str) -> None:
     try:
         if thread_ts:
             # remember this thread so we keep answering in it
             PARTICIPATING_THREADS.add(thread_ts)
-        reply = _ask_noodle(prompt)
-        for fragment in _chunk_response(reply):
+        reply = _ask_noodle(conv_key, prompt)
+        # cap fragments so noodle never spams the channel
+        fragments = _chunk_response(reply)[:8]
+        for fragment in fragments:
             payload = {"channel": channel, "text": fragment}
             if thread_ts:
                 payload["thread_ts"] = thread_ts
@@ -283,9 +325,10 @@ def handle_message(event: dict) -> None:
     if not ok:
         return
     channel = event.get("channel")
+    key = _conv_key(event)
     # run the (slow) ai call + chunked sending off the socket thread
     threading.Thread(
-        target=_process, args=(channel, prompt, thread_ts), daemon=True
+        target=_process, args=(channel, prompt, thread_ts, key), daemon=True
     ).start()
 
 

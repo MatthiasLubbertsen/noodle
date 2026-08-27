@@ -56,13 +56,14 @@ no nested `noodle/noodle` folder.
 
 ### 4. persona & system prompt
 - the persona lives in `prompts/system_prompt.md` and is loaded at startup.
-- style rules (strict): lowercase ONLY, no capitals ever; replace every "r"
-  and "l" with "w"; sprinkle "uwu"/"owo"/"7w7"; no periods/colons/semicolons;
-  every sentence ends with `<3` or `~`; the `:3` face only appears once every
-  few sentences when extra happy (never on every sentence); ends the message
-  with a cute `*action*` in asterisks; they/them; shy and cute.
-- the prompt also tells the model to put **one thought per line** so the bot
-  can chunk the reply.
+- style rules: lowercase ONLY (no capitals); `r`/`l` → `w` **only sometimes**,
+  for flavor; `uwu`/`owo`/`<3`/`:3` used **sparingly** (not every line); periods
+  are allowed on SOME sentences and two short sentences may share one message;
+  cute actions use **underscores** (`_giggles_`) and appear **only sometimes**,
+  optionally on the same line as the last sentence; shy, cute, they/them.
+- the prompt tells the model to keep replies short (1-2 messages) and to put
+  each short thought on its own line so the bot can chunk the reply. a hard cap
+  (`[:8]` fragments) prevents the bot from spamming a channel.
 
 ### 4b. tools (slack search)
 - noodle can search slack using its own user token via the `search_messages`
@@ -78,6 +79,14 @@ no nested `noodle/noodle` folder.
   chain-of-thought / `<think:6124c78e>...</think:6124c78e>` blocks are stripped before chunking,
   and tool results are used as context only (never posted). reasoning, debug
   logs, or raw tool output are never sent to a channel or thread.
+
+### 4d. short-term memory (in-memory)
+- noodle keeps a per-conversation history (`MEMORY`, keyed by channel or
+  thread) of the last ~12 user turns, including tool calls/results, so it can
+  refer back to recent context. history is lost on restart (no persistence yet).
+- on each message the user turn is appended, the model is called with
+  `system + history`, and the assistant reply is stored back. long-term
+  (persistent) memory is a planned future extension.
 
 ### 5. message chunking
 - after the ai replies, `_chunk_response()` splits the text into small
