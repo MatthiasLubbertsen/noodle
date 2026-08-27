@@ -62,12 +62,14 @@ def _mention_in_text(text: str) -> bool:
 
 
 def _clean_text(text: str) -> str:
-    # keep slack's canonical mention syntax so the model knows both the id AND
-    # the type: <@U123> for users, <#C123> for channels. just drop the display
-    # name label. this lets the model build from:<@U123> / in:<#C123> queries.
+    # drop our OWN mention entirely (e.g. "@noodle") so the model never parrots
+    # its own ping back. keep other user/channel mentions in slack's canonical
+    # syntax (<@U123> / <#C123>) so it can build from:<@U123> / in:<#C123> queries.
+    for mid in MENTION_IDS:
+        text = re.sub(rf"<@{mid}(?:\|[A-Z0-9]+)?>", "", text)
     text = re.sub(r"<@([A-Z0-9]+)\|[^>]+>", r"<@\1>", text)
     text = re.sub(r"<#([A-Z0-9]+)\|[^>]+>", r"<#\1>", text)
-    return text.strip()
+    return re.sub(r"\s{2,}", " ", text).strip()
 
 
 def _clean_reply(text: str) -> str:
