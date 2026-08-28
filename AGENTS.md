@@ -13,12 +13,26 @@ character, not the codebase.
 
 ```
 noodle/
-  main.py                 # entrypoint: bolt app, socket mode, event handling
+  main.py                 # thin entrypoint: builds the app, starts socket mode
   config.py               # loads .env, exposes settings + paths
+  bot/                    # the bot, split into small focused modules
+    __init__.py           # package marker
+    state.py              # shared runtime state (app, client, memory, identity)
+    app.py                # builds bolt app, resolves identity, starts socket mode
+    handlers.py           # message event: decide whether to reply, then process
+    gate.py               # "should noodle reply here?" unprompted-reply gate
+    llm.py                # talks to the model, runs the tool loop
+    tools.py              # tools the model can call (search, fetch, lookups)
+    slack_text.py         # cleans incoming text, parses slack links, channel links
+    directory.py          # flaron user/channel directory (no auth needed)
+    memory.py             # per-conversation memory helpers
+    chunk.py              # splits replies into small slack messages
+    log.py                # logging setup
   requirements.txt        # python dependencies
   .env                    # secrets + tuning (already populated, do not commit)
   .gitignore              # ignores .env, logs, caches
   AGENTS.md               # this file
+  README.md               # project readme (badges, run instructions)
   prompts/
     system_prompt.md      # noodle's persona + reply-style instructions
   logs/                   # created at runtime (noodle.log)
@@ -41,7 +55,11 @@ no nested `noodle/noodle` folder.
   - a message in an **allowed channel** mentions "noodle" (case-insensitive)
     or `@noodle` (the app/bot user id), or
   - a message arrives in a **thread noodle has joined** (it keeps answering
-    inside threads it has replied to, even without a fresh mention).
+    inside threads it has replied to, even without a fresh mention), or
+  - a message arrives in an **allowed channel with no mention** and the
+    response gate (`bot/gate.py`) decides it is a good idea to reply (a small
+    llm check: is this message addressed to noodle, a question/request, or does
+    it continue a talk noodle is part of?). the gate defaults to "no" on error.
 - when replying inside a thread, noodle posts into that thread
   (`thread_ts`), so conversations stay grouped.
 - allowed channels come from `ALLOWED_CHANNELS` in `.env` (comma separated).
@@ -64,6 +82,16 @@ no nested `noodle/noodle` folder.
 - the prompt tells the model to keep replies short (1-2 messages) and to put
   each short thought on its own line so the bot can chunk the reply. a hard cap
   (`[:8]` fragments) prevents the bot from spamming a channel.
+
+### 4b-ii. flaron directory lookups
+- three more tools let noodle resolve slack users/channels by id or name using
+  the public flaron directory (no auth needed):
+  - `lookup_slack_user(user_id)` -> `GET flaron.halceon.dev/user/<id>`
+  - `lookup_slack_channel(channel_id)` -> `GET flaron.halceon.dev/channel/<id>`
+  - `search_slack_users(query)` -> `GET flaron.halceon.dev/users/search?q=<query>`
+- the model uses these to turn a plain name into the correct `<@USERID>` /
+  `<#CHANNELID>` so it always mentions people/channels in proper slack link
+  syntax (see persona rule in `prompts/system_prompt.md`).
 
 ### 4b. tools (slack search)
 - noodle can search slack using its own user token via the `search_messages`
