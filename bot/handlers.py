@@ -10,9 +10,44 @@ from bot.chunk import chunk_response
 from bot.gate import should_reply_unprompted
 from bot.llm import ask_noodle
 from bot.memory import conv_key
-from bot.slack_text import _clean_text, _is_dm, _mention_in_text
+from bot.slack_text import _channel_link, _clean_text, _is_dm, _mention_in_text
 
 logger = logging.getLogger("noodle")
+
+
+def _user_display(uid: str) -> str:
+    # prefer slack's own users_info for a friendly name
+    try:
+        info = state.app.client.users_info(user=uid)
+        if info.get("ok"):
+            u = info.get("user", {}) or {}
+            prof = u.get("profile", {}) or {}
+            return (
+                prof.get("display_name")
+                or u.get("real_name")
+                or u.get("name")
+                or uid
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("users_info failed for %s", uid)
+    return uid
+
+
+def location_label(event: dict) -> str:
+    """describe where noodle is right now, including the channel/dm name."""
+    channel = event.get("channel")
+    if _is_dm(event):
+        try:
+            info = state.app.client.conversations_info(channel=channel)
+            if info.get("ok"):
+                ch = info.get("channel", {}) or {}
+                uid = ch.get("user")
+                if uid:
+                    return f"you are in a direct message with {_user_display(uid)} (id {uid})."
+        except Exception:  # noqa: BLE001
+            logger.exception("dm info failed for %s", channel)
+        return "you are in a direct message."
+    return f"you are in {_channel_link(channel)}."
 
 
 def _should_respond(event: dict):
@@ -57,12 +92,13 @@ def _should_respond(event: dict):
     return False, None, None
 
 
-def _process(channel: str, prompt: str, thread_ts: str | None, key: str) -> None:
+def _process(channel: str, prompt: str, thread_ts: str | None, key: str,
+             location: str | None = None) -> None:
     try:
         if thread_ts:
             # remember this thread so we keep answering in it
             state.PARTICIPATING_THREADS.add(thread_ts)
-        reply = ask_noodle(key, prompt)
+        reply = ask_noodle(key, prompt, location=location)
         # cap fragments so noodle never spams the channel
         fragments = chunk_response(reply)[:8]
         for fragment in fragments:
@@ -96,7 +132,8 @@ def handle_message(event: dict) -> None:
         return
     channel = event.get("channel")
     key = conv_key(event)
+    location = location_label(event)
     # run the (slow) ai call + chunked sending off the socket thread
     threading.Thread(
-        target=_process, args=(channel, prompt, thread_ts, key), daemon=True
+        target=_process, args=(channel, prompt, thread_ts, key, location), daemon=True
     ).start()

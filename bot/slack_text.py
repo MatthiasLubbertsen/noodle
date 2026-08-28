@@ -19,14 +19,10 @@ def _clean_text(text: str) -> str:
     # its own ping back.
     for mid in state.MENTION_IDS:
         text = re.sub(rf"<@{mid}(?:\|[A-Z0-9]+)?>", "", text)
-    # render channel mentions as friendly #name so the model doesn't mangle raw
-    # <#C123> tokens. slack search accepts in:#channel-name, so the id is not
-    # needed in the prompt. keep the bare <#C123> form only when no name present.
-    text = re.sub(r"<#([A-Z0-9]+)\|([^>]+)>", r"#\2", text)
-    # render user mentions as @name when a label is present (from:@name works).
-    text = re.sub(r"<@([A-Z0-9]+)\|([^>]+)>", r"@\2", text)
-    # anything still wrapped in <...> (bare ids) gets unwrapped to avoid leakage
-    text = re.sub(r"<([^>]+)>", r"\1", text)
+    # IMPORTANT: leave every other slack mention exactly as slack sends it
+    # (e.g. <#C0C78SG9L|hq> and <@U09UE480JHH|bob>). slack ONLY renders a real
+    # mention when the full <...> form is used, so the model copies the id into
+    # <#CHANNELID> / <@USERID> when it replies. we do NOT reformat mentions here.
     return re.sub(r"\s{2,}", " ", text).strip()
 
 

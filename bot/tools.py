@@ -2,11 +2,28 @@ import logging
 import re
 
 from bot import state
-from bot.directory import lookup_channel, lookup_user, search_users
+from bot.directory import flaron_query
 from bot.slack_text import _channel_link, _parse_slack_ref
 
 logger = logging.getLogger("noodle")
 
+FLARON_DOCS = (
+    "public flaron slack directory (no auth needed). base url "
+    "https://flaron.halceon.dev. actions and their params:\n"
+    "- user (id) -> GET /user/<id> : full user profile\n"
+    "- channel (id) -> GET /channel/<id> : full channel info\n"
+    "- user_search (query) -> GET /users/search?q= : search users by name/handle\n"
+    "- channel_search (query) -> GET /channels/search?q= : search channels by name\n"
+    "- channel_by_name (name) -> GET /cname/<name> : channel info by name\n"
+    "- channel_managers (id) -> GET /cman/<id> : channel manager list\n"
+    "- channel_members (id) -> GET /ccount/<id> : channel member count\n"
+    "- app (id) -> GET /app/<id> : slack app info\n"
+    "- emoji (name) -> GET /emoji/<name> : emoji info\n"
+    "- command (name) -> GET /command/<name> : slack command info\n"
+    "- promote (id) -> GET /promote/<id> : promote info\n"
+    "returns the FULL json from flaron, so you can read every field (ids, names, "
+    "titles, descriptions, topics, counts, etc)."
+)
 
 TOOLS = [
     {
@@ -57,53 +74,43 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "lookup_slack_user",
+            "name": "flaron",
             "description": (
-                "look up a slack user's profile by their user id (e.g. U123). "
-                "returns their @username, display name and real name. use this to "
-                "find the correct <@USERID> to mention when you only know a name."
+                "look up anything in the public flaron slack directory (no auth "
+                "needed). use it to turn a name into the right <@USERID> or "
+                "<#CHANNELID>, or to read full info about users, channels, apps, "
+                "emoji and commands. " + FLARON_DOCS
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "user_id": {"type": "string", "description": "the slack user id, e.g. U123"}
+                    "action": {
+                        "type": "string",
+                        "description": (
+                            "which lookup to run: user, channel, user_search, "
+                            "channel_search, channel_by_name, channel_managers, "
+                            "channel_members, app, emoji, command, promote"
+                        ),
+                        "enum": [
+                            "user", "channel", "user_search", "channel_search",
+                            "channel_by_name", "channel_managers", "channel_members",
+                            "app", "emoji", "command", "promote",
+                        ],
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "the slack id (user/channel/app), for actions that need it",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "a name (channel/emoji/command), for actions that need it",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "a search term, for user_search / channel_search",
+                    },
                 },
-                "required": ["user_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "lookup_slack_channel",
-            "description": (
-                "look up a slack channel's info by channel id (e.g. C123). returns "
-                "its #name, description and topic. use this to find the correct "
-                "<#CHANNELID> to mention when you only know a name."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "channel_id": {"type": "string", "description": "the slack channel id, e.g. C123"}
-                },
-                "required": ["channel_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_slack_users",
-            "description": (
-                "search slack users by name or handle. returns matching user ids and "
-                "@usernames. use this to turn a name like 'matthias' into a <@USERID>."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "the name or handle to search for"}
-                },
-                "required": ["query"],
+                "required": ["action"],
             },
         },
     },
@@ -217,10 +224,11 @@ def run_tool(name: str, args: dict, user_prompt: str = "") -> str:
         return _search_slack_messages(args.get("query", ""), user_prompt=user_prompt)
     if name == "fetch_slack_message":
         return _fetch_slack_message(args.get("ref", ""))
-    if name == "lookup_slack_user":
-        return lookup_user(args.get("user_id", ""))
-    if name == "lookup_slack_channel":
-        return lookup_channel(args.get("channel_id", ""))
-    if name == "search_slack_users":
-        return search_users(args.get("query", ""))
+    if name == "flaron":
+        return flaron_query(
+            args.get("action", ""),
+            id=args.get("id"),
+            name=args.get("name"),
+            query=args.get("query"),
+        )
     return f"unknown tool: {name}"

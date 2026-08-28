@@ -10,14 +10,22 @@ from bot.tools import TOOLS, run_tool
 logger = logging.getLogger("noodle")
 
 
-def ask_noodle(conv_key: str, user_text: str) -> str:
+def ask_noodle(conv_key: str, user_text: str, location: str | None = None) -> str:
     user_text = user_text or "hello"
     first2 = " ".join(user_text.split()[:2])
     logger.debug("ai request for user prompt: %r", first2)
     history = state.MEMORY.setdefault(conv_key, [])
     history.append({"role": "user", "content": user_text})
 
-    messages = [{"role": "system", "content": state.SYSTEM_PROMPT}] + history
+    system_content = state.SYSTEM_PROMPT
+    if location:
+        system_content = (
+            f"{system_content}\n\n"
+            f"context: {location} keep this in mind but do not announce it unless "
+            "it is relevant to the conversation."
+        )
+
+    messages = [{"role": "system", "content": system_content}] + history
     for _ in range(5):
         response = state.client.chat.completions.create(
             model=config.MODEL,
@@ -59,7 +67,7 @@ def ask_noodle(conv_key: str, user_text: str) -> str:
             history.append(
                 {"role": "tool", "tool_call_id": tc.id, "content": result}
             )
-        messages = [{"role": "system", "content": state.SYSTEM_PROMPT}] + history
+        messages = [{"role": "system", "content": system_content}] + history
 
     # safety net: answer without tools if we hit the round cap
     final_resp = state.client.chat.completions.create(

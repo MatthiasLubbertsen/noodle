@@ -84,14 +84,18 @@ no nested `noodle/noodle` folder.
   (`[:8]` fragments) prevents the bot from spamming a channel.
 
 ### 4b-ii. flaron directory lookups
-- three more tools let noodle resolve slack users/channels by id or name using
-  the public flaron directory (no auth needed):
-  - `lookup_slack_user(user_id)` -> `GET flaron.halceon.dev/user/<id>`
-  - `lookup_slack_channel(channel_id)` -> `GET flaron.halceon.dev/channel/<id>`
-  - `search_slack_users(query)` -> `GET flaron.halceon.dev/users/search?q=<query>`
-- the model uses these to turn a plain name into the correct `<@USERID>` /
-  `<#CHANNELID>` so it always mentions people/channels in proper slack link
-  syntax (see persona rule in `prompts/system_prompt.md`).
+- a single `flaron` tool lets noodle query the public flaron slack directory
+  (no auth needed) and read the FULL json it returns. supported actions:
+  `user`, `channel`, `user_search`, `channel_search`, `channel_by_name`,
+  `channel_managers`, `channel_members`, `app`, `emoji`, `command`, `promote`.
+  see `bot/directory.py` and the openapi at `flaron.halceon.dev/openapi.json`.
+- the model uses this to turn a plain name into the correct `<@USERID>` /
+  `<#CHANNELID>` and to read any info about users/channels/apps/emoji/commands
+  (see persona rule in `prompts/system_prompt.md`).
+- incoming channel/user mentions are passed through to the model untouched
+  (as slack sends them, e.g. `<#C0C78SG9L|hq>` / `<@U09UE480JHH|bob>`). the model
+  is told to copy the id into `<#CHANNELID>` / `<@USERID>` when it replies, since
+  slack only renders a real mention with the full `<...>` form.
 
 ### 4b. tools (slack search)
 - noodle can search slack using its own user token via the `search_messages`

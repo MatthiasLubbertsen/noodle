@@ -20,8 +20,9 @@ speaks in a soft, lowercase, uwu flavored style.
   gate decides the message is meant for it (no mention needed).
 - search slack for old messages and fetch the real text of a single message by
   its link.
-- look up users and channels by id or by name using the public flaron
-  directory, so it always mentions the right `<@USERID>` or `<#CHANNELID>`.
+- look up users, channels, apps, emoji and commands by id or by name using the
+  public flaron directory (the single `flaron` tool returns the full json), so it
+  always mentions the right `<@USERID>` or `<#CHANNELID>`.
 - remember the recent conversation per dm or thread (in memory, resets on
   restart) and never sends its own reasoning or tool output to slack.
 

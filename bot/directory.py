@@ -25,48 +25,50 @@ def _get_json(path: str, params: dict | None = None):
         return None
 
 
-def lookup_user(user_id: str) -> str:
-    """look up a slack user's profile by id. no auth needed."""
-    data = _get_json(f"/user/{user_id}")
-    if not data:
-        return f"no user info found for {user_id}"
-    user = (data.get("data") or {}).get("user") or {}
-    if not user:
-        return f"no user info found for {user_id}"
-    bits = [
-        f"user {user_id}: @{user.get('name', '?')}",
-        f"(display: {user.get('display_name') or '?'}, "
-        f"real: {user.get('real_name') or '?'})",
-    ]
-    if user.get("title"):
-        bits.append(f"- {user['title']}")
-    return " ".join(bits)
+def _dump(data, label: str) -> str:
+    if data is None:
+        return f"no flaron data found for {label}"
+    return json.dumps(data, indent=2, ensure_ascii=False)
 
 
-def lookup_channel(channel_id: str) -> str:
-    """look up a slack channel's info by id. no auth needed."""
-    data = _get_json(f"/channel/{channel_id}")
-    if not data:
-        return f"no channel info found for {channel_id}"
-    name = data.get("name") or channel_id
-    bits = [f"channel {channel_id}: #{name}"]
-    if data.get("description"):
-        bits.append(data["description"])
-    if data.get("topic"):
-        bits.append(f"topic: {data['topic']}")
-    return " - ".join(bits)
+def flaron_query(action: str, id: str | None = None, name: str | None = None,
+                 query: str | None = None) -> str:
+    """call any public (no-auth) flaron endpoint and return the full json.
 
-
-def search_users(query: str) -> str:
-    """search slack users by name/handle."""
-    data = _get_json("/users/search", {"q": query})
-    if not data:
-        return f"user search for {query!r} failed"
-    results = data.get("data") or []
-    if not results:
-        return f"no users found for {query!r}"
-    lines = [f"users matching {query!r}:"]
-    for u in results[:10]:
-        lines.append(f"- {u.get('id')}: @{u.get('name')} "
-                     f"(display: {u.get('display_name') or '?'})")
-    return "\n".join(lines)
+    actions:
+      user              -> GET /user/<id>            (needs id)
+      channel           -> GET /channel/<id>         (needs id)
+      user_search       -> GET /users/search?q=      (needs query)
+      channel_search    -> GET /channels/search?q=   (needs query)
+      channel_by_name   -> GET /cname/<name>         (needs name)
+      channel_managers  -> GET /cman/<id>            (needs id)
+      channel_members   -> GET /ccount/<id>          (needs id)
+      app               -> GET /app/<id>             (needs id)
+      emoji             -> GET /emoji/<name>          (needs name)
+      command           -> GET /command/<name>       (needs name)
+      promote           -> GET /promote/<id>         (needs id)
+    """
+    action = (action or "").lower()
+    if action == "user":
+        return _dump(_get_json(f"/user/{id}"), f"user {id}")
+    if action == "channel":
+        return _dump(_get_json(f"/channel/{id}"), f"channel {id}")
+    if action == "user_search":
+        return _dump(_get_json("/users/search", {"q": query}), f"users matching {query!r}")
+    if action == "channel_search":
+        return _dump(_get_json("/channels/search", {"q": query}), f"channels matching {query!r}")
+    if action == "channel_by_name":
+        return _dump(_get_json(f"/cname/{urllib.parse.quote(name or '')}"), f"channel named {name!r}")
+    if action == "channel_managers":
+        return _dump(_get_json(f"/cman/{id}"), f"managers of {id}")
+    if action == "channel_members":
+        return _dump(_get_json(f"/ccount/{id}"), f"member count of {id}")
+    if action == "app":
+        return _dump(_get_json(f"/app/{id}"), f"app {id}")
+    if action == "emoji":
+        return _dump(_get_json(f"/emoji/{urllib.parse.quote(name or '')}"), f"emoji {name!r}")
+    if action == "command":
+        return _dump(_get_json(f"/command/{urllib.parse.quote(name or '')}"), f"command {name!r}")
+    if action == "promote":
+        return _dump(_get_json(f"/promote/{id}"), f"promote {id}")
+    return f"unknown flaron action: {action!r} (try user, channel, user_search, channel_search, channel_by_name, channel_managers, channel_members, app, emoji, command, promote)"
