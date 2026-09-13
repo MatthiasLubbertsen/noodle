@@ -1,16 +1,14 @@
 import datetime
 import logging
-from zoneinfo import ZoneInfo
 
-import config
 from bot import state
+from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
 
 
 def _today_str() -> str:
-    tz = ZoneInfo(config.DAILY_STATS_TZ)
-    return datetime.datetime.now(tz).strftime("%Y-%m-%d")
+    return datetime.datetime.now(AMSTERDAM_TZ).strftime("%Y-%m-%d")
 
 
 def messages_sent_today(user_id: str) -> int:
@@ -43,9 +41,6 @@ def build_daily_summary(user_id: str) -> str:
             "sorry. try asking me again in a bit."
         )
     if count == 0:
-        return "quick check in: looks like you haven't sent any messages on slack yet today."
+        return "today's recap: looks like you haven't sent any messages on slack yet today."
     plural = "message" if count == 1 else "messages"
-    return (
-        f"end of day check in: you've sent {count} {plural} on slack today. "
-        "hope it was a good one."
-    )
+    return f"today's recap: you've sent {count} {plural} on slack today."

@@ -146,27 +146,34 @@ def _process(channel: str, prompt: str, thread_ts: str | None, key: str,
             pass
 
 
-def _send_daily_stats_reply(channel: str, thread_ts: str | None) -> None:
+def _send_daily_stats_reply(channel: str) -> None:
+    # always a fresh top-level message, never a thread reply
     try:
         summary = build_daily_summary(config.USER_ID)
-        payload = {"channel": channel, "text": summary}
-        if thread_ts:
-            payload["thread_ts"] = thread_ts
-        state.app.client.chat_postMessage(**payload)
+        state.app.client.chat_postMessage(channel=channel, text=summary)
     except Exception:  # noqa: BLE001
         logger.exception("failed to send daily stats reply in %s", channel)
+
+
+def _is_ignored(text: str) -> bool:
+    # a message starting with "# " is always ignored, no matter what
+    return text.lstrip().startswith("# ")
 
 
 def handle_message(event: dict) -> None:
     if _is_noise(event):
         return
 
+    text = event.get("text", "") or ""
+    if _is_ignored(text):
+        return
+
     # pinging the @matthias-day usergroup always gets today's stats recap,
     # regardless of mentions/allowed-channels/the unprompted-reply gate.
-    if _matthias_day_pinged(event.get("text", "")):
+    if _matthias_day_pinged(text):
         threading.Thread(
             target=_send_daily_stats_reply,
-            args=(event.get("channel"), event.get("thread_ts")),
+            args=(event.get("channel"),),
             daemon=True,
         ).start()
         return

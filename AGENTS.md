@@ -28,7 +28,11 @@ noodle/
     memory.py             # per-conversation memory helpers
     chunk.py              # splits replies into small slack messages
     stats.py              # "messages sent today" recap (via slack search)
-    scheduler.py          # daily background job that DMs the recap
+    almanac.py            # fun/named days + on-this-day history (wikipedia)
+    news.py               # hack club news rss + persisted "seen" state
+    morning.py            # builds the 08:00 wakeup message in noodle's voice
+    scheduler.py          # daily background jobs (ping reminder, morning dm)
+    tz.py                 # shared Europe/Amsterdam timezone constant
     log.py                # logging setup
   requirements.txt        # python dependencies
   .env                    # secrets + tuning (already populated, do not commit)
@@ -38,6 +42,7 @@ noodle/
   prompts/
     system_prompt.md      # noodle's persona + reply-style instructions
   logs/                   # created at runtime (noodle.log)
+  data/                   # created at runtime (hackclub_news_seen.json)
 ```
 
 note: the project lives directly at `C:/Code/noodle` — there is intentionally
@@ -52,6 +57,9 @@ no nested `noodle/noodle` folder.
 
 ### 2. event triggers
 - listens to the generic `message` event.
+- a message whose text starts with `# ` (a literal hash + space) is ALWAYS
+  ignored first, before anything else (mentions, DMs, the `@matthias-day`
+  ping, the gate) — see `handlers._is_ignored()`.
 - responds when:
   - it is a **direct message (DM)**, or
   - a message in an **allowed channel** mentions "noodle" (case-insensitive)
@@ -151,19 +159,44 @@ no nested `noodle/noodle` folder.
 - long paragraphs are further hard-split at `MAX_FRAGMENT_CHARS` (default
   1500) so a single slack message never gets unreasonably huge.
 
-### 6. daily stats recap
+### 6. @matthias-day ping + stats recap
 - `bot/stats.py` builds a "messages sent today" recap for `USER_ID`, counting
   matches via `search_messages(query="from:<@USER_ID> on:<today>")` (using the
-  `messages.total` field from the slack search response, in `DAILY_STATS_TZ`).
+  `messages.total` field from the slack search response; "today" is always
+  Europe/Amsterdam, `bot/tz.py`).
+- whenever a message pings the `@matthias-day` usergroup (matched by
+  `MATTHIAS_DAY_GROUP_ID` if set, and always by the literal text
+  "matthias-day" as a fallback), `handlers.handle_message()` replies with
+  that recap **as a new top-level channel message, never a thread reply**
+  (`_send_daily_stats_reply()`). this check runs before the normal
+  mention/gate logic, is not subject to `ALLOWED_CHANNELS` or the
+  unprompted-reply cooldown, and is skipped by the `# `-prefix ignore rule
+  like everything else.
 - `bot/scheduler.py` runs a background thread (started from `build_app()`)
-  that DMs this recap to `USER_ID` every day at `DAILY_STATS_HOUR:MINUTE`
-  (default 19:00 `Europe/Amsterdam`).
-- the same recap is sent as a reply whenever a message pings the
-  `@matthias-day` usergroup (matched by `MATTHIAS_DAY_GROUP_ID` if set, and
-  always by the literal text "matthias-day" as a fallback), in
-  `handlers.handle_message()` — this check runs before the normal
-  mention/gate logic and is not subject to `ALLOWED_CHANNELS` or the
-  unprompted-reply cooldown.
+  that DMs `USER_ID` a plain reminder to go send that ping, every day at
+  `DAILY_PING_REMINDER` (default 19:00 Europe/Amsterdam) — this reminder DM
+  itself does NOT contain the stats recap, it just nudges matthias to do the
+  ping himself.
+
+### 7. 08:00 morning wakeup dm
+- also from `bot/scheduler.py`, a second daily background job DMs `USER_ID`
+  at a fixed 08:00 Europe/Amsterdam (not configurable).
+- `bot/almanac.py` calls wikipedia's public `onthisday` REST api (no auth) for
+  two things about today's date: `holidays` (fun/named days, e.g. "Roald Dahl
+  Day" — entries whose text starts with "Christian feast day" are filtered
+  out since they exist for nearly every date and would drown out the fun
+  ones) and `selected` (one notable "on this day in history" anniversary).
+- `bot/news.py` fetches the hack club news rss feed
+  (`https://news.hackclub.com/feed.xml`) and diffs it against a persisted set
+  of previously-seen article guids at `data/hackclub_news_seen.json` (created
+  automatically; survives restarts). on the very first run ever (no state
+  file yet) every article currently in the feed is marked seen and nothing is
+  reported, since matthias said he'd already read everything available at
+  setup time — only articles published after that count as "new".
+- `bot/morning.py` gathers those facts and asks the model (using the normal
+  persona system prompt, one-off call, not the regular per-conversation
+  `MEMORY`) to weave them into a single natural, in-voice message — explicitly
+  told not to just dump a bullet list.
 
 ## running it locally
 
@@ -192,10 +225,14 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `CHUNK_DELAY_SECONDS` | pause between fragment messages |
 | `MAX_FRAGMENT_CHARS` | max length of a single fragment |
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in one channel |
-| `DAILY_STATS_HOUR` / `DAILY_STATS_MINUTE` | when the daily recap DM goes out |
-| `DAILY_STATS_TZ` | timezone for the daily recap, default `Europe/Amsterdam` |
+| `DAILY_PING_REMINDER` | `HH:MM`, when the `@matthias-day` reminder dm goes out |
 | `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
 | `LOG_LEVEL` | optional, default `INFO` |
+
+everything time-based (the ping reminder, the 08:00 morning dm, "today" in
+the stats/news checks) runs in `Europe/Amsterdam` — hardcoded in `bot/tz.py`,
+not an env var. the 08:00 morning dm's time is likewise fixed in
+`bot/scheduler.py` (`MORNING_HOUR`/`MORNING_MINUTE`).
 
 ## extension points (not yet built)
 - per-channel/conversation memory (currently single-turn).

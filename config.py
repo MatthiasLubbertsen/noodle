@@ -48,13 +48,12 @@ MAX_FRAGMENT_CHARS = int(os.getenv("MAX_FRAGMENT_CHARS", "1500"))
 # noodle doesn't chime into a busy channel over and over back to back.
 UNPROMPTED_COOLDOWN_SECONDS = float(os.getenv("UNPROMPTED_COOLDOWN_SECONDS", "300"))
 
-# --- daily stats ---
-# time of day (Europe/Amsterdam) noodle DMs USER_ID a "messages sent today" recap
-DAILY_STATS_HOUR = int(os.getenv("DAILY_STATS_HOUR", "19"))
-DAILY_STATS_MINUTE = int(os.getenv("DAILY_STATS_MINUTE", "0"))
-DAILY_STATS_TZ = os.getenv("DAILY_STATS_TZ", "Europe/Amsterdam")
+# --- daily DMs ---
+# everything runs in Europe/Amsterdam time - not configurable, matthias lives there.
+# "HH:MM" time noodle DMs USER_ID a reminder to send today's @matthias-day ping
+DAILY_PING_REMINDER = os.getenv("DAILY_PING_REMINDER", "19:00")
 
-# the "@matthias-day" usergroup: pinging it also triggers the same stats recap.
+# the "@matthias-day" usergroup: pinging it triggers a "messages sent today" recap.
 # optional - if set, matched by id (<!subteam^ID>); the label "matthias-day" is
 # always matched too as a fallback.
 MATTHIAS_DAY_GROUP_ID = os.getenv("MATTHIAS_DAY_GROUP_ID", "")
@@ -62,4 +61,6 @@ MATTHIAS_DAY_GROUP_ID = os.getenv("MATTHIAS_DAY_GROUP_ID", "")
 # --- paths ---
 SYSTEM_PROMPT_PATH = BASE_DIR / "prompts" / "system_prompt.md"
 LOG_DIR = BASE_DIR / "logs"
+DATA_DIR = BASE_DIR / "data"
+NEWS_SEEN_PATH = DATA_DIR / "hackclub_news_seen.json"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

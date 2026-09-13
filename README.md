@@ -20,9 +20,15 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
   gate decides the message is meant for it (no mention needed), throttled so
   it won't jump into the same channel more than once every
   `UNPROMPTED_COOLDOWN_SECONDS`.
-- DM you a "messages sent today" recap every day at `DAILY_STATS_HOUR:MINUTE`
-  (default 19:00 Europe/Amsterdam), and send the same recap whenever the
-  `@matthias-day` usergroup gets pinged.
+- DM you a reminder to send today's `@matthias-day` ping at `DAILY_PING_REMINDER`
+  (default 19:00, Europe/Amsterdam), and reply with a "messages sent today"
+  recap (never as a thread reply) whenever that usergroup actually gets
+  pinged.
+- DM you a wakey-wakey message every morning at 08:00, mentioning any fun/
+  named day or notable historical anniversary, and any new hack club news
+  articles (news.hackclub.com) since the last check.
+- ignore any message that starts with `# ` (a hash and a space), always,
+  no matter what.
 - search slack for old messages and fetch the real text of a single message by
   its link.
 - look up users, channels, apps, emoji and commands by id or by name using the
@@ -62,7 +68,11 @@ noodle/
     memory.py          # per-conversation memory helpers
     chunk.py           # splits replies into small slack messages
     stats.py           # "messages sent today" recap (via slack search)
-    scheduler.py       # daily background job that DMs the recap
+    almanac.py         # fun/named days + on-this-day history (wikipedia)
+    news.py            # hack club news rss + persisted "seen" state
+    morning.py         # builds the 08:00 wakeup message in noodle's voice
+    scheduler.py       # daily background jobs (ping reminder, morning dm)
+    tz.py              # shared Europe/Amsterdam timezone constant
     log.py             # logging setup
   prompts/
     system_prompt.md   # noodle's persona + reply style + tool instructions
@@ -106,10 +116,12 @@ that is not writable.
 | `CHUNK_DELAY_SECONDS` | pause between fragment messages |
 | `MAX_FRAGMENT_CHARS` | max length of a single fragment |
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in a channel |
-| `DAILY_STATS_HOUR` / `DAILY_STATS_MINUTE` | when the daily recap DM goes out |
-| `DAILY_STATS_TZ` | timezone for the daily recap, default `Europe/Amsterdam` |
+| `DAILY_PING_REMINDER` | `HH:MM` time for the `@matthias-day` reminder dm (Europe/Amsterdam) |
 | `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
 | `LOG_LEVEL` | optional, default `INFO` |
+
+the 08:00 morning wakeup dm's time is not configurable (fixed), and every
+scheduled/dated thing noodle does runs in Europe/Amsterdam time.
 
 ## notes
 
