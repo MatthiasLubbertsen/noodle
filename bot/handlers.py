@@ -112,7 +112,7 @@ def _process(channel: str, prompt: str, thread_ts: str | None, key: str,
         try:
             state.app.client.chat_postMessage(
                 channel=channel,
-                text="i can't reach my brain right now, the network is wobbly :3",
+                text="i can't reach my brain right now, the network is being weird",
             )
         except Exception:  # noqa: BLE001
             pass
@@ -120,7 +120,7 @@ def _process(channel: str, prompt: str, thread_ts: str | None, key: str,
         logger.exception("failed to handle message in %s", channel)
         try:
             state.app.client.chat_postMessage(
-                channel=channel, text="oops something went wobbly :3"
+                channel=channel, text="oops, something went wrong on my end"
             )
         except Exception:  # noqa: BLE001
             pass

@@ -4,14 +4,14 @@ import config
 
 
 def chunk_response(text: str):
-    # primary strategy: the model is told to put each fragment on its own line
-    parts = [p.strip() for p in text.splitlines() if p.strip()]
+    # primary strategy: keep the reply as one block, splitting only on
+    # paragraph breaks (blank lines) if the model used any.
+    parts = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
 
-    # fallback: if there are no line breaks, split on sentence boundaries
-    if len(parts) <= 1:
-        parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", text) if p.strip()]
+    if not parts:
+        parts = [text.strip()]
 
-    # hard cap very long fragments so slack messages stay small
+    # hard cap very long paragraphs so slack messages stay a reasonable size
     result = []
     for part in parts:
         if len(part) <= config.MAX_FRAGMENT_CHARS:

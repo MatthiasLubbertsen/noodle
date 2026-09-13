@@ -42,7 +42,7 @@ ALLOW_CHANNEL_WILDCARD = "*" in ALLOWED_CHANNELS
 
 # --- chunking / pacing ---
 CHUNK_DELAY_SECONDS = float(os.getenv("CHUNK_DELAY_SECONDS", "0.5"))
-MAX_FRAGMENT_CHARS = int(os.getenv("MAX_FRAGMENT_CHARS", "200"))
+MAX_FRAGMENT_CHARS = int(os.getenv("MAX_FRAGMENT_CHARS", "1500"))
 
 # --- paths ---
 SYSTEM_PROMPT_PATH = BASE_DIR / "prompts" / "system_prompt.md"

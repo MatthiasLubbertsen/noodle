@@ -1,15 +1,15 @@
 # noodle
 
-a tiny, shy, cute slack agent that lives in your workspace and chats through a
+a tiny, cute slack agent that lives in your workspace and chats through a
 slack user account (not a bot app) using the slack bolt framework in socket
 mode. it is powered by an openai compatible api (openrouter or any proxy) and
-speaks in a soft, lowercase, uwu flavored style.
+speaks in a warm, casual, lowercase style, like a good friend texting.
 
 [![python](https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white)](https://www.python.org)
 [![slack](https://img.shields.io/badge/slack-bolt%20%2B%20socket%20mode-4a154b?logo=slack&logoColor=white)](https://slack.dev/bolt-python/)
 [![license](https://img.shields.io/badge/license-mit-green)](#license)
 [![made with love](https://img.shields.io/badge/made%20with-love-ff69b4)](https://github.com/MatthiasLubbertsen/noodle)
-[![persona](https://img.shields.io/badge/persona-shy%20uwu-9b59b6)](#)
+[![persona](https://img.shields.io/badge/persona-cute%20friend-9b59b6)](#)
 
 ## what noodle can do
 
@@ -105,7 +105,7 @@ that is not writable.
 - noodle only answers DMs from the slack user whose id is in `USER_ID`. any DM
   from another user is silently ignored. it never replies to its own messages.
 - all code, comments and logs are written in english. the assistant persona
-  itself speaks in a playful, lowercase, uwuified style. that is the bot
+  itself speaks in a warm, casual, lowercase style. that is the bot
   character, not the codebase.
 - tool calling needs a model that supports function calls. if the configured
   `MODEL` does not, the search/fetch/lookup tools simply will not trigger.

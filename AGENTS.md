@@ -6,7 +6,7 @@ openai-compatible api (configured to **openrouter**) using a configurable
 model (defaults described in `.env`).
 
 all code, comments, and logs are written in english. the assistant persona
-itself speaks in a playful, lowercase, "uwuified" style — that is the bot
+itself speaks in a warm, casual, lowercase style — that is the bot
 character, not the codebase.
 
 ## project layout
@@ -74,14 +74,14 @@ no nested `noodle/noodle` folder.
 
 ### 4. persona & system prompt
 - the persona lives in `prompts/system_prompt.md` and is loaded at startup.
-- style rules: lowercase ONLY (no capitals); `r`/`l` → `w` **only sometimes**,
-  for flavor; `uwu`/`owo`/`<3`/`:3` used **sparingly** (not every line); periods
-  are allowed on SOME sentences and two short sentences may share one message;
-  cute actions use **underscores** (`_giggles_`) and appear **only sometimes**,
-  optionally on the same line as the last sentence; shy, cute, they/them.
-- the prompt tells the model to keep replies short (1-2 messages) and to put
-  each short thought on its own line so the bot can chunk the reply. a hard cap
-  (`[:8]` fragments) prevents the bot from spamming a channel.
+- style rules: lowercase ONLY (no capitals); warm, casual, friendly, like a
+  real friend texting; no baby-talk speech quirks (no `uwu`/`owo`/`:3`, no
+  turning `r`/`l` into `w`, no `_giggles_`-style cute actions); they/them.
+- the prompt tells the model to write its reply as one bigger, normal chat
+  message (a paragraph, or a couple if there's a lot to say) instead of
+  splitting every thought onto its own line. a hard cap (`[:8]` fragments)
+  still prevents the bot from spamming a channel if it ever writes an
+  unusually long, multi-paragraph reply.
 
 ### 4b-ii. flaron directory lookups
 - a single `flaron` tool lets noodle query the public flaron slack directory
@@ -135,12 +135,13 @@ no nested `noodle/noodle` folder.
   (persistent) memory is a planned future extension.
 
 ### 5. message chunking
-- after the ai replies, `_chunk_response()` splits the text into small
-  fragments: first by line breaks (the model is instructed to use them), with
-  a sentence-boundary fallback if there are none.
-- each fragment is sent as its own `chat_postMessage`, with a pause of
-  `CHUNK_DELAY_SECONDS` (default 0.5s) between them, to simulate fast typing.
-- long fragments are further hard-split at `MAX_FRAGMENT_CHARS`.
+- after the ai replies, `chunk_response()` keeps the reply as one block,
+  splitting only on blank-line paragraph breaks (the model rarely uses more
+  than one paragraph, since it's told to write a single bigger message).
+- each resulting block is sent as its own `chat_postMessage`, with a pause of
+  `CHUNK_DELAY_SECONDS` (default 0.5s) between them if there is more than one.
+- long paragraphs are further hard-split at `MAX_FRAGMENT_CHARS` (default
+  1500) so a single slack message never gets unreasonably huge.
 
 ## running it locally
 
