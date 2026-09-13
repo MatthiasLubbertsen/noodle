@@ -44,6 +44,21 @@ ALLOW_CHANNEL_WILDCARD = "*" in ALLOWED_CHANNELS
 CHUNK_DELAY_SECONDS = float(os.getenv("CHUNK_DELAY_SECONDS", "0.5"))
 MAX_FRAGMENT_CHARS = int(os.getenv("MAX_FRAGMENT_CHARS", "1500"))
 
+# minimum gap between unprompted (no-mention) replies in the same channel, so
+# noodle doesn't chime into a busy channel over and over back to back.
+UNPROMPTED_COOLDOWN_SECONDS = float(os.getenv("UNPROMPTED_COOLDOWN_SECONDS", "300"))
+
+# --- daily stats ---
+# time of day (Europe/Amsterdam) noodle DMs USER_ID a "messages sent today" recap
+DAILY_STATS_HOUR = int(os.getenv("DAILY_STATS_HOUR", "19"))
+DAILY_STATS_MINUTE = int(os.getenv("DAILY_STATS_MINUTE", "0"))
+DAILY_STATS_TZ = os.getenv("DAILY_STATS_TZ", "Europe/Amsterdam")
+
+# the "@matthias-day" usergroup: pinging it also triggers the same stats recap.
+# optional - if set, matched by id (<!subteam^ID>); the label "matthias-day" is
+# always matched too as a fallback.
+MATTHIAS_DAY_GROUP_ID = os.getenv("MATTHIAS_DAY_GROUP_ID", "")
+
 # --- paths ---
 SYSTEM_PROMPT_PATH = BASE_DIR / "prompts" / "system_prompt.md"
 LOG_DIR = BASE_DIR / "logs"

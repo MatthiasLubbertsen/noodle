@@ -17,7 +17,12 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
   mention `noodle` or `@noodle`.
 - keep talking inside threads it has joined, even without a fresh mention.
 - chime into allowed channels on its own when a small "is this a good idea?"
-  gate decides the message is meant for it (no mention needed).
+  gate decides the message is meant for it (no mention needed), throttled so
+  it won't jump into the same channel more than once every
+  `UNPROMPTED_COOLDOWN_SECONDS`.
+- DM you a "messages sent today" recap every day at `DAILY_STATS_HOUR:MINUTE`
+  (default 19:00 Europe/Amsterdam), and send the same recap whenever the
+  `@matthias-day` usergroup gets pinged.
 - search slack for old messages and fetch the real text of a single message by
   its link.
 - look up users, channels, apps, emoji and commands by id or by name using the
@@ -56,6 +61,8 @@ noodle/
     directory.py       # flaron user/channel directory (no auth needed)
     memory.py          # per-conversation memory helpers
     chunk.py           # splits replies into small slack messages
+    stats.py           # "messages sent today" recap (via slack search)
+    scheduler.py       # daily background job that DMs the recap
     log.py             # logging setup
   prompts/
     system_prompt.md   # noodle's persona + reply style + tool instructions
@@ -98,6 +105,10 @@ that is not writable.
 | `ALLOWED_CHANNELS` | comma separated channel ids, or `*` for any |
 | `CHUNK_DELAY_SECONDS` | pause between fragment messages |
 | `MAX_FRAGMENT_CHARS` | max length of a single fragment |
+| `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in a channel |
+| `DAILY_STATS_HOUR` / `DAILY_STATS_MINUTE` | when the daily recap DM goes out |
+| `DAILY_STATS_TZ` | timezone for the daily recap, default `Europe/Amsterdam` |
+| `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
 | `LOG_LEVEL` | optional, default `INFO` |
 
 ## notes

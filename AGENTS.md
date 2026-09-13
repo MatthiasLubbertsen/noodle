@@ -27,6 +27,8 @@ noodle/
     directory.py          # flaron user/channel directory (no auth needed)
     memory.py             # per-conversation memory helpers
     chunk.py              # splits replies into small slack messages
+    stats.py              # "messages sent today" recap (via slack search)
+    scheduler.py          # daily background job that DMs the recap
     log.py                # logging setup
   requirements.txt        # python dependencies
   .env                    # secrets + tuning (already populated, do not commit)
@@ -57,9 +59,15 @@ no nested `noodle/noodle` folder.
   - a message arrives in a **thread noodle has joined** (it keeps answering
     inside threads it has replied to, even without a fresh mention), or
   - a message arrives in an **allowed channel with no mention** and the
-    response gate (`bot/gate.py`) decides it is a good idea to reply (a small
-    llm check: is this message addressed to noodle, a question/request, or does
-    it continue a talk noodle is part of?). the gate defaults to "no" on error.
+    response gate (`bot/gate.py`) decides it is a good idea to reply. the gate
+    defaults to "no": it only says yes if the message is clearly addressed to
+    noodle specifically, or is a direct continuation of something noodle just
+    said, and explicitly ignores ordinary questions between other people. it
+    also defaults to "no" on error.
+  - even when the gate says yes, noodle won't chime in unprompted in the same
+    channel more than once every `UNPROMPTED_COOLDOWN_SECONDS` (default 300s),
+    tracked in `state.LAST_UNPROMPTED_REPLY`. mentions and joined threads
+    bypass this cooldown entirely.
 - when replying inside a thread, noodle posts into that thread
   (`thread_ts`), so conversations stay grouped.
 - allowed channels come from `ALLOWED_CHANNELS` in `.env` (comma separated).
@@ -143,6 +151,20 @@ no nested `noodle/noodle` folder.
 - long paragraphs are further hard-split at `MAX_FRAGMENT_CHARS` (default
   1500) so a single slack message never gets unreasonably huge.
 
+### 6. daily stats recap
+- `bot/stats.py` builds a "messages sent today" recap for `USER_ID`, counting
+  matches via `search_messages(query="from:<@USER_ID> on:<today>")` (using the
+  `messages.total` field from the slack search response, in `DAILY_STATS_TZ`).
+- `bot/scheduler.py` runs a background thread (started from `build_app()`)
+  that DMs this recap to `USER_ID` every day at `DAILY_STATS_HOUR:MINUTE`
+  (default 19:00 `Europe/Amsterdam`).
+- the same recap is sent as a reply whenever a message pings the
+  `@matthias-day` usergroup (matched by `MATTHIAS_DAY_GROUP_ID` if set, and
+  always by the literal text "matthias-day" as a fallback), in
+  `handlers.handle_message()` — this check runs before the normal
+  mention/gate logic and is not subject to `ALLOWED_CHANNELS` or the
+  unprompted-reply cooldown.
+
 ## running it locally
 
 ```bash
@@ -169,6 +191,10 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `ALLOWED_CHANNELS` | comma separated channel ids, or `*` for any |
 | `CHUNK_DELAY_SECONDS` | pause between fragment messages |
 | `MAX_FRAGMENT_CHARS` | max length of a single fragment |
+| `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in one channel |
+| `DAILY_STATS_HOUR` / `DAILY_STATS_MINUTE` | when the daily recap DM goes out |
+| `DAILY_STATS_TZ` | timezone for the daily recap, default `Europe/Amsterdam` |
+| `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
 | `LOG_LEVEL` | optional, default `INFO` |
 
 ## extension points (not yet built)

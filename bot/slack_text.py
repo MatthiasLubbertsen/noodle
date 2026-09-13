@@ -1,6 +1,7 @@
 import logging
 import re
 
+import config
 from bot import state
 
 logger = logging.getLogger("noodle")
@@ -12,6 +13,18 @@ def _is_dm(event: dict) -> bool:
 
 def _mention_in_text(text: str) -> bool:
     return any(f"<@{mid}>" in text for mid in state.MENTION_IDS)
+
+
+def _matthias_day_pinged(text: str) -> bool:
+    """did this message ping the '@matthias-day' usergroup?"""
+    if not text:
+        return False
+    if config.MATTHIAS_DAY_GROUP_ID and f"<!subteam^{config.MATTHIAS_DAY_GROUP_ID}" in text:
+        return True
+    # slack includes the readable handle in the mention markup
+    # (<!subteam^ID|@matthias-day>), and this also catches a plain typed
+    # "@matthias-day" that slack didn't expand into a real mention.
+    return "matthias-day" in text.lower()
 
 
 def _clean_text(text: str) -> str:
