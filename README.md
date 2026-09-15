@@ -24,9 +24,10 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
   (default 19:00, Europe/Amsterdam), and reply with a "messages sent today"
   recap (never as a thread reply) whenever that usergroup actually gets
   pinged.
-- DM you a wakey-wakey message every morning at 08:00, mentioning any fun/
-  named day or notable historical anniversary, and any new hack club news
-  articles (news.hackclub.com) since the last check.
+- DM you a wakey-wakey message every morning at `DAILY_MORNING_DM` (default
+  08:00, Europe/Amsterdam), mentioning any fun/named day or notable
+  historical anniversary, and any new hack club news articles
+  (news.hackclub.com) since the last check.
 - ignore any message that starts with `# ` (a hash and a space), always,
   no matter what.
 - search slack for old messages and fetch the real text of a single message by
@@ -117,11 +118,12 @@ that is not writable.
 | `MAX_FRAGMENT_CHARS` | max length of a single fragment |
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in a channel |
 | `DAILY_PING_REMINDER` | `HH:MM` time for the `@matthias-day` reminder dm (Europe/Amsterdam) |
+| `DAILY_MORNING_DM` | `HH:MM` time for the morning wakeup dm (Europe/Amsterdam) |
 | `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
 | `LOG_LEVEL` | optional, default `INFO` |
 
-the 08:00 morning wakeup dm's time is not configurable (fixed), and every
-scheduled/dated thing noodle does runs in Europe/Amsterdam time.
+every scheduled/dated thing noodle does runs in Europe/Amsterdam time,
+hardcoded (not an env var).
 
 ## notes
 

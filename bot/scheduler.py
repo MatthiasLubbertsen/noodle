@@ -11,8 +11,6 @@ from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
 
-MORNING_HOUR, MORNING_MINUTE = 8, 0
-
 PING_REMINDER_TEXT = (
     "hey, it's that time again: time to send today's <!subteam^{group_id}|@matthias-day> "
     "ping."
@@ -80,6 +78,7 @@ def start_daily_scheduler() -> None:
     threading.Thread(
         target=_run_daily, args=(ping_hour, ping_minute, _send_ping_reminder), daemon=True
     ).start()
+    morning_hour, morning_minute = _parse_hhmm(config.DAILY_MORNING_DM, (8, 0))
     threading.Thread(
-        target=_run_daily, args=(MORNING_HOUR, MORNING_MINUTE, _send_morning_dm), daemon=True
+        target=_run_daily, args=(morning_hour, morning_minute, _send_morning_dm), daemon=True
     ).start()

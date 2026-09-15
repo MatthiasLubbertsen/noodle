@@ -178,9 +178,9 @@ no nested `noodle/noodle` folder.
   itself does NOT contain the stats recap, it just nudges matthias to do the
   ping himself.
 
-### 7. 08:00 morning wakeup dm
+### 7. morning wakeup dm
 - also from `bot/scheduler.py`, a second daily background job DMs `USER_ID`
-  at a fixed 08:00 Europe/Amsterdam (not configurable).
+  at `DAILY_MORNING_DM` (default 08:00 Europe/Amsterdam).
 - `bot/almanac.py` calls wikipedia's public `onthisday` REST api (no auth) for
   two things about today's date: `holidays` (fun/named days, e.g. "Roald Dahl
   Day" — entries whose text starts with "Christian feast day" are filtered
@@ -226,13 +226,14 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `MAX_FRAGMENT_CHARS` | max length of a single fragment |
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in one channel |
 | `DAILY_PING_REMINDER` | `HH:MM`, when the `@matthias-day` reminder dm goes out |
+| `DAILY_MORNING_DM` | `HH:MM`, when the morning wakeup dm goes out |
 | `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
 | `LOG_LEVEL` | optional, default `INFO` |
 
-everything time-based (the ping reminder, the 08:00 morning dm, "today" in
-the stats/news checks) runs in `Europe/Amsterdam` — hardcoded in `bot/tz.py`,
-not an env var. the 08:00 morning dm's time is likewise fixed in
-`bot/scheduler.py` (`MORNING_HOUR`/`MORNING_MINUTE`).
+everything time-based (both daily dms, "today" in the stats/news checks)
+runs in `Europe/Amsterdam` — hardcoded in `bot/tz.py`, not an env var. only
+the hour/minute of each dm is configurable, via `_parse_hhmm()` in
+`bot/scheduler.py`.
 
 ## extension points (not yet built)
 - per-channel/conversation memory (currently single-turn).

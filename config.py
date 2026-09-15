@@ -52,6 +52,8 @@ UNPROMPTED_COOLDOWN_SECONDS = float(os.getenv("UNPROMPTED_COOLDOWN_SECONDS", "30
 # everything runs in Europe/Amsterdam time - not configurable, matthias lives there.
 # "HH:MM" time noodle DMs USER_ID a reminder to send today's @matthias-day ping
 DAILY_PING_REMINDER = os.getenv("DAILY_PING_REMINDER", "19:00")
+# "HH:MM" time noodle DMs USER_ID the wakey-wakey / special-day / news digest
+DAILY_MORNING_DM = os.getenv("DAILY_MORNING_DM", "08:00")
 
 # the "@matthias-day" usergroup: pinging it triggers a "messages sent today" recap.
 # optional - if set, matched by id (<!subteam^ID>); the label "matthias-day" is
