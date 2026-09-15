@@ -8,6 +8,7 @@ import config
 from bot import state
 from bot.handlers import handle_message
 from bot.log import setup_logging
+from bot.scheduler import start_daily_scheduler
 
 logger = logging.getLogger("noodle")
 
@@ -29,6 +30,9 @@ def build_app() -> App:
 
     # wire the message event handler
     application.event("message")(handle_message)
+
+    # daily @matthias-day ping reminder + 08:00 morning wakeup dm
+    start_daily_scheduler()
 
     logger.info(
         "noodle online as user=%s bot=%s", state.AUTH_USER_ID, state.BOT_ID

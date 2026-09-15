@@ -1,15 +1,15 @@
 # noodle
 
-a tiny, shy, cute slack agent that lives in your workspace and chats through a
+a tiny, cute slack agent that lives in your workspace and chats through a
 slack user account (not a bot app) using the slack bolt framework in socket
 mode. it is powered by an openai compatible api (openrouter or any proxy) and
-speaks in a soft, lowercase, uwu flavored style.
+speaks in a warm, casual, lowercase style, like a good friend texting.
 
 [![python](https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white)](https://www.python.org)
 [![slack](https://img.shields.io/badge/slack-bolt%20%2B%20socket%20mode-4a154b?logo=slack&logoColor=white)](https://slack.dev/bolt-python/)
 [![license](https://img.shields.io/badge/license-mit-green)](#license)
 [![made with love](https://img.shields.io/badge/made%20with-love-ff69b4)](https://github.com/MatthiasLubbertsen/noodle)
-[![persona](https://img.shields.io/badge/persona-shy%20uwu-9b59b6)](#)
+[![persona](https://img.shields.io/badge/persona-cute%20friend-9b59b6)](#)
 
 ## what noodle can do
 
@@ -17,7 +17,18 @@ speaks in a soft, lowercase, uwu flavored style.
   mention `noodle` or `@noodle`.
 - keep talking inside threads it has joined, even without a fresh mention.
 - chime into allowed channels on its own when a small "is this a good idea?"
-  gate decides the message is meant for it (no mention needed).
+  gate decides the message is meant for it (no mention needed), throttled so
+  it won't jump into the same channel more than once every
+  `UNPROMPTED_COOLDOWN_SECONDS`.
+- DM you a reminder to send today's `@matthias-day` ping at `DAILY_PING_REMINDER`
+  (default 19:00, Europe/Amsterdam), and reply with a "messages sent today"
+  recap (never as a thread reply) whenever that usergroup actually gets
+  pinged.
+- DM you a wakey-wakey message every morning at 08:00, mentioning any fun/
+  named day or notable historical anniversary, and any new hack club news
+  articles (news.hackclub.com) since the last check.
+- ignore any message that starts with `# ` (a hash and a space), always,
+  no matter what.
 - search slack for old messages and fetch the real text of a single message by
   its link.
 - look up users, channels, apps, emoji and commands by id or by name using the
@@ -56,6 +67,12 @@ noodle/
     directory.py       # flaron user/channel directory (no auth needed)
     memory.py          # per-conversation memory helpers
     chunk.py           # splits replies into small slack messages
+    stats.py           # "messages sent today" recap (via slack search)
+    almanac.py         # fun/named days + on-this-day history (wikipedia)
+    news.py            # hack club news rss + persisted "seen" state
+    morning.py         # builds the 08:00 wakeup message in noodle's voice
+    scheduler.py       # daily background jobs (ping reminder, morning dm)
+    tz.py              # shared Europe/Amsterdam timezone constant
     log.py             # logging setup
   prompts/
     system_prompt.md   # noodle's persona + reply style + tool instructions
@@ -98,14 +115,20 @@ that is not writable.
 | `ALLOWED_CHANNELS` | comma separated channel ids, or `*` for any |
 | `CHUNK_DELAY_SECONDS` | pause between fragment messages |
 | `MAX_FRAGMENT_CHARS` | max length of a single fragment |
+| `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in a channel |
+| `DAILY_PING_REMINDER` | `HH:MM` time for the `@matthias-day` reminder dm (Europe/Amsterdam) |
+| `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
 | `LOG_LEVEL` | optional, default `INFO` |
+
+the 08:00 morning wakeup dm's time is not configurable (fixed), and every
+scheduled/dated thing noodle does runs in Europe/Amsterdam time.
 
 ## notes
 
 - noodle only answers DMs from the slack user whose id is in `USER_ID`. any DM
   from another user is silently ignored. it never replies to its own messages.
 - all code, comments and logs are written in english. the assistant persona
-  itself speaks in a playful, lowercase, uwuified style. that is the bot
+  itself speaks in a warm, casual, lowercase style. that is the bot
   character, not the codebase.
 - tool calling needs a model that supports function calls. if the configured
   `MODEL` does not, the search/fetch/lookup tools simply will not trigger.

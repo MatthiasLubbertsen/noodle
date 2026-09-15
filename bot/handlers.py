@@ -10,7 +10,14 @@ from bot.chunk import chunk_response
 from bot.gate import should_reply_unprompted
 from bot.llm import ask_noodle
 from bot.memory import conv_key
-from bot.slack_text import _channel_link, _clean_text, _is_dm, _mention_in_text
+from bot.slack_text import (
+    _channel_link,
+    _clean_text,
+    _is_dm,
+    _matthias_day_pinged,
+    _mention_in_text,
+)
+from bot.stats import build_daily_summary
 
 logger = logging.getLogger("noodle")
 
@@ -50,11 +57,17 @@ def location_label(event: dict) -> str:
     return f"you are in {_channel_link(channel)}."
 
 
-def _should_respond(event: dict):
-    # ignore our own messages and system/bot noise -> prevents reply loops
+def _is_noise(event: dict) -> bool:
+    # our own messages and system/bot noise -> prevents reply loops
     if event.get("bot_id") or event.get("subtype"):
-        return False, None, None
+        return True
     if event.get("user") == state.AUTH_USER_ID:
+        return True
+    return False
+
+
+def _should_respond(event: dict):
+    if _is_noise(event):
         return False, None, None
 
     user = event.get("user")
@@ -82,11 +95,18 @@ def _should_respond(event: dict):
     if thread_ts and thread_ts in state.PARTICIPATING_THREADS:
         return True, _clean_text(text), thread_ts
 
-    # allowed channels, no mention: let the gate decide if we should chime in
+    # allowed channels, no mention: let the gate decide if we should chime in,
+    # but not more than once per UNPROMPTED_COOLDOWN_SECONDS in the same
+    # channel, so noodle doesn't jump into every other message back to back.
     if config.ALLOW_CHANNEL_WILDCARD or channel in config.ALLOWED_CHANNELS:
+        now = time.time()
+        last = state.LAST_UNPROMPTED_REPLY.get(channel, 0.0)
+        if now - last < config.UNPROMPTED_COOLDOWN_SECONDS:
+            return False, None, None
         key = conv_key(event)
         if should_reply_unprompted(text, key):
             logger.info("gate allowed unprompted reply in %s", channel)
+            state.LAST_UNPROMPTED_REPLY[channel] = now
             return True, _clean_text(text), thread_ts
 
     return False, None, None
@@ -112,7 +132,7 @@ def _process(channel: str, prompt: str, thread_ts: str | None, key: str,
         try:
             state.app.client.chat_postMessage(
                 channel=channel,
-                text="i can't reach my brain right now, the network is wobbly :3",
+                text="i can't reach my brain right now, the network is being weird",
             )
         except Exception:  # noqa: BLE001
             pass
@@ -120,13 +140,44 @@ def _process(channel: str, prompt: str, thread_ts: str | None, key: str,
         logger.exception("failed to handle message in %s", channel)
         try:
             state.app.client.chat_postMessage(
-                channel=channel, text="oops something went wobbly :3"
+                channel=channel, text="oops, something went wrong on my end"
             )
         except Exception:  # noqa: BLE001
             pass
 
 
+def _send_daily_stats_reply(channel: str) -> None:
+    # always a fresh top-level message, never a thread reply
+    try:
+        summary = build_daily_summary(config.USER_ID)
+        state.app.client.chat_postMessage(channel=channel, text=summary)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to send daily stats reply in %s", channel)
+
+
+def _is_ignored(text: str) -> bool:
+    # a message starting with "# " is always ignored, no matter what
+    return text.lstrip().startswith("# ")
+
+
 def handle_message(event: dict) -> None:
+    if _is_noise(event):
+        return
+
+    text = event.get("text", "") or ""
+    if _is_ignored(text):
+        return
+
+    # pinging the @matthias-day usergroup always gets today's stats recap,
+    # regardless of mentions/allowed-channels/the unprompted-reply gate.
+    if _matthias_day_pinged(text):
+        threading.Thread(
+            target=_send_daily_stats_reply,
+            args=(event.get("channel"),),
+            daemon=True,
+        ).start()
+        return
+
     ok, prompt, thread_ts = _should_respond(event)
     if not ok:
         return

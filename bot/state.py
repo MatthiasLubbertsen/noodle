@@ -17,3 +17,6 @@ SYSTEM_PROMPT = ""
 MEMORY: dict = {}
 # threads noodle has joined (by replying) so it keeps answering in them
 PARTICIPATING_THREADS: set = set()
+# last time (unix seconds) noodle sent an unprompted (no-mention) reply, per
+# channel id, so it doesn't chime in over and over back to back
+LAST_UNPROMPTED_REPLY: dict = {}
