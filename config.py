@@ -60,6 +60,19 @@ DAILY_MORNING_DM = os.getenv("DAILY_MORNING_DM", "08:00")
 # always matched too as a fallback.
 MATTHIAS_DAY_GROUP_ID = os.getenv("MATTHIAS_DAY_GROUP_ID", "")
 
+# --- channel join/leave analytics ---
+# the one channel noodle watches for member_joined_channel/member_left_channel.
+# leave empty to disable this feature entirely.
+WATCHED_CHANNEL_ID = os.getenv("WATCHED_CHANNEL_ID", "")
+# where join/leave (+ @matthias-day group changes) get logged
+LOGS_CHANNEL_ID = os.getenv("LOGS_CHANNEL_ID", "")
+# ephemeral message posted in the watched channel (visible only to USER_ID)
+# when someone joins, nudging matthias to say hi. "{user}" is replaced with a
+# real <@USERID> mention of the person who just joined.
+JOIN_EPHEMERAL_MESSAGE = os.getenv(
+    "JOIN_EPHEMERAL_MESSAGE", "heads up, {user} just joined, go say hi!"
+)
+
 # --- paths ---
 SYSTEM_PROMPT_PATH = BASE_DIR / "prompts" / "system_prompt.md"
 LOG_DIR = BASE_DIR / "logs"

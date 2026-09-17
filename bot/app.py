@@ -9,6 +9,7 @@ from bot import state
 from bot.handlers import handle_message
 from bot.log import setup_logging
 from bot.scheduler import start_daily_scheduler
+from bot.watch import handle_member_joined_channel, handle_member_left_channel
 
 logger = logging.getLogger("noodle")
 
@@ -31,7 +32,11 @@ def build_app() -> App:
     # wire the message event handler
     application.event("message")(handle_message)
 
-    # daily @matthias-day ping reminder + 08:00 morning wakeup dm
+    # channel join/leave analytics + automations (add/remove @matthias-day)
+    application.event("member_joined_channel")(handle_member_joined_channel)
+    application.event("member_left_channel")(handle_member_left_channel)
+
+    # daily @matthias-day ping reminder + morning wakeup dm
     start_daily_scheduler()
 
     logger.info(

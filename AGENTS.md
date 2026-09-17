@@ -28,11 +28,13 @@ noodle/
     memory.py             # per-conversation memory helpers
     chunk.py              # splits replies into small slack messages
     stats.py              # "messages sent today" recap (via slack search)
-    almanac.py            # fun/named days + on-this-day history (wikipedia)
+    almanac.py            # silly/named days today (wikipedia)
     news.py               # hack club news rss + persisted "seen" state
-    morning.py            # builds the 08:00 wakeup message in noodle's voice
+    morning.py            # builds the tiny morning wakeup message
     scheduler.py          # daily background jobs (ping reminder, morning dm)
     tz.py                 # shared Europe/Amsterdam timezone constant
+    usergroups.py         # add/remove a user from a slack usergroup
+    watch.py              # channel join/leave analytics + automations
     log.py                # logging setup
   requirements.txt        # python dependencies
   .env                    # secrets + tuning (already populated, do not commit)
@@ -181,11 +183,10 @@ no nested `noodle/noodle` folder.
 ### 7. morning wakeup dm
 - also from `bot/scheduler.py`, a second daily background job DMs `USER_ID`
   at `DAILY_MORNING_DM` (default 08:00 Europe/Amsterdam).
-- `bot/almanac.py` calls wikipedia's public `onthisday` REST api (no auth) for
-  two things about today's date: `holidays` (fun/named days, e.g. "Roald Dahl
-  Day" — entries whose text starts with "Christian feast day" are filtered
-  out since they exist for nearly every date and would drown out the fun
-  ones) and `selected` (one notable "on this day in history" anniversary).
+- `bot/almanac.py` calls wikipedia's public `onthisday/holidays` REST api (no
+  auth) for silly/named days today (e.g. "Roald Dahl Day", "Watermelon Day")
+  — entries whose text starts with "Christian feast day" are filtered out
+  since they exist for nearly every date and would drown out the fun ones.
 - `bot/news.py` fetches the hack club news rss feed
   (`https://news.hackclub.com/feed.xml`) and diffs it against a persisted set
   of previously-seen article guids at `data/hackclub_news_seen.json` (created
@@ -195,8 +196,36 @@ no nested `noodle/noodle` folder.
   setup time — only articles published after that count as "new".
 - `bot/morning.py` gathers those facts and asks the model (using the normal
   persona system prompt, one-off call, not the regular per-conversation
-  `MEMORY`) to weave them into a single natural, in-voice message — explicitly
-  told not to just dump a bullet list.
+  `MEMORY`) to write ONE tiny 1-2 sentence good-morning message — explicitly
+  told to skip anything with nothing to say (no silly day, no new articles)
+  rather than announcing "nothing special today". kept deliberately small so
+  it doesn't turn into a multi-paragraph report.
+
+### 8. channel join/leave analytics
+- `application.event("member_joined_channel")` / `"member_left_channel")`
+  (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore
+  everything outside `WATCHED_CHANNEL_ID` and ignore noodle's own
+  join/leave. if `WATCHED_CHANNEL_ID` is unset the feature is a no-op.
+- on join: `bot/usergroups.py` (`ensure_member()`) adds the person to
+  `MATTHIAS_DAY_GROUP_ID` (fetches current members via
+  `usergroups.users.list`, appends, then `usergroups.users.update` with the
+  full new list - that's how the slack api works, it replaces the whole
+  membership, there's no "append one user" call). ONE combined message
+  ("`<@user> joined <#channel> and got added to the @matthias-day ping
+  group.`") is logged to `LOGS_CHANNEL_ID`, covering both the channel join
+  and the group add. then an ephemeral message (`chat_postEphemeral`,
+  visible only to `USER_ID`, i.e. matthias himself - nobody else in the
+  channel sees it) is posted in the watched channel from
+  `JOIN_EPHEMERAL_MESSAGE`, with `{user}` substituted for a real `<@USERID>`
+  mention of the person who joined, nudging matthias to say hi.
+- on leave: `ensure_not_member()` removes the person from the usergroup only
+  if they were actually in it (refuses to ever empty a usergroup down to
+  zero members - slack's api isn't meant for that). again ONE combined
+  message is logged, mentioning the removal only if it actually happened.
+- needs `usergroups:read` + `usergroups:write` scopes on `SLACK_USER_TOKEN`,
+  and the slack app must have `member_joined_channel` /
+  `member_left_channel` subscribed as events (workspace/app-level config,
+  not something this repo controls).
 
 ## running it locally
 
@@ -228,6 +257,9 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `DAILY_PING_REMINDER` | `HH:MM`, when the `@matthias-day` reminder dm goes out |
 | `DAILY_MORNING_DM` | `HH:MM`, when the morning wakeup dm goes out |
 | `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
+| `WATCHED_CHANNEL_ID` | channel watched for joins/leaves; empty disables it |
+| `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
+| `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |
 | `LOG_LEVEL` | optional, default `INFO` |
 
 everything time-based (both daily dms, "today" in the stats/news checks)

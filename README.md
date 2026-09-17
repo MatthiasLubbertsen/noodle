@@ -24,12 +24,18 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
   (default 19:00, Europe/Amsterdam), and reply with a "messages sent today"
   recap (never as a thread reply) whenever that usergroup actually gets
   pinged.
-- DM you a wakey-wakey message every morning at `DAILY_MORNING_DM` (default
-  08:00, Europe/Amsterdam), mentioning any fun/named day or notable
-  historical anniversary, and any new hack club news articles
-  (news.hackclub.com) since the last check.
+- DM you a tiny wakey-wakey message every morning at `DAILY_MORNING_DM`
+  (default 08:00, Europe/Amsterdam) — mentions it only if today has a silly/
+  named day (like watermelon day) and only if there are new hack club news
+  articles (news.hackclub.com) since the last check.
 - ignore any message that starts with `# ` (a hash and a space), always,
   no matter what.
+- watch one channel (`WATCHED_CHANNEL_ID`) for people joining/leaving: on
+  join it adds them to the `@matthias-day` usergroup, logs it (one message,
+  channel join + group add together) to `LOGS_CHANNEL_ID`, and posts an
+  ephemeral nudge (visible only to you) in that channel to say hi, mentioning
+  them (`JOIN_EPHEMERAL_MESSAGE`). on leave it removes them from the
+  usergroup if they were in it and logs that too, again as one message.
 - search slack for old messages and fetch the real text of a single message by
   its link.
 - look up users, channels, apps, emoji and commands by id or by name using the
@@ -69,11 +75,13 @@ noodle/
     memory.py          # per-conversation memory helpers
     chunk.py           # splits replies into small slack messages
     stats.py           # "messages sent today" recap (via slack search)
-    almanac.py         # fun/named days + on-this-day history (wikipedia)
+    almanac.py         # silly/named days today (wikipedia)
     news.py            # hack club news rss + persisted "seen" state
-    morning.py         # builds the 08:00 wakeup message in noodle's voice
+    morning.py         # builds the tiny morning wakeup message
     scheduler.py       # daily background jobs (ping reminder, morning dm)
     tz.py              # shared Europe/Amsterdam timezone constant
+    usergroups.py      # add/remove a user from a slack usergroup
+    watch.py           # channel join/leave analytics + automations
     log.py             # logging setup
   prompts/
     system_prompt.md   # noodle's persona + reply style + tool instructions
@@ -120,6 +128,9 @@ that is not writable.
 | `DAILY_PING_REMINDER` | `HH:MM` time for the `@matthias-day` reminder dm (Europe/Amsterdam) |
 | `DAILY_MORNING_DM` | `HH:MM` time for the morning wakeup dm (Europe/Amsterdam) |
 | `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
+| `WATCHED_CHANNEL_ID` | channel to watch for joins/leaves; empty disables the feature |
+| `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
+| `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |
 | `LOG_LEVEL` | optional, default `INFO` |
 
 every scheduled/dated thing noodle does runs in Europe/Amsterdam time,
@@ -134,6 +145,10 @@ hardcoded (not an env var).
   character, not the codebase.
 - tool calling needs a model that supports function calls. if the configured
   `MODEL` does not, the search/fetch/lookup tools simply will not trigger.
+- the join/leave watcher needs `usergroups:read` + `usergroups:write` scopes
+  on `SLACK_USER_TOKEN`, and the slack app must have the
+  `member_joined_channel` / `member_left_channel` events subscribed (event
+  subscriptions are configured in the slack app settings, not in this repo).
 
 ## license
 

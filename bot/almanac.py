@@ -43,22 +43,3 @@ def fun_holidays_today() -> list[str]:
         # some entries are "label:\nname" - keep just the name
         names.append(text.splitlines()[-1].strip())
     return names
-
-
-def history_blurb_today() -> str | None:
-    """one notable 'on this day in history' anniversary, via wikipedia."""
-    month, day = _today_month_day()
-    try:
-        data = _get_json(f"/selected/{month}/{day}")
-    except Exception:  # noqa: BLE001
-        logger.exception("failed to fetch onthisday selected events")
-        return None
-    selected = data.get("selected") or []
-    if not selected:
-        return None
-    pick = selected[0]
-    text = (pick.get("text") or "").strip()
-    if not text:
-        return None
-    year = pick.get("year")
-    return f"{year}: {text}" if year else text
