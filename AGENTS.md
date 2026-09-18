@@ -214,10 +214,9 @@ no nested `noodle/noodle` folder.
   ("`<@user> joined <#channel> and got added to the @matthias-day ping
   group.`") is logged to `LOGS_CHANNEL_ID`, covering both the channel join
   and the group add. then an ephemeral message (`chat_postEphemeral`,
-  visible only to `USER_ID`, i.e. matthias himself - nobody else in the
-  channel sees it) is posted in the watched channel from
-  `JOIN_EPHEMERAL_MESSAGE`, with `{user}` substituted for a real `<@USERID>`
-  mention of the person who joined, nudging matthias to say hi.
+  `user=<the person who just joined>` - visible only to them, nobody else in
+  the channel sees it) welcomes them in, from `JOIN_EPHEMERAL_MESSAGE`, with
+  `{user}` substituted for a real `<@USERID>` mention of them.
 - on leave: `ensure_not_member()` removes the person from the usergroup only
   if they were actually in it (refuses to ever empty a usergroup down to
   zero members - slack's api isn't meant for that). again ONE combined

@@ -32,10 +32,10 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
   no matter what.
 - watch one channel (`WATCHED_CHANNEL_ID`) for people joining/leaving: on
   join it adds them to the `@matthias-day` usergroup, logs it (one message,
-  channel join + group add together) to `LOGS_CHANNEL_ID`, and posts an
-  ephemeral nudge (visible only to you) in that channel to say hi, mentioning
-  them (`JOIN_EPHEMERAL_MESSAGE`). on leave it removes them from the
-  usergroup if they were in it and logs that too, again as one message.
+  channel join + group add together) to `LOGS_CHANNEL_ID`, and welcomes them
+  with an ephemeral message (visible only to them) mentioning them
+  (`JOIN_EPHEMERAL_MESSAGE`). on leave it removes them from the usergroup if
+  they were in it and logs that too, again as one message.
 - search slack for old messages and fetch the real text of a single message by
   its link.
 - look up users, channels, apps, emoji and commands by id or by name using the

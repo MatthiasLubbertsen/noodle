@@ -66,11 +66,11 @@ MATTHIAS_DAY_GROUP_ID = os.getenv("MATTHIAS_DAY_GROUP_ID", "")
 WATCHED_CHANNEL_ID = os.getenv("WATCHED_CHANNEL_ID", "")
 # where join/leave (+ @matthias-day group changes) get logged
 LOGS_CHANNEL_ID = os.getenv("LOGS_CHANNEL_ID", "")
-# ephemeral message posted in the watched channel (visible only to USER_ID)
-# when someone joins, nudging matthias to say hi. "{user}" is replaced with a
-# real <@USERID> mention of the person who just joined.
+# ephemeral message posted in the watched channel when someone joins,
+# visible only to the person who just joined (welcoming them in). "{user}"
+# is replaced with a real <@USERID> mention of that person.
 JOIN_EPHEMERAL_MESSAGE = os.getenv(
-    "JOIN_EPHEMERAL_MESSAGE", "heads up, {user} just joined, go say hi!"
+    "JOIN_EPHEMERAL_MESSAGE", "hey {user}, welcome! say hi and introduce yourself :)"
 )
 
 # --- paths ---

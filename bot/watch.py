@@ -40,7 +40,7 @@ def handle_member_joined_channel(event: dict) -> None:
         text = config.JOIN_EPHEMERAL_MESSAGE.format(user=f"<@{user}>")
         try:
             state.app.client.chat_postEphemeral(
-                channel=channel, user=config.USER_ID, text=text
+                channel=channel, user=user, text=text
             )
         except Exception:  # noqa: BLE001
             logger.exception("failed to post join ephemeral message")
