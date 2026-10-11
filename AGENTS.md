@@ -153,13 +153,16 @@ no nested `noodle/noodle` folder.
   (persistent) memory is a planned future extension.
 
 ### 5. message chunking
-- after the ai replies, `chunk_response()` keeps the reply as one block,
-  splitting only on blank-line paragraph breaks (the model rarely uses more
-  than one paragraph, since it's told to write a single bigger message).
+- after the ai replies, `chunk_response()` splits it into one slack message
+  per paragraph, on blank-line breaks only (the model rarely uses more than
+  one paragraph, since it's told to write a single bigger message).
+- a paragraph is NEVER cut mid-way, no matter how long - there is no
+  character-based hard-split anymore. slack's own per-message limit is far
+  bigger than anything the model realistically writes, so this is safe.
 - each resulting block is sent as its own `chat_postMessage`, with a pause of
-  `CHUNK_DELAY_SECONDS` (default 0.5s) between them if there is more than one.
-- long paragraphs are further hard-split at `MAX_FRAGMENT_CHARS` (default
-  1500) so a single slack message never gets unreasonably huge.
+  `CHUNK_DELAY_SECONDS` (default 0.5s) between them if there is more than one,
+  capped at 8 messages per reply (`handlers._process()`) so a pathological
+  multi-paragraph reply can't spam a channel.
 
 ### 6. @matthias-day ping + stats recap
 - `bot/stats.py` builds a "messages sent today" recap for `USER_ID`, counting
@@ -194,12 +197,18 @@ no nested `noodle/noodle` folder.
   file yet) every article currently in the feed is marked seen and nothing is
   reported, since matthias said he'd already read everything available at
   setup time — only articles published after that count as "new".
-- `bot/morning.py` gathers those facts and asks the model (using the normal
-  persona system prompt, one-off call, not the regular per-conversation
-  `MEMORY`) to write ONE tiny 1-2 sentence good-morning message — explicitly
-  told to skip anything with nothing to say (no silly day, no new articles)
-  rather than announcing "nothing special today". kept deliberately small so
-  it doesn't turn into a multi-paragraph report.
+- `bot/morning.py` exposes two builders, sent as two separate messages by
+  `scheduler._send_morning_dm()`:
+  - `build_greeting_message()` asks the model (using the normal persona
+    system prompt, one-off call, not the regular per-conversation `MEMORY`)
+    for ONE tiny 1-2 sentence good-morning message covering only the
+    good-morning + today's silly/named day (if any) — explicitly told to
+    skip it entirely rather than announcing "nothing special today", and to
+    never mention news. kept deliberately small.
+  - `build_news_message()` is a separate, hand-written (not model-generated)
+    message listing new hack club news articles, returning `None` when
+    there's nothing new - in which case `_send_morning_dm()` sends only the
+    greeting and skips the news message entirely.
 
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
@@ -251,7 +260,6 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `MODEL` | model id, e.g. `gpt-4o-mini` or an openrouter model |
 | `ALLOWED_CHANNELS` | comma separated channel ids, or `*` for any |
 | `CHUNK_DELAY_SECONDS` | pause between fragment messages |
-| `MAX_FRAGMENT_CHARS` | max length of a single fragment |
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in one channel |
 | `DAILY_PING_REMINDER` | `HH:MM`, when the `@matthias-day` reminder dm goes out |
 | `DAILY_MORNING_DM` | `HH:MM`, when the morning wakeup dm goes out |

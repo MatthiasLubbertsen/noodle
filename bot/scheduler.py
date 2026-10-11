@@ -6,7 +6,7 @@ import time
 import config
 from bot import state
 from bot.chunk import chunk_response
-from bot.morning import build_wakeup_message
+from bot.morning import build_greeting_message, build_news_message
 from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
@@ -58,8 +58,12 @@ def _send_ping_reminder() -> None:
 
 def _send_morning_dm() -> None:
     try:
-        _post_dm(build_wakeup_message())
-        logger.info("sent morning wakeup dm to %s", config.USER_ID)
+        _post_dm(build_greeting_message())
+        news = build_news_message()
+        if news:
+            time.sleep(config.CHUNK_DELAY_SECONDS)
+            _post_dm(news)
+        logger.info("sent morning wakeup dm(s) to %s", config.USER_ID)
     except Exception:  # noqa: BLE001
         logger.exception("failed to send morning wakeup dm")
 

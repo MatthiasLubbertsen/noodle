@@ -42,7 +42,6 @@ ALLOW_CHANNEL_WILDCARD = "*" in ALLOWED_CHANNELS
 
 # --- chunking / pacing ---
 CHUNK_DELAY_SECONDS = float(os.getenv("CHUNK_DELAY_SECONDS", "0.5"))
-MAX_FRAGMENT_CHARS = int(os.getenv("MAX_FRAGMENT_CHARS", "1500"))
 
 # minimum gap between unprompted (no-mention) replies in the same channel, so
 # noodle doesn't chime into a busy channel over and over back to back.

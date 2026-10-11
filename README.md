@@ -25,9 +25,10 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
   recap (never as a thread reply) whenever that usergroup actually gets
   pinged.
 - DM you a tiny wakey-wakey message every morning at `DAILY_MORNING_DM`
-  (default 08:00, Europe/Amsterdam) — mentions it only if today has a silly/
-  named day (like watermelon day) and only if there are new hack club news
-  articles (news.hackclub.com) since the last check.
+  (default 08:00, Europe/Amsterdam), mentioning it only if today has a silly/
+  named day (like watermelon day). if there are any new hack club news
+  articles (news.hackclub.com) since the last check, that's sent as a
+  second, separate message right after.
 - ignore any message that starts with `# ` (a hash and a space), always,
   no matter what.
 - watch one channel (`WATCHED_CHANNEL_ID`) for people joining/leaving: on
@@ -73,11 +74,11 @@ noodle/
     slack_text.py      # cleans incoming text, parses slack links, channel links
     directory.py       # flaron user/channel directory (no auth needed)
     memory.py          # per-conversation memory helpers
-    chunk.py           # splits replies into small slack messages
+    chunk.py           # splits a reply into one slack message per paragraph
     stats.py           # "messages sent today" recap (via slack search)
     almanac.py         # silly/named days today (wikipedia)
     news.py            # hack club news rss + persisted "seen" state
-    morning.py         # builds the tiny morning wakeup message
+    morning.py         # builds the morning greeting + separate news message
     scheduler.py       # daily background jobs (ping reminder, morning dm)
     tz.py              # shared Europe/Amsterdam timezone constant
     usergroups.py      # add/remove a user from a slack usergroup
@@ -123,7 +124,6 @@ that is not writable.
 | `MODEL` | model id, e.g. `gpt-4o-mini` or an openrouter model |
 | `ALLOWED_CHANNELS` | comma separated channel ids, or `*` for any |
 | `CHUNK_DELAY_SECONDS` | pause between fragment messages |
-| `MAX_FRAGMENT_CHARS` | max length of a single fragment |
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in a channel |
 | `DAILY_PING_REMINDER` | `HH:MM` time for the `@matthias-day` reminder dm (Europe/Amsterdam) |
 | `DAILY_MORNING_DM` | `HH:MM` time for the morning wakeup dm (Europe/Amsterdam) |
