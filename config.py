@@ -77,4 +77,7 @@ SYSTEM_PROMPT_PATH = BASE_DIR / "prompts" / "system_prompt.md"
 LOG_DIR = BASE_DIR / "logs"
 DATA_DIR = BASE_DIR / "data"
 NEWS_SEEN_PATH = DATA_DIR / "hackclub_news_seen.json"
+# persistent dm conversation history (survives restarts) - sqlite, see
+# bot/history_store.py. dms only, for now.
+MEMORY_DB_PATH = DATA_DIR / "noodle_memory.db"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

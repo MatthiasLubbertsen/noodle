@@ -42,8 +42,11 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
 - look up users, channels, apps, emoji and commands by id or by name using the
   public flaron directory (the single `flaron` tool returns the full json), so it
   always mentions the right `<@USERID>` or `<#CHANNELID>`.
-- remember the recent conversation per dm or thread (in memory, resets on
-  restart) and never sends its own reasoning or tool output to slack.
+- remember the recent conversation per dm or thread, and never sends its own
+  reasoning or tool output to slack. dm history is persisted (sqlite,
+  `data/noodle_memory.db`) and survives restarts; channels/threads are still
+  in-memory only for now. the daily ping reminder and morning dm(s) count as
+  dm turns too, so noodle remembers having sent them.
 
 ## how mentioning works
 
@@ -73,7 +76,8 @@ noodle/
     tools.py           # the tools the model can call (search, fetch, lookups)
     slack_text.py      # cleans incoming text, parses slack links, channel links
     directory.py       # flaron user/channel directory (no auth needed)
-    memory.py          # per-conversation memory helpers
+    memory.py          # per-conversation memory helpers (+ the stable dm key)
+    history_store.py   # persistent dm history (sqlite), survives restarts
     chunk.py           # splits a reply into one slack message per paragraph
     stats.py           # "messages sent today" recap (via slack search)
     almanac.py         # silly/named days today (wikipedia)
@@ -87,6 +91,7 @@ noodle/
   prompts/
     system_prompt.md   # noodle's persona + reply style + tool instructions
   logs/                # created at runtime (noodle.log)
+  data/                # created at runtime (news state, noodle_memory.db)
 ```
 
 ## running it locally

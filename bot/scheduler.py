@@ -6,6 +6,8 @@ import time
 import config
 from bot import state
 from bot.chunk import chunk_response
+from bot.history_store import append_message
+from bot.memory import dm_conv_key, trim_memory
 from bot.morning import build_greeting_message, build_news_message
 from bot.tz import AMSTERDAM_TZ
 
@@ -42,6 +44,14 @@ def _post_dm(text: str) -> None:
     for fragment in fragments:
         state.app.client.chat_postMessage(channel=config.USER_ID, text=fragment)
         time.sleep(config.CHUNK_DELAY_SECONDS)
+
+    # remember noodle sent this, both live and persisted, so it has the
+    # context if matthias replies to it (even across a restart)
+    key = dm_conv_key()
+    history = state.MEMORY.setdefault(key, [])
+    history.append({"role": "assistant", "content": text})
+    trim_memory(history)
+    append_message(key, "assistant", text)
 
 
 def _send_ping_reminder() -> None:

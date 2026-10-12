@@ -1,7 +1,17 @@
+import config
+from bot.slack_text import _is_dm
 from bot.state import MEMORY
 
 
+def dm_conv_key() -> str:
+    # stable regardless of slack's (occasionally recycled) dm channel id -
+    # there's only ever one authorized dm partner (USER_ID)
+    return f"dm:{config.USER_ID}"
+
+
 def conv_key(event: dict) -> str:
+    if _is_dm(event):
+        return dm_conv_key()
     thread_ts = event.get("thread_ts")
     if thread_ts:
         return f"thread:{thread_ts}"

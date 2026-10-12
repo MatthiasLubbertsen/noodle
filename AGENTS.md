@@ -25,7 +25,8 @@ noodle/
     tools.py              # tools the model can call (search, fetch, lookups)
     slack_text.py         # cleans incoming text, parses slack links, channel links
     directory.py          # flaron user/channel directory (no auth needed)
-    memory.py             # per-conversation memory helpers
+    memory.py             # per-conversation memory helpers (+ the stable dm key)
+    history_store.py      # persistent dm history (sqlite), survives restarts
     chunk.py              # splits replies into small slack messages
     stats.py              # "messages sent today" recap (via slack search)
     almanac.py            # silly/named days today (wikipedia)
@@ -44,7 +45,7 @@ noodle/
   prompts/
     system_prompt.md      # noodle's persona + reply-style instructions
   logs/                   # created at runtime (noodle.log)
-  data/                   # created at runtime (hackclub_news_seen.json)
+  data/                   # created at runtime (news state, noodle_memory.db)
 ```
 
 note: the project lives directly at `C:/Code/noodle` — there is intentionally
@@ -144,13 +145,39 @@ no nested `noodle/noodle` folder.
   and tool results are used as context only (never posted). reasoning, debug
   logs, or raw tool output are never sent to a channel or thread.
 
-### 4d. short-term memory (in-memory)
-- noodle keeps a per-conversation history (`MEMORY`, keyed by channel or
-  thread) of the last ~12 user turns, including tool calls/results, so it can
-  refer back to recent context. history is lost on restart (no persistence yet).
-- on each message the user turn is appended, the model is called with
-  `system + history`, and the assistant reply is stored back. long-term
-  (persistent) memory is a planned future extension.
+### 4d. memory (in-memory for channels/threads, persisted for dms)
+- noodle keeps a per-conversation history (`state.MEMORY`, keyed by
+  `bot.memory.conv_key()`) of the last ~12 user turns, including tool
+  calls/results, so it can refer back to recent context. on each message the
+  user turn is appended, the model is called with `system + history`, and
+  the assistant reply is stored back (`bot/llm.py`).
+- channel and thread conversations (`chan:<id>` / `thread:<ts>`) are
+  in-memory only and still reset on restart.
+- **dm conversations are persisted.** `conv_key()` gives every dm the same
+  stable key, `bot.memory.dm_conv_key()` → `f"dm:{USER_ID}"` (not the slack
+  dm channel id, which can change) — there's only ever one authorized dm
+  partner, so one key is enough. `bot/history_store.py` wraps a small sqlite
+  db (`data/noodle_memory.db`, stdlib `sqlite3`, no new dependency) with
+  `init_db()` / `append_message()` / `load_history()`.
+- a plain persisted table (not a vector db) is the right fit here: this is
+  recency-based context (the last N turns, verbatim, in order), not semantic
+  search over a large corpus, so embeddings would add cost and complexity
+  without buying anything - you'd still just want "the last N rows" back. a
+  vector store would make sense later if noodle needs to recall something
+  from way back by topic rather than recency.
+- `bot/llm.py`'s `_remember()` persists every dm turn (both the user's
+  message and noodle's final reply - not the intermediate tool-call/tool
+  messages, which stay in-memory-only bookkeeping for that one request) the
+  moment it happens, keyed by whether `conv_key` starts with `"dm:"`.
+- `bot/scheduler.py`'s `_post_dm()` persists the same way for the
+  `@matthias-day` ping reminder and the morning dm(s) (`bot/app.py` imports
+  live into `state.MEMORY[dm_conv_key()]`), so noodle remembers having sent
+  those too, live and across restarts.
+- on startup, `build_app()` calls `history_store.init_db()` then
+  `load_history(dm_conv_key())` to repopulate `state.MEMORY` before the
+  socket connection opens, so dm continuity survives a restart.
+- channels/threads persistence and dm-history pruning/retention are future
+  extensions, not built yet.
 
 ### 5. message chunking
 - after the ai replies, `chunk_response()` splits it into one slack message
@@ -275,6 +302,8 @@ the hour/minute of each dm is configurable, via `_parse_hhmm()` in
 `bot/scheduler.py`.
 
 ## extension points (not yet built)
-- per-channel/conversation memory (currently single-turn).
+- persisted memory for channels/threads (currently dms only).
+- semantic recall over old dm history (would be a good fit for a vector db,
+  unlike the current recency-based last-N-turns memory).
 - streaming tokens into fragments for even snappier typing.
 - slash commands or `app_mention` event handling.

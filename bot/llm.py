@@ -3,11 +3,18 @@ import logging
 
 import config
 from bot import state
+from bot.history_store import append_message
 from bot.memory import trim_memory
 from bot.slack_text import _clean_reply
 from bot.tools import TOOLS, run_tool
 
 logger = logging.getLogger("noodle")
+
+
+def _remember(conv_key: str, role: str, content: str) -> None:
+    # persist dm turns only, for now - channels/threads stay in-memory-only
+    if conv_key.startswith("dm:"):
+        append_message(conv_key, role, content)
 
 
 def ask_noodle(conv_key: str, user_text: str, location: str | None = None) -> str:
@@ -16,6 +23,7 @@ def ask_noodle(conv_key: str, user_text: str, location: str | None = None) -> st
     logger.debug("ai request for user prompt: %r", first2)
     history = state.MEMORY.setdefault(conv_key, [])
     history.append({"role": "user", "content": user_text})
+    _remember(conv_key, "user", user_text)
 
     system_content = state.SYSTEM_PROMPT
     if location:
@@ -39,6 +47,7 @@ def ask_noodle(conv_key: str, user_text: str, location: str | None = None) -> st
         if not message.tool_calls:
             final = _clean_reply(message.content or "")
             history.append({"role": "assistant", "content": final})
+            _remember(conv_key, "assistant", final)
             trim_memory(history)
             return final
         history.append(
@@ -78,5 +87,6 @@ def ask_noodle(conv_key: str, user_text: str, location: str | None = None) -> st
     )
     final = _clean_reply(final_resp.choices[0].message.content or "")
     history.append({"role": "assistant", "content": final})
+    _remember(conv_key, "assistant", final)
     trim_memory(history)
     return final

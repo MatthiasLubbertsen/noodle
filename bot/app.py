@@ -7,7 +7,9 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 import config
 from bot import state
 from bot.handlers import handle_message
+from bot.history_store import init_db, load_history
 from bot.log import setup_logging
+from bot.memory import dm_conv_key, trim_memory
 from bot.scheduler import start_daily_scheduler
 from bot.watch import handle_member_joined_channel, handle_member_left_channel
 
@@ -28,6 +30,15 @@ def build_app() -> App:
     state.app = application
     state.client = client
     state.SYSTEM_PROMPT = config.SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
+
+    # restore persisted dm history (dms only, for now) so conversations
+    # survive a restart
+    init_db()
+    dm_key = dm_conv_key()
+    dm_history = load_history(dm_key)
+    trim_memory(dm_history)
+    state.MEMORY[dm_key] = dm_history
+    logger.info("restored %d persisted dm turn(s)", len(dm_history))
 
     # wire the message event handler
     application.event("message")(handle_message)
