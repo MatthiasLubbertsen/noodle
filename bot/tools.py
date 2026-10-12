@@ -6,6 +6,7 @@ from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
 from bot.exa import web_answer
 from bot.history_store import search_similar
+from bot.netlog import log_tool
 from bot.slack_text import _channel_link, _parse_slack_ref
 
 logger = logging.getLogger("noodle")
@@ -199,6 +200,7 @@ def _search_slack_messages(query: str, user_prompt: str = "") -> str:
         resp = state.app.client.search_messages(query=query, count=5)
         if not resp.get("ok"):
             logger.warning("search FAILED error=%s", resp.get("error"))
+            log_tool("search_slack_messages", query, "failed")
             return f"slack search error: {resp.get('error')}"
         matches = (resp.get("messages") or {}).get("matches", [])
         logger.info("search %r -> %d matches", query, len(matches))
@@ -223,6 +225,7 @@ def _search_slack_messages(query: str, user_prompt: str = "") -> str:
                 except Exception:  # noqa: BLE001
                     logger.exception("broader search failed")
         if not matches:
+            log_tool("search_slack_messages", query, "no matches")
             return "no slack messages found for that query"
         logger.debug("top match: %r", (matches[0].get("text") or "")[:120])
         lines = []
@@ -237,17 +240,21 @@ def _search_slack_messages(query: str, user_prompt: str = "") -> str:
             )
             ts = m.get("ts", "")
             lines.append(f"- in {chan_link} from {user} at {ts}: {body}")
+        log_tool("search_slack_messages", query, f"{len(matches)} matches")
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001
         logger.exception("slack search failed (user: %r)", first2)
+        log_tool("search_slack_messages", query, "failed")
         return f"slack search failed: {exc}"
 
 
 def _fetch_slack_message(ref: str) -> str:
     cid, ts = _parse_slack_ref(ref)
     if not cid:
+        log_tool("fetch_slack_message", ref, "bad ref")
         return "could not parse a slack channel/timestamp from that reference"
     if not ts:
+        log_tool("fetch_slack_message", ref, "no ts")
         return (
             f"that looks like channel <#{cid}> but no specific message was given; "
             f"try a search with in:<#{cid}>"
@@ -262,14 +269,17 @@ def _fetch_slack_message(ref: str) -> str:
             resp2 = state.app.client.conversations_replies(channel=cid, ts=ts, limit=1)
             msgs = (resp2.get("messages") or []) if resp2.get("ok") else []
         if not msgs:
+            log_tool("fetch_slack_message", ref, "not found")
             return f"no message found at {_channel_link(cid)} {ts}"
         msg = msgs[0]
         text = msg.get("text", "")
         user = msg.get("user", "unknown")
         logger.debug("fetched from %s at %s: %r", user, ts, text[:160])
+        log_tool("fetch_slack_message", ref, "success")
         return f"message in {_channel_link(cid)} from {user} at {ts}: {text}"
     except Exception as exc:  # noqa: BLE001
         logger.exception("fetch_slack_message failed")
+        log_tool("fetch_slack_message", ref, "failed")
         return f"fetch failed: {exc}"
 
 
@@ -279,9 +289,11 @@ def _search_memory(query: str) -> str:
         return "no search query given"
     vector = embed_text(query)
     if vector is None:
+        log_tool("search_memory", query, "embed failed")
         return "memory search failed (couldn't embed the query, check logs)"
     results = search_similar(vector, limit=5)
     if not results:
+        log_tool("search_memory", query, "no matches")
         return "no matching memories found"
     name_cache: dict = {}
     lines = []
@@ -299,6 +311,7 @@ def _search_memory(query: str) -> str:
         else:
             who = "someone"
         lines.append(f"- [{r['kind']} @ {r['created_at']}] {who}: {r['content']}")
+    log_tool("search_memory", query, f"{len(results)} matches")
     return "\n".join(lines)
 
 
@@ -308,7 +321,9 @@ def _web_search(query: str) -> str:
         return "no search query given"
     answer = web_answer(query)
     if answer is None:
+        log_tool("web_search", query, "failed")
         return "web search failed, check logs"
+    log_tool("web_search", query, "success")
     return answer
 
 

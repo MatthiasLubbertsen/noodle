@@ -115,6 +115,12 @@ no nested `noodle/noodle` folder.
   is always the model's choice, never forced) costs real money and real
   latency, and over-eager tool use is what caused the flaron mis-ping bug
   described in 4b-ii.
+- the "using tools" section also tells the model that a tool often returns
+  far more than is needed (e.g. flaron's full user profile - timezone,
+  title, nda/verification status...) and to only share what's actually
+  relevant to the question, not recite every field back. this exists
+  because the model once answered "who's U097VQ3MX35?" by dumping the
+  entire flaron response instead of just saying who the person is.
 
 ### 4b-ii. flaron directory lookups
 - a single `flaron` tool lets noodle query the public flaron slack directory
@@ -309,6 +315,28 @@ no nested `noodle/noodle` folder.
   dm/thread/channel are handled one at a time, in the order their threads
   happen to acquire the lock, each seeing the previous one's finished
   history. different conv_keys still run fully in parallel.
+
+### 4f. logging
+- `bot/log.py`'s `setup_logging()` sets the `httpx`/`httpcore`/`openai`
+  loggers to `WARNING`, since the `openai` sdk's http transport otherwise
+  logs its own verbose per-request line
+  (`HTTP Request: POST .../chat/completions "HTTP/1.1 200 OK"`) at `INFO`
+  for every single call - noisy and redundant with the concise lines below.
+- `bot/netlog.py` gives two small helpers for the `noodle` logger instead:
+  - `log_hcai(endpoint, result)` -> one line per outbound call to a hack
+    club ai proxy endpoint, e.g. `called hcai chat: 200`,
+    `called hcai jev: 200`, `called hcai embeddings: error`. used by
+    `bot/llm.py` (chat completions, via a `_call_chat()` helper built on
+    `.with_raw_response.create()` so the real http status code is
+    available), `bot/gate.py` (jev), `bot/embeddings.py`, and `bot/exa.py`.
+  - `log_tool(name, detail, result)` -> one line per tool call the model
+    makes, e.g. `called tool flaron: C0A9NJT2BCJ: success`,
+    `called tool web_search: google revenue: success`,
+    `called tool search_memory: no matches`. used by every function in
+    `bot/tools.py` and by `bot/directory.py`'s `flaron_query()` (via a
+    local `_run()` closure wrapping each `_get_json()` call, so every
+    flaron action logs the same way without repeating the log call at
+    every branch).
 
 ### 5. message chunking
 - after the ai replies, `chunk_response()` splits it into one slack message

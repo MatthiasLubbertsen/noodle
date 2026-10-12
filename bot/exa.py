@@ -1,8 +1,10 @@
 import json
 import logging
+import urllib.error
 import urllib.request
 
 import config
+from bot.netlog import log_hcai
 
 logger = logging.getLogger("noodle")
 
@@ -30,8 +32,14 @@ def web_answer(query: str) -> str | None:
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
+            log_hcai("exa", str(resp.status))
             data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        log_hcai("exa", str(exc.code))
+        logger.exception("exa web search failed")
+        return None
     except Exception:  # noqa: BLE001
+        log_hcai("exa", "error")
         logger.exception("exa web search failed")
         return None
 

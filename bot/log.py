@@ -18,3 +18,9 @@ def setup_logging() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=handlers,
     )
+    # these libraries log their own verbose per-request lines (method, url,
+    # status) at INFO - noisy and redundant with bot/netlog.py's concise
+    # "called hcai ..." / "called tool ..." lines, so quiet them down.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)

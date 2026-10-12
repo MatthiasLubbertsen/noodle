@@ -5,10 +5,30 @@ import config
 from bot import state
 from bot.history_store import append_message_async
 from bot.memory import trim_memory
+from bot.netlog import log_hcai
 from bot.slack_text import _clean_reply
 from bot.tools import TOOLS, run_tool
 
 logger = logging.getLogger("noodle")
+
+
+def _call_chat(messages, tools=None, tool_choice=None):
+    kwargs = {
+        "model": config.MODEL,
+        "messages": messages,
+        "temperature": 0.9,
+        "max_tokens": 1000,
+    }
+    if tools is not None:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = tool_choice
+    try:
+        raw = state.client.chat.completions.with_raw_response.create(**kwargs)
+    except Exception as exc:  # noqa: BLE001
+        log_hcai("chat", str(getattr(exc, "status_code", "error")))
+        raise
+    log_hcai("chat", str(raw.status_code))
+    return raw.parse()
 
 
 def _kind_for(conv_key: str) -> str:
@@ -54,14 +74,7 @@ def ask_noodle(
 
     messages = [{"role": "system", "content": system_content}] + history
     for _ in range(5):
-        response = state.client.chat.completions.create(
-            model=config.MODEL,
-            messages=messages,
-            tools=TOOLS,
-            tool_choice="auto",
-            temperature=0.9,
-            max_tokens=1000,
-        )
+        response = _call_chat(messages, tools=TOOLS, tool_choice="auto")
         message = response.choices[0].message
         if not message.tool_calls:
             final = _clean_reply(message.content or "")
@@ -98,12 +111,7 @@ def ask_noodle(
         messages = [{"role": "system", "content": system_content}] + history
 
     # safety net: answer without tools if we hit the round cap
-    final_resp = state.client.chat.completions.create(
-        model=config.MODEL,
-        messages=messages,
-        temperature=0.9,
-        max_tokens=1000,
-    )
+    final_resp = _call_chat(messages)
     final = _clean_reply(final_resp.choices[0].message.content or "")
     history.append({"role": "assistant", "content": final})
     _remember(conv_key, "assistant", final, persist)

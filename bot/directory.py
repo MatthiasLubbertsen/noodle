@@ -4,6 +4,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from bot.netlog import log_tool
 from bot.state import logger
 
 BASE_URL = "https://flaron.halceon.dev"
@@ -64,26 +65,34 @@ def flaron_query(action: str, id: str | None = None, name: str | None = None,
       promote           -> GET /promote/<id>         (needs id)
     """
     action = (action or "").lower()
+    detail = id or name or query or action
+
+    def _run(path, params=None):
+        data = _get_json(path, params)
+        log_tool("flaron", detail, "success" if data is not None else "not found")
+        return data
+
     if action == "user":
-        return _dump(_get_json(f"/user/{id}"), f"user {id}")
+        return _dump(_run(f"/user/{id}"), f"user {id}")
     if action == "channel":
-        return _dump(_get_json(f"/channel/{id}"), f"channel {id}")
+        return _dump(_run(f"/channel/{id}"), f"channel {id}")
     if action == "user_search":
-        return _dump(_get_json("/users/search", {"q": query}), f"users matching {query!r}")
+        return _dump(_run("/users/search", {"q": query}), f"users matching {query!r}")
     if action == "channel_search":
-        return _dump(_get_json("/channels/search", {"q": query}), f"channels matching {query!r}")
+        return _dump(_run("/channels/search", {"q": query}), f"channels matching {query!r}")
     if action == "channel_by_name":
-        return _dump(_get_json(f"/cname/{urllib.parse.quote(name or '')}"), f"channel named {name!r}")
+        return _dump(_run(f"/cname/{urllib.parse.quote(name or '')}"), f"channel named {name!r}")
     if action == "channel_managers":
-        return _dump(_get_json(f"/cman/{id}"), f"managers of {id}")
+        return _dump(_run(f"/cman/{id}"), f"managers of {id}")
     if action == "channel_members":
-        return _dump(_get_json(f"/ccount/{id}"), f"member count of {id}")
+        return _dump(_run(f"/ccount/{id}"), f"member count of {id}")
     if action == "app":
-        return _dump(_get_json(f"/app/{id}"), f"app {id}")
+        return _dump(_run(f"/app/{id}"), f"app {id}")
     if action == "emoji":
-        return _dump(_get_json(f"/emoji/{urllib.parse.quote(name or '')}"), f"emoji {name!r}")
+        return _dump(_run(f"/emoji/{urllib.parse.quote(name or '')}"), f"emoji {name!r}")
     if action == "command":
-        return _dump(_get_json(f"/command/{urllib.parse.quote(name or '')}"), f"command {name!r}")
+        return _dump(_run(f"/command/{urllib.parse.quote(name or '')}"), f"command {name!r}")
     if action == "promote":
-        return _dump(_get_json(f"/promote/{id}"), f"promote {id}")
+        return _dump(_run(f"/promote/{id}"), f"promote {id}")
+    log_tool("flaron", detail, "unknown action")
     return f"unknown flaron action: {action!r} (try user, channel, user_search, channel_search, channel_by_name, channel_managers, channel_members, app, emoji, command, promote)"

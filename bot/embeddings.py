@@ -1,8 +1,10 @@
 import json
 import logging
+import urllib.error
 import urllib.request
 
 import config
+from bot.netlog import log_hcai
 
 logger = logging.getLogger("noodle")
 
@@ -32,8 +34,14 @@ def embed_text(text: str) -> list[float] | None:
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
+            log_hcai("embeddings", str(resp.status))
             data = json.loads(resp.read().decode("utf-8"))
         return data["data"][0]["embedding"]
+    except urllib.error.HTTPError as exc:
+        log_hcai("embeddings", str(exc.code))
+        logger.exception("embedding request failed")
+        return None
     except Exception:  # noqa: BLE001
+        log_hcai("embeddings", "error")
         logger.exception("embedding request failed")
         return None
