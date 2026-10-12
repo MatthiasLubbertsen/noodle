@@ -118,12 +118,25 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 ## running it with docker
 
 ```bash
+mkdir -p data logs && chmod 777 data logs   # first time only, see note below
 docker compose up -d --build
 ```
 
-the container reads `.env` next to the compose file. logs go to the console; the
-code also tries to write `logs/noodle.log` and falls back to console only if
-that is not writable.
+the container reads `.env` next to the compose file. `./data` and `./logs`
+are bind-mounted into the container (`docker-compose.yml`) so persisted
+state - `noodle_memory.db`, the hack club news "seen" state, log files -
+survives `docker compose up -d --build`, not just a plain restart. without
+that mount, rebuilding the container (which you'll do on every update)
+recreates its filesystem from scratch and silently wipes all of that.
+
+the `chmod 777` is needed because the container runs as a non-root
+`appuser`: if `./data`/`./logs` don't exist yet, docker creates them on the
+host owned by root, which the container user can't write into. skip this
+step if those directories already exist with permissions the container can
+write to.
+
+logs go to the console either way; the code also tries to write
+`logs/noodle.log` and falls back to console only if that's not writable.
 
 ## .env reference
 

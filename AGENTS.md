@@ -39,6 +39,8 @@ noodle/
     watch.py              # channel join/leave analytics + automations
     log.py                # logging setup
   requirements.txt        # python dependencies
+  Dockerfile              # non-root `appuser`, see the data/logs volume note below
+  docker-compose.yml      # bind-mounts ./data and ./logs - see "running it with docker"
   .env                    # secrets + tuning (already populated, do not commit)
   .gitignore              # ignores .env, logs, caches
   AGENTS.md               # this file
@@ -232,6 +234,15 @@ no nested `noodle/noodle` folder.
   persisted either) - a restart still resets those for live back-and-forth,
   same as before. only dm live-continuity and the persisted/searchable
   history (all kinds) survive a restart.
+- **this all depends on `data/` being a real bind mount, not just a
+  container-local directory.** `docker-compose.yml` mounts `./data:/app/data`
+  (and `./logs:/app/logs`) precisely so `noodle_memory.db` and
+  `data/hackclub_news_seen.json` survive `docker compose up -d --build` -
+  without it, rebuilding the container (the normal update flow) discards the
+  container's whole writable layer, wiping everything in `data/` even though
+  a plain restart of the same container would have been fine. see "running
+  it with docker" in the README for the one-time `chmod 777 data logs` the
+  non-root `appuser` needs the first time those host directories get created.
 
 ### 5. message chunking
 - after the ai replies, `chunk_response()` splits it into one slack message

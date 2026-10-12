@@ -6,3 +6,10 @@ services:
     # secrets come from the gitignored .env on the host (not baked into the image)
     env_file:
       - .env
+    # bind-mount so persisted state (noodle_memory.db, news "seen" state,
+    # logs) survives `docker compose up -d --build`, not just a plain
+    # restart - without this the container's writable layer (and everything
+    # in it) is discarded every time the container gets recreated.
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
