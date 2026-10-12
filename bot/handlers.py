@@ -120,12 +120,13 @@ def _should_respond(event: dict):
 
 
 def _process(channel: str, prompt: str, thread_ts: str | None, key: str,
-             location: str | None = None, persist: bool = False) -> None:
+             location: str | None = None, persist: bool = False,
+             user_id: str | None = None) -> None:
     try:
         if thread_ts:
             # remember this thread so we keep answering in it
             state.PARTICIPATING_THREADS.add(thread_ts)
-        reply = ask_noodle(key, prompt, location=location, persist=persist)
+        reply = ask_noodle(key, prompt, location=location, persist=persist, user_id=user_id)
         # cap fragments so noodle never spams the channel
         fragments = chunk_response(reply)[:8]
         for fragment in fragments:
@@ -191,9 +192,10 @@ def handle_message(event: dict) -> None:
     channel = event.get("channel")
     key = conv_key(event)
     location = location_label(event)
+    sender_id = event.get("user")
     # run the (slow) ai call + chunked sending off the socket thread
     threading.Thread(
         target=_process,
-        args=(channel, prompt, thread_ts, key, location, persist),
+        args=(channel, prompt, thread_ts, key, location, persist, sender_id),
         daemon=True,
     ).start()

@@ -72,10 +72,14 @@ no nested `noodle/noodle` folder.
     inside threads it has replied to, even without a fresh mention), or
   - a message arrives in an **allowed channel with no mention** and the
     response gate (`bot/gate.py`) decides it is a good idea to reply. the gate
-    defaults to "no": it only says yes if the message is clearly addressed to
-    noodle specifically, or is a direct continuation of something noodle just
-    said, and explicitly ignores ordinary questions between other people. it
-    also defaults to "no" on error.
+    is jev (hack club ai's fast/cheap classifier model, see 4b-iv below), not
+    a chat completion: it answers one yes/no question with a calibrated 0-1
+    probability, and the gate requires > `REPLY_THRESHOLD` (0.6, biased above
+    a coin flip to stay conservative). the instructions tell it to default to
+    no: only answer yes if the message is clearly addressed to noodle
+    specifically, or is a direct continuation of something noodle just said,
+    and to explicitly ignore ordinary questions between other people. a
+    request failure also defaults to no.
   - even when the gate says yes, noodle won't chime in unprompted in the same
     channel more than once every `UNPROMPTED_COOLDOWN_SECONDS` (default 300s),
     tracked in `state.LAST_UNPROMPTED_REPLY`. mentions and joined threads
@@ -147,8 +151,26 @@ no nested `noodle/noodle` folder.
   the live context window. embeds the query with `bot/embeddings.py`, then
   `history_store.search_similar()` does a brute-force cosine-similarity scan
   over every embedded row and returns the top 5, formatted as
-  `[kind @ timestamp] role: content` lines - never posted raw, same as every
-  other tool result.
+  `[kind @ timestamp] <@USERID>: content` (or `noodle: content` for its own
+  replies) - never posted raw, same as every other tool result.
+
+### 4b-iv. the unprompted-reply gate runs on jev, not chat completions
+- `bot/gate.py`'s `should_reply_unprompted()` calls hack club ai's jev /
+  "system one" model (`docs.ai.hackclub.com/api/jev.html`,
+  `POST AI_ENDPOINT + "/jev/systemone"`) instead of a normal chat completion.
+  jev is built for exactly this kind of narrow, calibrated decision
+  (classification/routing), and is faster and cheaper per call than an LLM
+  request - billing there is input-tokens-only, output is free.
+- the request sends one `state` string (the last ~6 turns of the
+  conversation + the new incoming message) and one `noul`-type question
+  (`should_reply`), which returns a 0-1 probability of "yes" rather than a
+  coin-flip text answer. `GATE_INSTRUCTIONS` is the single prompt for that
+  question - kept tight since it's the only thing billed, while `state`
+  carries the actual content for free. `REPLY_THRESHOLD = 0.6` is the cutoff
+  noodle requires before replying, biased a bit above 0.5 to stay
+  conservative (matches the "default to no" rule above). any request
+  failure (timeout, bad response shape, rate limit, etc) is logged and
+  treated as "no".
 
 ### 4c. never send reasoning to slack
 - noodle only ever forwards the model's final `content` to slack. any
@@ -171,34 +193,40 @@ no nested `noodle/noodle` folder.
   (`init_db()` / `append_message()` / `load_history()` / `search_similar()`).
   ambient allowed-channel chatter the unprompted-reply gate chimed into
   (noodle wasn't addressed) is explicitly NOT persisted yet.
-- `handlers._should_respond()` now returns a 4th value, `persist`: `True`
+- each row also carries `user_id`: the slack id of whoever actually sent a
+  "user"-role message (matthias in a dm, or anyone else in a thread) -
+  nothing else about them (no name, no profile data). `handlers.handle_message()`
+  reads `event.get("user")` and threads it through `_process()` →
+  `ask_noodle(..., user_id=...)` → `llm._remember()` → `append_message(...,
+  user_id=...)`. "assistant"-role rows (noodle's own replies) always pass
+  `user_id=None` - role already disambiguates those.
+- `handlers._should_respond()` returns a 4th value, `persist`: `True`
   for dms, mentions, and thread continuations, `False` for the gate's
   unprompted replies. that flows through `_process()` → `ask_noodle(...,
   persist=...)` → `llm._remember()`, which tags the row's `kind`
   (`"dm"` / `"thread"` / `"mention"`) from the conv_key's prefix and skips
   writing entirely when `persist` is `False`.
 - **embeddings + semantic search.** every persisted row also gets embedded
-  (`bot/embeddings.py`, hack club ai's `/v1/embeddings`, see 4b-iii and the
-  `.env` reference) and the vector stored alongside it as json. this is what
-  powers `search_memory`: a plain recency-ordered table wouldn't let noodle
-  find something from weeks ago by topic, so unlike the original dm-only
-  version of this feature, this now genuinely needs embeddings + similarity
-  search, not just "give me the last N rows". `search_similar()` is a
-  brute-force cosine-similarity scan over every embedded row (plenty fast
-  for a personal bot's history - no vector index needed at this scale).
-  embedding failures never break chat: `append_message()` just stores a
-  `NULL` embedding and the row is skipped by search but still counts for
-  live-context hydration.
+  (`bot/embeddings.py`, hack club ai's `/v1/embeddings` with `EMBEDDING_MODEL`
+  - deliberately a cheap paid model, qwen3-embedding-8b, not a `:free` one;
+  see 4b-iii and the `.env` reference) and the vector stored alongside it as
+  json. this is what powers `search_memory`: a plain recency-ordered table
+  wouldn't let noodle find something from weeks ago by topic, so this
+  genuinely needs embeddings + similarity search, not just "give me the last
+  N rows". `search_similar()` is a brute-force cosine-similarity scan over
+  every embedded row (plenty fast for a personal bot's history - no vector
+  index needed at this scale). embedding failures never break chat:
+  `append_message()` just stores a `NULL` embedding and the row is skipped
+  by search but still counts for live-context hydration.
 - **dm continuity across restarts.** dms get one stable key regardless of
   slack's (occasionally recycled) dm channel id -
   `bot.memory.dm_conv_key()` → `f"dm:{USER_ID}"` - since there's only ever
   one authorized dm partner. `bot/scheduler.py`'s `_post_dm()` persists the
   `@matthias-day` ping reminder and the morning dm(s) the same way (kind
-  `"dm"`), live into `state.MEMORY[dm_conv_key()]` and to disk. on startup,
-  `build_app()` calls `history_store.init_db()` (which also runs a one-time
-  migration from the old pre-search `dm_messages` table, if found) then
-  `load_history(dm_conv_key())` to repopulate `state.MEMORY` before the
-  socket connection opens.
+  `"dm"`, `user_id=None` since noodle sent them), live into
+  `state.MEMORY[dm_conv_key()]` and to disk. on startup, `build_app()` calls
+  `history_store.init_db()` then `load_history(dm_conv_key())` to
+  repopulate `state.MEMORY` before the socket connection opens.
 - channel/thread conversations are NOT similarly re-hydrated into live
   `state.MEMORY` on startup (and `state.PARTICIPATING_THREADS` isn't
   persisted either) - a restart still resets those for live back-and-forth,
@@ -311,7 +339,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `OPENAI_API_KEY` | openrouter api key (sk-or-...) |
 | `AI_ENDPOINT` | openai-compatible base; `/v1` is appended automatically |
 | `MODEL` | model id, e.g. `gpt-4o-mini` or an openrouter model |
-| `EMBEDDING_MODEL` | embeddings model for `search_memory`, via `AI_ENDPOINT` + `/embeddings` |
+| `EMBEDDING_MODEL` | embeddings model for `search_memory`, via `AI_ENDPOINT` + `/embeddings` (default: a cheap paid model, not `:free`) |
 | `ALLOWED_CHANNELS` | comma separated channel ids, or `*` for any |
 | `CHUNK_DELAY_SECONDS` | pause between fragment messages |
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in one channel |
@@ -335,7 +363,5 @@ the hour/minute of each dm is configurable, via `_parse_hhmm()` in
   per-channel `state.MEMORY`) across a restart - only dm live-context does
   that today; thread/channel history is persisted+searchable but not
   re-hydrated into live context on startup.
-- backfilling embeddings for rows migrated from the old pre-search schema
-  (they carry a `NULL` embedding and won't surface in `search_memory`).
 - streaming tokens into fragments for even snappier typing.
 - slash commands or `app_mention` event handling.

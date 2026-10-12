@@ -17,9 +17,11 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
   mention `noodle` or `@noodle`.
 - keep talking inside threads it has joined, even without a fresh mention.
 - chime into allowed channels on its own when a small "is this a good idea?"
-  gate decides the message is meant for it (no mention needed), throttled so
-  it won't jump into the same channel more than once every
-  `UNPROMPTED_COOLDOWN_SECONDS`.
+  gate decides the message is meant for it (no mention needed). that gate is
+  jev (hack club ai's fast/cheap classifier model, not a full chat
+  completion) answering a single yes/no question with a calibrated
+  probability; a reply is also throttled so it won't jump into the same
+  channel more than once every `UNPROMPTED_COOLDOWN_SECONDS`.
 - DM you a reminder to send today's `@matthias-day` ping at `DAILY_PING_REMINDER`
   (default 19:00, Europe/Amsterdam), and reply with a "messages sent today"
   recap (never as a thread reply) whenever that usergroup actually gets
@@ -47,9 +49,11 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
 - persist dms, threads, and direct pings/mentions (not ambient allowed-channel
   chatter it wasn't addressed in - that's not persisted yet) to a local
   sqlite db (`data/noodle_memory.db`), each turn embedded for semantic
-  search. the daily ping reminder and morning dm(s) count as dm turns too.
-  a `search_memory` tool lets noodle semantically search weeks of its own
-  history when asked to recall something older than the live context window.
+  search and tagged with the slack id of whoever said it (nothing else about
+  them is stored). the daily ping reminder and morning dm(s) count as dm
+  turns too. a `search_memory` tool lets noodle semantically search weeks of
+  its own history when asked to recall something older than the live
+  context window.
 
 ## how mentioning works
 
@@ -161,9 +165,16 @@ hardcoded (not an env var).
   subscriptions are configured in the slack app settings, not in this repo).
 - memory search is built against hack club ai's embeddings proxy
   (`docs.ai.hackclub.com/api/embeddings.html`), hit at `AI_ENDPOINT +
-  "/embeddings"` using `OPENAI_API_KEY`. the default `EMBEDDING_MODEL` is a
-  free model there; it'll work against any other openai-compatible
-  `/embeddings` endpoint at that same base too.
+  "/embeddings"` using `OPENAI_API_KEY`. the default `EMBEDDING_MODEL`
+  (qwen3-embedding-8b) is a cheap paid model, deliberately not a `:free`
+  one; it'll work against any other openai-compatible `/embeddings`
+  endpoint at that same base too.
+- the unprompted-reply gate is built against hack club ai's jev/"system one"
+  model (`docs.ai.hackclub.com/api/jev.html`), hit at `AI_ENDPOINT +
+  "/jev/systemone"` - a purpose-built classifier, not a chat completion, so
+  it's both faster and cheaper (billing is input-tokens-only there; output
+  is free) than the old approach of asking a full chat model to answer
+  "yes"/"no" in text.
 
 ## license
 

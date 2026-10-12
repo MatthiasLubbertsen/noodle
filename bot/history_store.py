@@ -11,11 +11,7 @@ logger = logging.getLogger("noodle")
 
 
 def init_db() -> None:
-    """create the persistent memory db/table if they don't exist yet.
-
-    also runs a one-time migration from the old dm-only "dm_messages" table
-    (pre-semantic-search) into the new general "messages" table, if found.
-    """
+    """create the persistent memory db/table if they don't exist yet."""
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(config.MEMORY_DB_PATH)
     try:
@@ -27,6 +23,7 @@ def init_db() -> None:
                 kind TEXT NOT NULL,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
+                user_id TEXT,
                 embedding TEXT,
                 created_at TEXT NOT NULL
             )
@@ -35,25 +32,20 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_conv_key ON messages (conv_key, id)"
         )
-        old_table = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='dm_messages'"
-        ).fetchone()
-        if old_table:
-            conn.execute(
-                "INSERT INTO messages (conv_key, kind, role, content, embedding, created_at) "
-                "SELECT conv_key, 'dm', role, content, NULL, created_at FROM dm_messages"
-            )
-            conn.execute("DROP TABLE dm_messages")
-            logger.info("migrated old dm_messages rows into the messages table")
         conn.commit()
     finally:
         conn.close()
 
 
-def append_message(conv_key: str, kind: str, role: str, content: str) -> None:
+def append_message(
+    conv_key: str, kind: str, role: str, content: str, user_id: str | None = None
+) -> None:
     """persist one turn (and its embedding, if that succeeds).
 
-    never raises - a storage or embedding hiccup shouldn't break chat.
+    user_id is the slack id of whoever actually said this - only meaningful
+    for "user" turns (noodle's own "assistant" turns pass None, since role
+    already disambiguates those). never raises - a storage or embedding
+    hiccup shouldn't break chat.
     """
     if not content:
         return
@@ -63,13 +55,14 @@ def append_message(conv_key: str, kind: str, role: str, content: str) -> None:
         conn = sqlite3.connect(config.MEMORY_DB_PATH)
         try:
             conn.execute(
-                "INSERT INTO messages (conv_key, kind, role, content, embedding, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO messages (conv_key, kind, role, content, user_id, embedding, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     conv_key,
                     kind,
                     role,
                     content,
+                    user_id,
                     embedding_json,
                     datetime.datetime.now(AMSTERDAM_TZ).isoformat(),
                 ),
@@ -121,7 +114,7 @@ def search_similar(query_embedding: list[float], limit: int = 5) -> list[dict]:
         conn = sqlite3.connect(config.MEMORY_DB_PATH)
         try:
             rows = conn.execute(
-                "SELECT kind, role, content, embedding, created_at FROM messages "
+                "SELECT kind, role, content, user_id, embedding, created_at FROM messages "
                 "WHERE embedding IS NOT NULL"
             ).fetchall()
         finally:
@@ -131,15 +124,22 @@ def search_similar(query_embedding: list[float], limit: int = 5) -> list[dict]:
         return []
 
     scored = []
-    for kind, role, content, embedding_json, created_at in rows:
+    for kind, role, content, user_id, embedding_json, created_at in rows:
         try:
             vector = json.loads(embedding_json)
         except (TypeError, ValueError):
             continue
         score = _cosine(query_embedding, vector)
-        scored.append((score, kind, role, content, created_at))
+        scored.append((score, kind, role, content, user_id, created_at))
     scored.sort(key=lambda t: t[0], reverse=True)
     return [
-        {"score": score, "kind": kind, "role": role, "content": content, "created_at": created_at}
-        for score, kind, role, content, created_at in scored[:limit]
+        {
+            "score": score,
+            "kind": kind,
+            "role": role,
+            "content": content,
+            "user_id": user_id,
+            "created_at": created_at,
+        }
+        for score, kind, role, content, user_id, created_at in scored[:limit]
     ]

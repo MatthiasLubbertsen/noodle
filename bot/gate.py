@@ -1,29 +1,38 @@
+import json
 import logging
+import urllib.request
 
 import config
 from bot import state
 
 logger = logging.getLogger("noodle")
 
-GATE_SYSTEM = (
-    "you are the gatekeeper for a friendly slack bot named noodle. "
-    "noodle was NOT mentioned by name in the incoming message, so it is only "
-    "one voice among many people chatting normally in this channel. decide "
-    "whether noodle should chime in unprompted. reply with exactly one word: "
-    "'yes' or 'no'. "
-    "default to 'no'. only say 'yes' if the message is clearly addressed to "
-    "noodle specifically (e.g. it directly asks 'noodle' or an assistant for "
-    "help), or it is a direct, unambiguous continuation of something noodle "
-    "just said in the recent conversation above. say 'no' for ordinary chat "
-    "between other people, banter, announcements, reactions, or any message "
-    "that would make sense even if noodle did not exist, EVEN IF it contains "
-    "a question mark or is phrased as a question, since most questions in a "
-    "group channel are addressed to other humans, not to noodle."
+JEV_URL_SUFFIX = "/jev/systemone"
+
+# a single, small "yes/no" question for jev (hack club ai's fast/cheap
+# classifier model, https://docs.ai.hackclub.com/api/jev.html) instead of a
+# full chat-completion call - this is exactly the narrow, calibrated-answer
+# task it's built for, and billing is input-only (output is free), so the
+# instructions stay tight while the "state" below carries the real content.
+GATE_INSTRUCTIONS = (
+    "the state is a recent slack conversation followed by one new message, "
+    "in a channel where the assistant 'noodle' was NOT mentioned by name. "
+    "should noodle reply to the new message anyway, unprompted? default to "
+    "no. say yes only if the new message is clearly addressed to noodle "
+    "specifically, or is a direct, unambiguous continuation of something "
+    "noodle just said above. say no for ordinary chat between other people, "
+    "banter, announcements, reactions, or anything that would make sense "
+    "even if noodle did not exist - including questions, since most "
+    "questions in a group channel are addressed to other humans, not noodle."
 )
+
+# jev returns a calibrated 0-1 probability, not a coin flip - bias the
+# cutoff above 0.5 to stay conservative, matching "default to no" above.
+REPLY_THRESHOLD = 0.6
 
 
 def should_reply_unprompted(user_text: str, conv_key: str) -> bool:
-    """cheap LLM check: is it a good idea for noodle to reply here?"""
+    """fast/cheap check via jev: is it a good idea for noodle to reply here?"""
     text = (user_text or "").strip()
     if not text:
         return False
@@ -38,25 +47,33 @@ def should_reply_unprompted(user_text: str, conv_key: str) -> bool:
         elif role == "assistant":
             recent.append(f"noodle: {content}")
     context = "\n".join(recent)
-    prompt = (
-        f"recent conversation:\n{context}\n\n"
-        f"incoming message:\n{text}\n\n"
-        "should noodle reply? answer yes or no:"
+    state_text = f"recent conversation:\n{context}\n\nnew message:\n{text}"
+
+    payload = json.dumps(
+        {
+            "state": state_text,
+            "questions": {
+                "should_reply": {"type": "noul", "instructions": GATE_INSTRUCTIONS}
+            },
+        }
+    ).encode("utf-8")
+    url = config.AI_ENDPOINT.rstrip("/") + JEV_URL_SUFFIX
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {config.OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
     )
     try:
-        resp = state.client.chat.completions.create(
-            model=config.MODEL,
-            messages=[
-                {"role": "system", "content": GATE_SYSTEM},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0,
-            max_tokens=3,
-        )
-        answer = (resp.choices[0].message.content or "").strip().lower()
-        return answer.startswith("yes")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        probability = data["answers"]["should_reply"]["noul"]
+        return probability > REPLY_THRESHOLD
     except Exception:  # noqa: BLE001
-        logger.exception("gate llm failed; defaulting to no")
-        # when unsure (e.g. the model backend hiccups) stay quiet rather than
-        # risk noodle spamming a channel it wasn't actually asked to join.
+        logger.exception("jev gate check failed; defaulting to no")
+        # when unsure (e.g. a backend hiccup) stay quiet rather than risk
+        # noodle spamming a channel it wasn't actually asked to join.
         return False

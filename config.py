@@ -34,11 +34,10 @@ if not AI_ENDPOINT.endswith("/v1"):
 MODEL = os.getenv("MODEL", "gpt-4o-mini")
 
 # embeddings model for semantic memory search, via the ai endpoint's
-# /embeddings route (see bot/embeddings.py). defaults to a free hack club ai
-# model - good context length (32k), no training-retention caveat (unlike
-# some of the other free options there). swap for something like
-# "qwen/qwen3-embedding-8b" (~$0.01/1M tokens) if you want higher quality.
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nvidia/nemotron-3-embed-1b:free")
+# /embeddings route (see bot/embeddings.py). qwen3-embedding-8b: cheap
+# (~$0.01/1M tokens), multilingual, 32k context - deliberately not a :free
+# model (those come with retention/quality tradeoffs not worth it here).
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "qwen/qwen3-embedding-8b")
 
 # --- channels ---
 # comma separated channel ids where noodle replies to mentions.
@@ -84,7 +83,7 @@ SYSTEM_PROMPT_PATH = BASE_DIR / "prompts" / "system_prompt.md"
 LOG_DIR = BASE_DIR / "logs"
 DATA_DIR = BASE_DIR / "data"
 NEWS_SEEN_PATH = DATA_DIR / "hackclub_news_seen.json"
-# persistent dm conversation history (survives restarts) - sqlite, see
-# bot/history_store.py. dms only, for now.
+# persistent, embedded conversation history (dms, threads, direct pings) -
+# sqlite, see bot/history_store.py.
 MEMORY_DB_PATH = DATA_DIR / "noodle_memory.db"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

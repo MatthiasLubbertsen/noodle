@@ -256,7 +256,13 @@ def _search_memory(query: str) -> str:
         return "no matching memories found"
     lines = []
     for r in results:
-        lines.append(f"- [{r['kind']} @ {r['created_at']}] {r['role']}: {r['content']}")
+        if r["role"] == "assistant":
+            who = "noodle"
+        elif r["user_id"]:
+            who = f"<@{r['user_id']}>"
+        else:
+            who = "someone"
+        lines.append(f"- [{r['kind']} @ {r['created_at']}] {who}: {r['content']}")
     return "\n".join(lines)
 
 

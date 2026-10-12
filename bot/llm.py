@@ -19,22 +19,28 @@ def _kind_for(conv_key: str) -> str:
     return "mention"
 
 
-def _remember(conv_key: str, role: str, content: str, persist: bool) -> None:
+def _remember(
+    conv_key: str, role: str, content: str, persist: bool, user_id: str | None = None
+) -> None:
     # persist dms, threads, and direct pings - not ambient allowed-channel
     # chatter the unprompted-reply gate chimed into (persist=False for that)
     if persist:
-        append_message(conv_key, _kind_for(conv_key), role, content)
+        append_message(conv_key, _kind_for(conv_key), role, content, user_id=user_id)
 
 
 def ask_noodle(
-    conv_key: str, user_text: str, location: str | None = None, persist: bool = False
+    conv_key: str,
+    user_text: str,
+    location: str | None = None,
+    persist: bool = False,
+    user_id: str | None = None,
 ) -> str:
     user_text = user_text or "hello"
     first2 = " ".join(user_text.split()[:2])
     logger.debug("ai request for user prompt: %r", first2)
     history = state.MEMORY.setdefault(conv_key, [])
     history.append({"role": "user", "content": user_text})
-    _remember(conv_key, "user", user_text, persist)
+    _remember(conv_key, "user", user_text, persist, user_id=user_id)
 
     system_content = state.SYSTEM_PROMPT
     if location:
