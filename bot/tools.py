@@ -2,7 +2,7 @@ import logging
 import re
 
 from bot import state
-from bot.directory import flaron_query
+from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
 from bot.exa import web_answer
 from bot.history_store import search_similar
@@ -283,12 +283,19 @@ def _search_memory(query: str) -> str:
     results = search_similar(vector, limit=5)
     if not results:
         return "no matching memories found"
+    name_cache: dict = {}
     lines = []
     for r in results:
         if r["role"] == "assistant":
             who = "noodle"
         elif r["user_id"]:
-            who = f"<@{r['user_id']}>"
+            uid = r["user_id"]
+            if uid not in name_cache:
+                name_cache[uid] = lookup_display_name(uid)
+            name = name_cache[uid]
+            # keep the real <@USERID> mention too, so noodle can still tag
+            # them if it wants to - the name is just so it knows who that is
+            who = f"{name} (<@{uid}>)" if name else f"<@{uid}>"
         else:
             who = "someone"
         lines.append(f"- [{r['kind']} @ {r['created_at']}] {who}: {r['content']}")

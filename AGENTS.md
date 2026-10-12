@@ -171,9 +171,19 @@ no nested `noodle/noodle` folder.
   topic, from however long ago, when asked to recall something that isn't in
   the live context window. embeds the query with `bot/embeddings.py`, then
   `history_store.search_similar()` does a brute-force cosine-similarity scan
-  over every embedded row and returns the top 5, formatted as
-  `[kind @ timestamp] <@USERID>: content` (or `noodle: content` for its own
-  replies) - never posted raw, same as every other tool result.
+  over every embedded row and returns the top 5 - never posted raw, same as
+  every other tool result.
+- persisted rows only ever store a raw `user_id` (see 4d), which on its own
+  doesn't tell the model anything - so `_search_memory()` resolves each
+  unique `user_id` in the results to a display name via
+  `directory.lookup_display_name()` (one flaron `/user/<id>` lookup per
+  unique id in the batch, cached locally in the function call so a person
+  showing up in several results only costs one lookup) and formats each line
+  as `[kind @ timestamp] Name (<@USERID>): content` - giving the model both
+  a human-readable name (so it actually knows who it's quoting) and the real
+  `<@USERID>` mention (so it can still tag them if it wants to). falls back
+  to just `<@USERID>` if flaron has no name for that id, and to `noodle` /
+  `someone` for assistant rows / rows with no stored `user_id`.
 
 ### 4b-iv-a. web_search tool (exa)
 - a `web_search` tool (`bot/exa.py`, `run_tool()` in `bot/tools.py`) calls

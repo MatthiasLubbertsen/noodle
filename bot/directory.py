@@ -31,6 +31,21 @@ def _dump(data, label: str) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False)
 
 
+def lookup_display_name(user_id: str) -> str | None:
+    """resolve a slack user id to a short display name via the public flaron
+    directory (e.g. for search_memory results, which only ever store a raw
+    user_id). returns None if the lookup fails or no name is found - never
+    raises.
+    """
+    if not user_id:
+        return None
+    data = _get_json(f"/user/{user_id}")
+    if not data:
+        return None
+    user = (data.get("data") or {}).get("user") or {}
+    return user.get("display_name") or user.get("real_name") or user.get("name") or None
+
+
 def flaron_query(action: str, id: str | None = None, name: str | None = None,
                  query: str | None = None) -> str:
     """call any public (no-auth) flaron endpoint and return the full json.
