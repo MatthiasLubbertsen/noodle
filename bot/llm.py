@@ -11,19 +11,30 @@ from bot.tools import TOOLS, run_tool
 logger = logging.getLogger("noodle")
 
 
-def _remember(conv_key: str, role: str, content: str) -> None:
-    # persist dm turns only, for now - channels/threads stay in-memory-only
+def _kind_for(conv_key: str) -> str:
     if conv_key.startswith("dm:"):
-        append_message(conv_key, role, content)
+        return "dm"
+    if conv_key.startswith("thread:"):
+        return "thread"
+    return "mention"
 
 
-def ask_noodle(conv_key: str, user_text: str, location: str | None = None) -> str:
+def _remember(conv_key: str, role: str, content: str, persist: bool) -> None:
+    # persist dms, threads, and direct pings - not ambient allowed-channel
+    # chatter the unprompted-reply gate chimed into (persist=False for that)
+    if persist:
+        append_message(conv_key, _kind_for(conv_key), role, content)
+
+
+def ask_noodle(
+    conv_key: str, user_text: str, location: str | None = None, persist: bool = False
+) -> str:
     user_text = user_text or "hello"
     first2 = " ".join(user_text.split()[:2])
     logger.debug("ai request for user prompt: %r", first2)
     history = state.MEMORY.setdefault(conv_key, [])
     history.append({"role": "user", "content": user_text})
-    _remember(conv_key, "user", user_text)
+    _remember(conv_key, "user", user_text, persist)
 
     system_content = state.SYSTEM_PROMPT
     if location:
@@ -47,7 +58,7 @@ def ask_noodle(conv_key: str, user_text: str, location: str | None = None) -> st
         if not message.tool_calls:
             final = _clean_reply(message.content or "")
             history.append({"role": "assistant", "content": final})
-            _remember(conv_key, "assistant", final)
+            _remember(conv_key, "assistant", final, persist)
             trim_memory(history)
             return final
         history.append(
@@ -87,6 +98,6 @@ def ask_noodle(conv_key: str, user_text: str, location: str | None = None) -> st
     )
     final = _clean_reply(final_resp.choices[0].message.content or "")
     history.append({"role": "assistant", "content": final})
-    _remember(conv_key, "assistant", final)
+    _remember(conv_key, "assistant", final, persist)
     trim_memory(history)
     return final

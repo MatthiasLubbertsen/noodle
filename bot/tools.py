@@ -3,6 +3,8 @@ import re
 
 from bot import state
 from bot.directory import flaron_query
+from bot.embeddings import embed_text
+from bot.history_store import search_similar
 from bot.slack_text import _channel_link, _parse_slack_ref
 
 logger = logging.getLogger("noodle")
@@ -114,6 +116,29 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_memory",
+            "description": (
+                "semantically search noodle's own persisted memory - past dms, "
+                "threads, and direct pings (not ambient channel chatter noodle "
+                "wasn't addressed in) - for anything related to a topic, even "
+                "from weeks ago. use this when asked to recall something from a "
+                "past conversation that isn't in the current context."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "what to search for, in natural language",
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    },
 ]
 
 
@@ -219,6 +244,22 @@ def _fetch_slack_message(ref: str) -> str:
         return f"fetch failed: {exc}"
 
 
+def _search_memory(query: str) -> str:
+    query = (query or "").strip()
+    if not query:
+        return "no search query given"
+    vector = embed_text(query)
+    if vector is None:
+        return "memory search failed (couldn't embed the query, check logs)"
+    results = search_similar(vector, limit=5)
+    if not results:
+        return "no matching memories found"
+    lines = []
+    for r in results:
+        lines.append(f"- [{r['kind']} @ {r['created_at']}] {r['role']}: {r['content']}")
+    return "\n".join(lines)
+
+
 def run_tool(name: str, args: dict, user_prompt: str = "") -> str:
     if name == "search_slack_messages":
         return _search_slack_messages(args.get("query", ""), user_prompt=user_prompt)
@@ -231,4 +272,6 @@ def run_tool(name: str, args: dict, user_prompt: str = "") -> str:
             name=args.get("name"),
             query=args.get("query"),
         )
+    if name == "search_memory":
+        return _search_memory(args.get("query", ""))
     return f"unknown tool: {name}"

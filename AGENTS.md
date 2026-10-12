@@ -26,7 +26,8 @@ noodle/
     slack_text.py         # cleans incoming text, parses slack links, channel links
     directory.py          # flaron user/channel directory (no auth needed)
     memory.py             # per-conversation memory helpers (+ the stable dm key)
-    history_store.py      # persistent dm history (sqlite), survives restarts
+    history_store.py      # persistent + embedded memory (sqlite), semantic search
+    embeddings.py         # calls the ai endpoint's /embeddings route
     chunk.py              # splits replies into small slack messages
     stats.py              # "messages sent today" recap (via slack search)
     almanac.py            # silly/named days today (wikipedia)
@@ -139,45 +140,70 @@ no nested `noodle/noodle` folder.
 - verbose logs: each search logs its query, the first two words of the user's
   prompt, `searching_as`, the match count, and a snippet of the top matches.
 
+### 4b-iii. search_memory tool
+- a `search_memory` tool (`bot/tools.py`) lets the model semantically search
+  noodle's own persisted memory (see 4d below) for anything related to a
+  topic, from however long ago, when asked to recall something that isn't in
+  the live context window. embeds the query with `bot/embeddings.py`, then
+  `history_store.search_similar()` does a brute-force cosine-similarity scan
+  over every embedded row and returns the top 5, formatted as
+  `[kind @ timestamp] role: content` lines - never posted raw, same as every
+  other tool result.
+
 ### 4c. never send reasoning to slack
 - noodle only ever forwards the model's final `content` to slack. any
   chain-of-thought / `<think:6124c78e>...</think:6124c78e>` blocks are stripped before chunking,
   and tool results are used as context only (never posted). reasoning, debug
   logs, or raw tool output are never sent to a channel or thread.
 
-### 4d. memory (in-memory for channels/threads, persisted for dms)
-- noodle keeps a per-conversation history (`state.MEMORY`, keyed by
-  `bot.memory.conv_key()`) of the last ~12 user turns, including tool
-  calls/results, so it can refer back to recent context. on each message the
-  user turn is appended, the model is called with `system + history`, and
-  the assistant reply is stored back (`bot/llm.py`).
-- channel and thread conversations (`chan:<id>` / `thread:<ts>`) are
-  in-memory only and still reset on restart.
-- **dm conversations are persisted.** `conv_key()` gives every dm the same
-  stable key, `bot.memory.dm_conv_key()` → `f"dm:{USER_ID}"` (not the slack
-  dm channel id, which can change) — there's only ever one authorized dm
-  partner, so one key is enough. `bot/history_store.py` wraps a small sqlite
-  db (`data/noodle_memory.db`, stdlib `sqlite3`, no new dependency) with
-  `init_db()` / `append_message()` / `load_history()`.
-- a plain persisted table (not a vector db) is the right fit here: this is
-  recency-based context (the last N turns, verbatim, in order), not semantic
-  search over a large corpus, so embeddings would add cost and complexity
-  without buying anything - you'd still just want "the last N rows" back. a
-  vector store would make sense later if noodle needs to recall something
-  from way back by topic rather than recency.
-- `bot/llm.py`'s `_remember()` persists every dm turn (both the user's
-  message and noodle's final reply - not the intermediate tool-call/tool
-  messages, which stay in-memory-only bookkeeping for that one request) the
-  moment it happens, keyed by whether `conv_key` starts with `"dm:"`.
-- `bot/scheduler.py`'s `_post_dm()` persists the same way for the
-  `@matthias-day` ping reminder and the morning dm(s) (`bot/app.py` imports
-  live into `state.MEMORY[dm_conv_key()]`), so noodle remembers having sent
-  those too, live and across restarts.
-- on startup, `build_app()` calls `history_store.init_db()` then
+### 4d. memory: live context (in-memory) + persisted, embedded history
+- **live context.** noodle keeps a per-conversation history (`state.MEMORY`,
+  keyed by `bot.memory.conv_key()`) of the last ~12 user turns, including
+  tool calls/results, so it can refer back to recent context within one
+  conversation. on each message the user turn is appended, the model is
+  called with `system + history`, and the assistant reply is stored back
+  (`bot/llm.py`). this part is unchanged by persistence/search below - it's
+  what actually goes into the prompt on the next turn.
+- **what gets persisted.** every dm, thread (`thread:<ts>`), and direct
+  ping/mention (`chan:<id>`, but only when noodle was actually addressed -
+  see below) turn is written to `data/noodle_memory.db` (sqlite, stdlib
+  `sqlite3`, no new dependency) via `bot/history_store.py`
+  (`init_db()` / `append_message()` / `load_history()` / `search_similar()`).
+  ambient allowed-channel chatter the unprompted-reply gate chimed into
+  (noodle wasn't addressed) is explicitly NOT persisted yet.
+- `handlers._should_respond()` now returns a 4th value, `persist`: `True`
+  for dms, mentions, and thread continuations, `False` for the gate's
+  unprompted replies. that flows through `_process()` → `ask_noodle(...,
+  persist=...)` → `llm._remember()`, which tags the row's `kind`
+  (`"dm"` / `"thread"` / `"mention"`) from the conv_key's prefix and skips
+  writing entirely when `persist` is `False`.
+- **embeddings + semantic search.** every persisted row also gets embedded
+  (`bot/embeddings.py`, hack club ai's `/v1/embeddings`, see 4b-iii and the
+  `.env` reference) and the vector stored alongside it as json. this is what
+  powers `search_memory`: a plain recency-ordered table wouldn't let noodle
+  find something from weeks ago by topic, so unlike the original dm-only
+  version of this feature, this now genuinely needs embeddings + similarity
+  search, not just "give me the last N rows". `search_similar()` is a
+  brute-force cosine-similarity scan over every embedded row (plenty fast
+  for a personal bot's history - no vector index needed at this scale).
+  embedding failures never break chat: `append_message()` just stores a
+  `NULL` embedding and the row is skipped by search but still counts for
+  live-context hydration.
+- **dm continuity across restarts.** dms get one stable key regardless of
+  slack's (occasionally recycled) dm channel id -
+  `bot.memory.dm_conv_key()` → `f"dm:{USER_ID}"` - since there's only ever
+  one authorized dm partner. `bot/scheduler.py`'s `_post_dm()` persists the
+  `@matthias-day` ping reminder and the morning dm(s) the same way (kind
+  `"dm"`), live into `state.MEMORY[dm_conv_key()]` and to disk. on startup,
+  `build_app()` calls `history_store.init_db()` (which also runs a one-time
+  migration from the old pre-search `dm_messages` table, if found) then
   `load_history(dm_conv_key())` to repopulate `state.MEMORY` before the
-  socket connection opens, so dm continuity survives a restart.
-- channels/threads persistence and dm-history pruning/retention are future
-  extensions, not built yet.
+  socket connection opens.
+- channel/thread conversations are NOT similarly re-hydrated into live
+  `state.MEMORY` on startup (and `state.PARTICIPATING_THREADS` isn't
+  persisted either) - a restart still resets those for live back-and-forth,
+  same as before. only dm live-continuity and the persisted/searchable
+  history (all kinds) survive a restart.
 
 ### 5. message chunking
 - after the ai replies, `chunk_response()` splits it into one slack message
@@ -285,6 +311,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `OPENAI_API_KEY` | openrouter api key (sk-or-...) |
 | `AI_ENDPOINT` | openai-compatible base; `/v1` is appended automatically |
 | `MODEL` | model id, e.g. `gpt-4o-mini` or an openrouter model |
+| `EMBEDDING_MODEL` | embeddings model for `search_memory`, via `AI_ENDPOINT` + `/embeddings` |
 | `ALLOWED_CHANNELS` | comma separated channel ids, or `*` for any |
 | `CHUNK_DELAY_SECONDS` | pause between fragment messages |
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in one channel |
@@ -302,8 +329,13 @@ the hour/minute of each dm is configurable, via `_parse_hhmm()` in
 `bot/scheduler.py`.
 
 ## extension points (not yet built)
-- persisted memory for channels/threads (currently dms only).
-- semantic recall over old dm history (would be a good fit for a vector db,
-  unlike the current recency-based last-N-turns memory).
+- persisting + embedding ambient allowed-channel chatter (currently only
+  dms/threads/direct pings are persisted/searchable).
+- restoring thread/channel live continuity (`state.PARTICIPATING_THREADS`,
+  per-channel `state.MEMORY`) across a restart - only dm live-context does
+  that today; thread/channel history is persisted+searchable but not
+  re-hydrated into live context on startup.
+- backfilling embeddings for rows migrated from the old pre-search schema
+  (they carry a `NULL` embedding and won't surface in `search_memory`).
 - streaming tokens into fragments for even snappier typing.
 - slash commands or `app_mention` event handling.

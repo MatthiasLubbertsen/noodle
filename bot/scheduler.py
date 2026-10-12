@@ -51,7 +51,7 @@ def _post_dm(text: str) -> None:
     history = state.MEMORY.setdefault(key, [])
     history.append({"role": "assistant", "content": text})
     trim_memory(history)
-    append_message(key, "assistant", text)
+    append_message(key, "dm", "assistant", text)
 
 
 def _send_ping_reminder() -> None:

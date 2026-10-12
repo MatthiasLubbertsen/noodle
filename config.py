@@ -33,6 +33,13 @@ if not AI_ENDPOINT.endswith("/v1"):
 
 MODEL = os.getenv("MODEL", "gpt-4o-mini")
 
+# embeddings model for semantic memory search, via the ai endpoint's
+# /embeddings route (see bot/embeddings.py). defaults to a free hack club ai
+# model - good context length (32k), no training-retention caveat (unlike
+# some of the other free options there). swap for something like
+# "qwen/qwen3-embedding-8b" (~$0.01/1M tokens) if you want higher quality.
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nvidia/nemotron-3-embed-1b:free")
+
 # --- channels ---
 # comma separated channel ids where noodle replies to mentions.
 # leave empty to disable channel replies, or set to "*" to allow any channel.

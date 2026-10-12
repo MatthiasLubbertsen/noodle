@@ -67,8 +67,15 @@ def _is_noise(event: dict) -> bool:
 
 
 def _should_respond(event: dict):
+    """returns (ok, prompt, thread_ts, persist).
+
+    persist is True for dms, direct pings (mentions), and thread
+    continuations - noodle was actually addressed. it's False for the
+    unprompted-reply gate chiming into ambient allowed-channel chatter
+    noodle wasn't addressed in - not persisted/embedded (yet).
+    """
     if _is_noise(event):
-        return False, None, None
+        return False, None, None, False
 
     user = event.get("user")
     text = event.get("text", "")
@@ -78,8 +85,8 @@ def _should_respond(event: dict):
     if _is_dm(event):
         if user != config.USER_ID:
             logger.info("ignored DM from unauthorized user %s", user)
-            return False, None, None
-        return True, _clean_text(text), thread_ts
+            return False, None, None, False
+        return True, _clean_text(text), thread_ts, True
 
     mentioned = ("noodle" in text.lower()) or _mention_in_text(text)
     if mentioned:
@@ -88,12 +95,12 @@ def _should_respond(event: dict):
             and channel not in config.ALLOWED_CHANNELS
         ):
             logger.info("ignored mention in non-allowed channel %s", channel)
-            return False, None, None
-        return True, _clean_text(text), thread_ts
+            return False, None, None, False
+        return True, _clean_text(text), thread_ts, True
 
     # keep talking inside threads noodle has joined, even without a mention
     if thread_ts and thread_ts in state.PARTICIPATING_THREADS:
-        return True, _clean_text(text), thread_ts
+        return True, _clean_text(text), thread_ts, True
 
     # allowed channels, no mention: let the gate decide if we should chime in,
     # but not more than once per UNPROMPTED_COOLDOWN_SECONDS in the same
@@ -102,23 +109,23 @@ def _should_respond(event: dict):
         now = time.time()
         last = state.LAST_UNPROMPTED_REPLY.get(channel, 0.0)
         if now - last < config.UNPROMPTED_COOLDOWN_SECONDS:
-            return False, None, None
+            return False, None, None, False
         key = conv_key(event)
         if should_reply_unprompted(text, key):
             logger.info("gate allowed unprompted reply in %s", channel)
             state.LAST_UNPROMPTED_REPLY[channel] = now
-            return True, _clean_text(text), thread_ts
+            return True, _clean_text(text), thread_ts, False
 
-    return False, None, None
+    return False, None, None, False
 
 
 def _process(channel: str, prompt: str, thread_ts: str | None, key: str,
-             location: str | None = None) -> None:
+             location: str | None = None, persist: bool = False) -> None:
     try:
         if thread_ts:
             # remember this thread so we keep answering in it
             state.PARTICIPATING_THREADS.add(thread_ts)
-        reply = ask_noodle(key, prompt, location=location)
+        reply = ask_noodle(key, prompt, location=location, persist=persist)
         # cap fragments so noodle never spams the channel
         fragments = chunk_response(reply)[:8]
         for fragment in fragments:
@@ -178,7 +185,7 @@ def handle_message(event: dict) -> None:
         ).start()
         return
 
-    ok, prompt, thread_ts = _should_respond(event)
+    ok, prompt, thread_ts, persist = _should_respond(event)
     if not ok:
         return
     channel = event.get("channel")
@@ -186,5 +193,7 @@ def handle_message(event: dict) -> None:
     location = location_label(event)
     # run the (slow) ai call + chunked sending off the socket thread
     threading.Thread(
-        target=_process, args=(channel, prompt, thread_ts, key, location), daemon=True
+        target=_process,
+        args=(channel, prompt, thread_ts, key, location, persist),
+        daemon=True,
     ).start()

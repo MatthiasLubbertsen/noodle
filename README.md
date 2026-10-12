@@ -43,10 +43,13 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
   public flaron directory (the single `flaron` tool returns the full json), so it
   always mentions the right `<@USERID>` or `<#CHANNELID>`.
 - remember the recent conversation per dm or thread, and never sends its own
-  reasoning or tool output to slack. dm history is persisted (sqlite,
-  `data/noodle_memory.db`) and survives restarts; channels/threads are still
-  in-memory only for now. the daily ping reminder and morning dm(s) count as
-  dm turns too, so noodle remembers having sent them.
+  reasoning or tool output to slack.
+- persist dms, threads, and direct pings/mentions (not ambient allowed-channel
+  chatter it wasn't addressed in - that's not persisted yet) to a local
+  sqlite db (`data/noodle_memory.db`), each turn embedded for semantic
+  search. the daily ping reminder and morning dm(s) count as dm turns too.
+  a `search_memory` tool lets noodle semantically search weeks of its own
+  history when asked to recall something older than the live context window.
 
 ## how mentioning works
 
@@ -77,7 +80,8 @@ noodle/
     slack_text.py      # cleans incoming text, parses slack links, channel links
     directory.py       # flaron user/channel directory (no auth needed)
     memory.py          # per-conversation memory helpers (+ the stable dm key)
-    history_store.py   # persistent dm history (sqlite), survives restarts
+    history_store.py   # persistent + embedded memory (sqlite), semantic search
+    embeddings.py      # calls the ai endpoint's /embeddings route
     chunk.py           # splits a reply into one slack message per paragraph
     stats.py           # "messages sent today" recap (via slack search)
     almanac.py         # silly/named days today (wikipedia)
@@ -127,6 +131,7 @@ that is not writable.
 | `OPENAI_API_KEY` | openai compatible api key (sk-or-...) |
 | `AI_ENDPOINT` | openai compatible base; `/v1` is appended automatically |
 | `MODEL` | model id, e.g. `gpt-4o-mini` or an openrouter model |
+| `EMBEDDING_MODEL` | embeddings model for memory search, via `AI_ENDPOINT` + `/embeddings` |
 | `ALLOWED_CHANNELS` | comma separated channel ids, or `*` for any |
 | `CHUNK_DELAY_SECONDS` | pause between fragment messages |
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in a channel |
@@ -154,6 +159,11 @@ hardcoded (not an env var).
   on `SLACK_USER_TOKEN`, and the slack app must have the
   `member_joined_channel` / `member_left_channel` events subscribed (event
   subscriptions are configured in the slack app settings, not in this repo).
+- memory search is built against hack club ai's embeddings proxy
+  (`docs.ai.hackclub.com/api/embeddings.html`), hit at `AI_ENDPOINT +
+  "/embeddings"` using `OPENAI_API_KEY`. the default `EMBEDDING_MODEL` is a
+  free model there; it'll work against any other openai-compatible
+  `/embeddings` endpoint at that same base too.
 
 ## license
 
