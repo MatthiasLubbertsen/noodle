@@ -12,7 +12,7 @@ from bot.tools import TOOLS, run_tool
 logger = logging.getLogger("noodle")
 
 
-def _call_chat(messages, tools=None, tool_choice=None):
+def _call_chat(messages, tools=None, tool_choice=None, detail=""):
     kwargs = {
         "model": config.MODEL,
         "messages": messages,
@@ -25,9 +25,9 @@ def _call_chat(messages, tools=None, tool_choice=None):
     try:
         raw = state.client.chat.completions.with_raw_response.create(**kwargs)
     except Exception as exc:  # noqa: BLE001
-        log_hcai("chat", str(getattr(exc, "status_code", "error")))
+        log_hcai("chat", str(getattr(exc, "status_code", "error")), detail=detail)
         raise
-    log_hcai("chat", str(raw.status_code))
+    log_hcai("chat", str(raw.status_code), detail=detail)
     return raw.parse()
 
 
@@ -59,6 +59,7 @@ def ask_noodle(
 ) -> str:
     user_text = user_text or "hello"
     first2 = " ".join(user_text.split()[:2])
+    first4 = " ".join(user_text.split()[:4])
     logger.debug("ai request for user prompt: %r", first2)
     history = state.MEMORY.setdefault(conv_key, [])
     history.append({"role": "user", "content": user_text})
@@ -74,7 +75,7 @@ def ask_noodle(
 
     messages = [{"role": "system", "content": system_content}] + history
     for _ in range(5):
-        response = _call_chat(messages, tools=TOOLS, tool_choice="auto")
+        response = _call_chat(messages, tools=TOOLS, tool_choice="auto", detail=first4)
         message = response.choices[0].message
         if not message.tool_calls:
             final = _clean_reply(message.content or "")
@@ -111,7 +112,7 @@ def ask_noodle(
         messages = [{"role": "system", "content": system_content}] + history
 
     # safety net: answer without tools if we hit the round cap
-    final_resp = _call_chat(messages)
+    final_resp = _call_chat(messages, detail=first4)
     final = _clean_reply(final_resp.choices[0].message.content or "")
     history.append({"role": "assistant", "content": final})
     _remember(conv_key, "assistant", final, persist)

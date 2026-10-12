@@ -21,6 +21,7 @@ def embed_text(text: str) -> list[float] | None:
     text = (text or "").strip()
     if not text:
         return None
+    detail = " ".join(text.split()[:4])
     url = config.AI_ENDPOINT.rstrip("/") + "/embeddings"
     payload = json.dumps({"model": config.EMBEDDING_MODEL, "input": text}).encode("utf-8")
     req = urllib.request.Request(
@@ -34,14 +35,14 @@ def embed_text(text: str) -> list[float] | None:
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            log_hcai("embeddings", str(resp.status))
+            log_hcai("embeddings", str(resp.status), detail=detail)
             data = json.loads(resp.read().decode("utf-8"))
         return data["data"][0]["embedding"]
     except urllib.error.HTTPError as exc:
-        log_hcai("embeddings", str(exc.code))
+        log_hcai("embeddings", str(exc.code), detail=detail)
         logger.exception("embedding request failed")
         return None
     except Exception:  # noqa: BLE001
-        log_hcai("embeddings", "error")
+        log_hcai("embeddings", "error", detail=detail)
         logger.exception("embedding request failed")
         return None

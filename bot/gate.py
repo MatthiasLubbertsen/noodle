@@ -38,6 +38,7 @@ def should_reply_unprompted(user_text: str, conv_key: str) -> bool:
     text = (user_text or "").strip()
     if not text:
         return False
+    detail = " ".join(text.split()[:4])
 
     history = state.MEMORY.get(conv_key, [])
     recent = []
@@ -71,16 +72,16 @@ def should_reply_unprompted(user_text: str, conv_key: str) -> bool:
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            log_hcai("jev", str(resp.status))
+            log_hcai("jev", str(resp.status), detail=detail)
             data = json.loads(resp.read().decode("utf-8"))
         probability = data["answers"]["should_reply"]["noul"]
         return probability > REPLY_THRESHOLD
     except urllib.error.HTTPError as exc:
-        log_hcai("jev", str(exc.code))
+        log_hcai("jev", str(exc.code), detail=detail)
         logger.exception("jev gate check failed; defaulting to no")
         return False
     except Exception:  # noqa: BLE001
-        log_hcai("jev", "error")
+        log_hcai("jev", "error", detail=detail)
         logger.exception("jev gate check failed; defaulting to no")
         # when unsure (e.g. a backend hiccup) stay quiet rather than risk
         # noodle spamming a channel it wasn't actually asked to join.

@@ -317,15 +317,26 @@ no nested `noodle/noodle` folder.
   history. different conv_keys still run fully in parallel.
 
 ### 4f. logging
-- `bot/log.py`'s `setup_logging()` sets the `httpx`/`httpcore`/`openai`
-  loggers to `WARNING`, since the `openai` sdk's http transport otherwise
-  logs its own verbose per-request line
-  (`HTTP Request: POST .../chat/completions "HTTP/1.1 200 OK"`) at `INFO`
-  for every single call - noisy and redundant with the concise lines below.
+- `bot/log.py`'s `setup_logging()` attaches a `_QuietLibraryFilter` to every
+  log handler, dropping any sub-`WARNING` record whose logger name starts
+  with `httpx`, `httpcore`, or `openai` - this is what actually silences
+  the `openai` sdk's http transport's own verbose per-request line
+  (`HTTP Request: POST .../chat/completions "HTTP/1.1 200 OK"`), which it
+  logs at `INFO` for every single call. a plain
+  `logging.getLogger("httpx").setLevel(WARNING)` is kept too (belt and
+  suspenders) but isn't actually sufficient by itself: in production this
+  line showed up under a differently-named logger (`httpx2`, likely a
+  proxy/wrapper registering its own named instance), and `setLevel()` only
+  configures the exact logger object named `"httpx"` - a different name is
+  a different logger entirely and keeps logging at its own default level.
+  a filter on the handler catches every record that reaches it by prefix,
+  regardless of which exact name it was logged under.
 - `bot/netlog.py` gives two small helpers for the `noodle` logger instead:
-  - `log_hcai(endpoint, result)` -> one line per outbound call to a hack
-    club ai proxy endpoint, e.g. `called hcai chat: 200`,
-    `called hcai jev: 200`, `called hcai embeddings: error`. used by
+  - `log_hcai(endpoint, result, detail="")` -> one line per outbound call to
+    a hack club ai proxy endpoint, e.g. `called hcai chat: who is that: 200`,
+    `called hcai jev: lol true: 200`, `called hcai embeddings: error`.
+    `detail` is the first 4 words of whatever prompt/query triggered the
+    call, so the log line says what the call was actually for. used by
     `bot/llm.py` (chat completions, via a `_call_chat()` helper built on
     `.with_raw_response.create()` so the real http status code is
     available), `bot/gate.py` (jev), `bot/embeddings.py`, and `bot/exa.py`.

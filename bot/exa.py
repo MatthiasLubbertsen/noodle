@@ -19,6 +19,7 @@ def web_answer(query: str) -> str | None:
     query = (query or "").strip()
     if not query:
         return None
+    detail = " ".join(query.split()[:4])
     url = config.AI_ENDPOINT.rstrip("/") + ANSWER_URL_SUFFIX
     payload = json.dumps({"query": query}).encode("utf-8")
     req = urllib.request.Request(
@@ -32,14 +33,14 @@ def web_answer(query: str) -> str | None:
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
-            log_hcai("exa", str(resp.status))
+            log_hcai("exa", str(resp.status), detail=detail)
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        log_hcai("exa", str(exc.code))
+        log_hcai("exa", str(exc.code), detail=detail)
         logger.exception("exa web search failed")
         return None
     except Exception:  # noqa: BLE001
-        log_hcai("exa", "error")
+        log_hcai("exa", "error", detail=detail)
         logger.exception("exa web search failed")
         return None
 
