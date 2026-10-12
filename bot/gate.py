@@ -75,7 +75,14 @@ def should_reply_unprompted(user_text: str, conv_key: str) -> bool:
             log_hcai("jev", str(resp.status), detail=detail)
             data = json.loads(resp.read().decode("utf-8"))
         probability = data["answers"]["should_reply"]["noul"]
-        return probability > REPLY_THRESHOLD
+        decision = probability > REPLY_THRESHOLD
+        logger.info(
+            "jev gate decision: %s (p=%.2f): %s",
+            "yes" if decision else "no",
+            probability,
+            detail,
+        )
+        return decision
     except urllib.error.HTTPError as exc:
         log_hcai("jev", str(exc.code), detail=detail)
         logger.exception("jev gate check failed; defaulting to no")

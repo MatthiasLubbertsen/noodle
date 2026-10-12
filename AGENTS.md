@@ -218,6 +218,12 @@ no nested `noodle/noodle` folder.
   conservative (matches the "default to no" rule above). any request
   failure (timeout, bad response shape, rate limit, etc) is logged and
   treated as "no".
+- every successful gate check logs its actual outcome, not just that the
+  call happened: `jev gate decision: yes (p=0.82): <first 4 words>` /
+  `jev gate decision: no (p=0.20): <first 4 words>`, right after the
+  `called hcai jev: ...: 200` transport log from `bot/netlog.py`. this is
+  what makes it possible to tell from the logs alone whether noodle stayed
+  quiet because the gate said no, vs. some other reason entirely.
 
 ### 4c. never send reasoning to slack
 - noodle only ever forwards the model's final `content` to slack. any
