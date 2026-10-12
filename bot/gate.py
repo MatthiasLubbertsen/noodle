@@ -72,15 +72,14 @@ def should_reply_unprompted(user_text: str, conv_key: str) -> bool:
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            log_hcai("jev", str(resp.status), detail=detail)
+            status = resp.status
             data = json.loads(resp.read().decode("utf-8"))
         probability = data["answers"]["should_reply"]["noul"]
         decision = probability > REPLY_THRESHOLD
-        logger.info(
-            "jev gate decision: %s (p=%.2f): %s",
-            "yes" if decision else "no",
-            probability,
-            detail,
+        log_hcai(
+            "jev",
+            f"{status} ({'yes' if decision else 'no'}, p={probability:.2f})",
+            detail=detail,
         )
         return decision
     except urllib.error.HTTPError as exc:
