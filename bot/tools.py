@@ -4,6 +4,7 @@ import re
 from bot import state
 from bot.directory import flaron_query
 from bot.embeddings import embed_text
+from bot.exa import web_answer
 from bot.history_store import search_similar
 from bot.slack_text import _channel_link, _parse_slack_ref
 
@@ -79,9 +80,13 @@ TOOLS = [
             "name": "flaron",
             "description": (
                 "look up anything in the public flaron slack directory (no auth "
-                "needed). use it to turn a name into the right <@USERID> or "
-                "<#CHANNELID>, or to read full info about users, channels, apps, "
-                "emoji and commands. " + FLARON_DOCS
+                "needed). use it ONLY when a human clearly wants a specific real "
+                "person or channel referenced/tagged and you need their correct "
+                "<@USERID> or <#CHANNELID>, or when asked to read info about "
+                "users, channels, apps, emoji and commands. never call this just "
+                "to check whether an ordinary word (a technical term, a feature "
+                "name, something you're explaining) might coincidentally match a "
+                "real user or channel name. " + FLARON_DOCS
             ),
             "parameters": {
                 "type": "object",
@@ -133,6 +138,30 @@ TOOLS = [
                     "query": {
                         "type": "string",
                         "description": "what to search for, in natural language",
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": (
+                "search the live web and get a short, cited answer to a "
+                "question (exa, via hack club ai). use this ONLY when you need "
+                "current or external information you don't already know and "
+                "that isn't in slack (recent events, docs, prices, facts about "
+                "the outside world) - never for casual chit-chat or anything "
+                "you can just answer yourself."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "the question to answer, in natural language",
                     }
                 },
                 "required": ["query"],
@@ -266,6 +295,16 @@ def _search_memory(query: str) -> str:
     return "\n".join(lines)
 
 
+def _web_search(query: str) -> str:
+    query = (query or "").strip()
+    if not query:
+        return "no search query given"
+    answer = web_answer(query)
+    if answer is None:
+        return "web search failed, check logs"
+    return answer
+
+
 def run_tool(name: str, args: dict, user_prompt: str = "") -> str:
     if name == "search_slack_messages":
         return _search_slack_messages(args.get("query", ""), user_prompt=user_prompt)
@@ -280,4 +319,6 @@ def run_tool(name: str, args: dict, user_prompt: str = "") -> str:
         )
     if name == "search_memory":
         return _search_memory(args.get("query", ""))
+    if name == "web_search":
+        return _web_search(args.get("query", ""))
     return f"unknown tool: {name}"

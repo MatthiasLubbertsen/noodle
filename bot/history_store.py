@@ -2,6 +2,7 @@ import datetime
 import json
 import logging
 import sqlite3
+import threading
 
 import config
 from bot.embeddings import embed_text
@@ -72,6 +73,23 @@ def append_message(
             conn.close()
     except Exception:  # noqa: BLE001
         logger.exception("failed to persist message (conv_key=%s role=%s)", conv_key, role)
+
+
+def append_message_async(
+    conv_key: str, kind: str, role: str, content: str, user_id: str | None = None
+) -> None:
+    """fire-and-forget append_message() in the background.
+
+    append_message() embeds the content, which is a network call - doing it
+    inline would add that round trip to every single reply's latency. this
+    runs it off the critical path instead; nothing waits on it.
+    """
+    threading.Thread(
+        target=append_message,
+        args=(conv_key, kind, role, content),
+        kwargs={"user_id": user_id},
+        daemon=True,
+    ).start()
 
 
 def load_history(conv_key: str, limit: int = 48) -> list[dict]:

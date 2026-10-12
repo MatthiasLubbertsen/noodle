@@ -28,6 +28,7 @@ noodle/
     memory.py             # per-conversation memory helpers (+ the stable dm key)
     history_store.py      # persistent + embedded memory (sqlite), semantic search
     embeddings.py         # calls the ai endpoint's /embeddings route
+    exa.py                # calls the ai endpoint's /exa/answer route (web_search)
     chunk.py              # splits replies into small slack messages
     stats.py              # "messages sent today" recap (via slack search)
     almanac.py            # silly/named days today (wikipedia)
@@ -108,6 +109,12 @@ no nested `noodle/noodle` folder.
   splitting every thought onto its own line. a hard cap (`[:8]` fragments)
   still prevents the bot from spamming a channel if it ever writes an
   unusually long, multi-paragraph reply.
+- the "using tools" section opens with a blanket rule: only call a tool when
+  it's actually needed for that specific reply, never speculatively or out
+  of habit. every tool call (`tool_choice="auto"` in `bot/llm.py`, so calling
+  is always the model's choice, never forced) costs real money and real
+  latency, and over-eager tool use is what caused the flaron mis-ping bug
+  described in 4b-ii.
 
 ### 4b-ii. flaron directory lookups
 - a single `flaron` tool lets noodle query the public flaron slack directory
@@ -122,6 +129,18 @@ no nested `noodle/noodle` folder.
   (as slack sends them, e.g. `<#C0C78SG9L|hq>` / `<@U09UE480JHH|bob>`). the model
   is told to copy the id into `<#CHANNELID>` / `<@USERID>` when it replies, since
   slack only renders a real mention with the full `<...>` form.
+- **both the tool's own `description` field and `prompts/system_prompt.md`
+  explicitly say not to use flaron speculatively** - only when a human
+  clearly wants a specific real person/channel referenced or tagged, never
+  to check whether some ordinary word (a technical term, a feature/model
+  name) might coincidentally match a real user. this exists because the
+  model once did exactly that: it explained "jev" (the classifier model
+  used in 4b-iv) by looking the word up via flaron, found an unrelated real
+  slack bot that happened to be named something like
+  `JevClaudeCodexT3codeAgentProMax`, and pinged it in its reply. the fix is
+  prompt-level (there's no code-level way to block a specific tool call
+  pattern without breaking legitimate lookups), so it reduces but doesn't
+  100% guarantee this can't recur.
 
 ### 4b. tools (slack search)
 - noodle can search slack using its own user token via the `search_messages`
@@ -155,6 +174,16 @@ no nested `noodle/noodle` folder.
   over every embedded row and returns the top 5, formatted as
   `[kind @ timestamp] <@USERID>: content` (or `noodle: content` for its own
   replies) - never posted raw, same as every other tool result.
+
+### 4b-iv-a. web_search tool (exa)
+- a `web_search` tool (`bot/exa.py`, `run_tool()` in `bot/tools.py`) calls
+  hack club ai's exa proxy (`docs.ai.hackclub.com/api/exa.html`,
+  `POST AI_ENDPOINT + "/exa/answer"`) with a natural-language question and
+  gets back a short answer grounded in live web results, plus up to 3 source
+  urls appended as `sources: ...`. same auth/base-url pattern as
+  embeddings/jev. its description and the system prompt both say to use it
+  ONLY for current/external info noodle doesn't already know - never for
+  casual chat or things answerable from the conversation itself.
 
 ### 4b-iv. the unprompted-reply gate runs on jev, not chat completions
 - `bot/gate.py`'s `should_reply_unprompted()` calls hack club ai's jev /
@@ -192,9 +221,18 @@ no nested `noodle/noodle` folder.
   ping/mention (`chan:<id>`, but only when noodle was actually addressed -
   see below) turn is written to `data/noodle_memory.db` (sqlite, stdlib
   `sqlite3`, no new dependency) via `bot/history_store.py`
-  (`init_db()` / `append_message()` / `load_history()` / `search_similar()`).
-  ambient allowed-channel chatter the unprompted-reply gate chimed into
-  (noodle wasn't addressed) is explicitly NOT persisted yet.
+  (`init_db()` / `append_message()` / `append_message_async()` /
+  `load_history()` / `search_similar()`). ambient allowed-channel chatter the
+  unprompted-reply gate chimed into (noodle wasn't addressed) is explicitly
+  NOT persisted yet.
+- **persisting is asynchronous.** `append_message()` embeds the content
+  before writing it (a network call to `bot/embeddings.py`), so calling it
+  inline would add that round trip to every single reply's latency -
+  `llm._remember()` and `scheduler._post_dm()` both call
+  `append_message_async()` instead, which fires `append_message()` off in a
+  daemon thread and returns immediately. nothing in the reply path waits on
+  the write or the embedding call. this was a real bug: early on,
+  persistence ran inline and visibly slowed down every reply.
 - each row also carries `user_id`: the slack id of whoever actually sent a
   "user"-role message (matthias in a dm, or anyone else in a thread) -
   nothing else about them (no name, no profile data). `handlers.handle_message()`
@@ -243,6 +281,24 @@ no nested `noodle/noodle` folder.
   a plain restart of the same container would have been fine. see "running
   it with docker" in the README for the one-time `chmod 777 data logs` the
   non-root `appuser` needs the first time those host directories get created.
+
+### 4e. messages to the same conversation are serialized
+- `handlers.handle_message()` spawns a new thread per incoming slack event
+  (so the socket connection is never blocked), but several messages arriving
+  close together for the SAME conv_key used to race each other: each thread
+  read/appended `state.MEMORY[key]` independently, so one reply's chat
+  completion could run against a stale snapshot of history, assistant/user
+  turns could land out of order, and replies came back jumbled and delayed -
+  it visibly looked like noodle was "talking to itself" when really it was
+  several independent replies to different messages all finishing around the
+  same time, in the wrong order.
+- fixed with one `threading.Lock` per conv_key (`state.CONV_LOCKS`, created
+  on demand behind `state.CONV_LOCKS_GUARD` by `handlers._get_conv_lock()`).
+  `handlers._process()` acquires that lock before doing any work
+  (`_process_locked()` is the actual body) - so messages to the same
+  dm/thread/channel are handled one at a time, in the order their threads
+  happen to acquire the lock, each seeing the previous one's finished
+  history. different conv_keys still run fully in parallel.
 
 ### 5. message chunking
 - after the ai replies, `chunk_response()` splits it into one slack message

@@ -3,7 +3,7 @@ import logging
 
 import config
 from bot import state
-from bot.history_store import append_message
+from bot.history_store import append_message_async
 from bot.memory import trim_memory
 from bot.slack_text import _clean_reply
 from bot.tools import TOOLS, run_tool
@@ -23,9 +23,11 @@ def _remember(
     conv_key: str, role: str, content: str, persist: bool, user_id: str | None = None
 ) -> None:
     # persist dms, threads, and direct pings - not ambient allowed-channel
-    # chatter the unprompted-reply gate chimed into (persist=False for that)
+    # chatter the unprompted-reply gate chimed into (persist=False for that).
+    # async: embedding is a network call, and nothing here should block the
+    # actual reply on it.
     if persist:
-        append_message(conv_key, _kind_for(conv_key), role, content, user_id=user_id)
+        append_message_async(conv_key, _kind_for(conv_key), role, content, user_id=user_id)
 
 
 def ask_noodle(

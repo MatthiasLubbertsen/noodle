@@ -54,6 +54,12 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
   turns too. a `search_memory` tool lets noodle semantically search weeks of
   its own history when asked to recall something older than the live
   context window.
+- search the live web for a short, cited answer with a `web_search` tool
+  (exa, via hack club ai) - only called when it genuinely needs current or
+  external info, never for casual chat.
+- messages to the same dm/thread/channel are handled one at a time, in
+  order, so several messages arriving close together don't race each other
+  and come out jumbled or delayed.
 
 ## how mentioning works
 
@@ -86,6 +92,7 @@ noodle/
     memory.py          # per-conversation memory helpers (+ the stable dm key)
     history_store.py   # persistent + embedded memory (sqlite), semantic search
     embeddings.py      # calls the ai endpoint's /embeddings route
+    exa.py             # calls the ai endpoint's /exa/answer route (web_search)
     chunk.py           # splits a reply into one slack message per paragraph
     stats.py           # "messages sent today" recap (via slack search)
     almanac.py         # silly/named days today (wikipedia)
@@ -188,6 +195,12 @@ hardcoded (not an env var).
   it's both faster and cheaper (billing is input-tokens-only there; output
   is free) than the old approach of asking a full chat model to answer
   "yes"/"no" in text.
+- `web_search` is built against hack club ai's exa proxy
+  (`docs.ai.hackclub.com/api/exa.html`), hit at `AI_ENDPOINT +
+  "/exa/answer"` using `OPENAI_API_KEY` - same pattern as embeddings/jev.
+- persisting a memory turn embeds it first (a network call), which runs in
+  a background thread (`history_store.append_message_async()`) so it never
+  adds latency to noodle's actual reply.
 
 ## license
 

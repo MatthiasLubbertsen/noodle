@@ -1,4 +1,5 @@
 import logging
+import threading
 
 import config
 
@@ -20,3 +21,10 @@ PARTICIPATING_THREADS: set = set()
 # last time (unix seconds) noodle sent an unprompted (no-mention) reply, per
 # channel id, so it doesn't chime in over and over back to back
 LAST_UNPROMPTED_REPLY: dict = {}
+# one lock per conv_key, so messages to the same dm/thread/channel are
+# handled one at a time, in order - without this, several messages arriving
+# close together each spawn their own thread and race on the same
+# state.MEMORY[conv_key] list, corrupting ordering and making replies come
+# out jumbled/delayed. see handlers._get_conv_lock().
+CONV_LOCKS: dict = {}
+CONV_LOCKS_GUARD = threading.Lock()
