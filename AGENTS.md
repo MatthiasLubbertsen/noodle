@@ -282,7 +282,16 @@ no nested `noodle/noodle` folder.
   every embedded row (plenty fast for a personal bot's history - no vector
   index needed at this scale). embedding failures never break chat:
   `append_message()` just stores a `NULL` embedding and the row is skipped
-  by search but still counts for live-context hydration.
+  by search but still counts for live-context hydration. `bot/embeddings.py`
+  retries once after a transient failure (timeout/connection reset) before
+  giving up, with a 30s timeout (up from 15s - a full day's recap is a lot
+  more text than a typical chat message). a caller can instead pass
+  `append_message(..., require_embedding=True)` to skip the insert entirely
+  on failure rather than storing a dead, never-searchable row - used by
+  `bot/matthias_day.py`'s `persist_ping()`, since those rows only exist to
+  be searched (never hydrated into live context) and, combined with the
+  permalink dedup, this means a failed day just gets retried cleanly on the
+  next backfill run instead of silently and permanently lost.
 - **dm continuity across restarts.** dms get one stable key regardless of
   slack's (occasionally recycled) dm channel id -
   `bot.memory.dm_conv_key()` → `f"dm:{USER_ID}"` - since there's only ever

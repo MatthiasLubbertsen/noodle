@@ -67,4 +67,11 @@ def persist_ping(client, channel: str, ts: str, raw_text: str) -> None:
         user_id=config.USER_ID,
         created_at=created_at,
         permalink=permalink,
+        # these entries exist ONLY to be semantically searched later (never
+        # hydrated into live context) - a row with a failed embedding would
+        # be permanently invisible to search_memory, so skip persisting
+        # entirely on failure rather than storing a dead row. combined with
+        # the permalink dedup, this means a failed day just gets retried
+        # cleanly on the next backfill run instead of being silently lost.
+        require_embedding=True,
     )

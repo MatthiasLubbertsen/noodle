@@ -51,6 +51,7 @@ def append_message(
     user_id: str | None = None,
     created_at: str | None = None,
     permalink: str | None = None,
+    require_embedding: bool = False,
 ) -> None:
     """persist one turn (and its embedding, if that succeeds).
 
@@ -61,8 +62,16 @@ def append_message(
     happened instead of now(). permalink is an optional link back to the
     original slack message (e.g. for @matthias-day ping entries, see
     bot/matthias_day.py); if given and already stored, this is a no-op, so
-    a backfill script can be re-run safely without duplicating rows. never
-    raises - a storage or embedding hiccup shouldn't break chat.
+    a backfill script can be re-run safely without duplicating rows.
+    require_embedding skips the insert entirely if embedding fails, instead
+    of storing a row with a NULL embedding - for rows that exist ONLY to be
+    semantically searched (e.g. @matthias-day entries, never hydrated into
+    live context), a dead, never-searchable row is worse than no row: with
+    require_embedding + a permalink, a failed attempt leaves no trace, so
+    re-running the backfill actually retries it instead of silently
+    skipping it forever (a stored permalink is what the dedup check above
+    keys on). never raises - a storage or embedding hiccup shouldn't break
+    chat.
     """
     if not content:
         return
@@ -79,6 +88,12 @@ def append_message(
         logger.exception("failed to check for a duplicate permalink")
 
     embedding = embed_text(content)
+    if embedding is None and require_embedding:
+        logger.warning(
+            "skipping persist (embedding failed) for conv_key=%s - safe to retry later",
+            conv_key,
+        )
+        return
     embedding_json = json.dumps(embedding) if embedding is not None else None
     timestamp = created_at or datetime.datetime.now(AMSTERDAM_TZ).isoformat()
     try:
