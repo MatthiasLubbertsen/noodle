@@ -9,13 +9,21 @@ from bot.tz import AMSTERDAM_TZ
 logger = logging.getLogger("noodle")
 
 # the leading @matthias-day ping: a real <!subteam^ID> mention (how it
-# normally renders), or an unexpanded literal "@matthias-day"/"matthias-day"
-# typed as plain text (slack occasionally doesn't expand it - see
+# normally renders), an unexpanded literal "@matthias-day"/"matthias-day"
+# typed as plain text, or the rare "@…" glitched-mention slack sometimes
+# renders instead (slack occasionally doesn't expand it right - see
 # slack_text._matthias_day_pinged, which this mirrors).
 _PING_PREFIX_RE = re.compile(
-    r"^\s*(?:<!subteam\^[A-Z0-9]+(?:\|[^>]*)?>|@?matthias-day)\s*",
+    r"^\s*(?:<!subteam\^[A-Z0-9]+(?:\|[^>]*)?>|@?matthias-day|@…)\s*",
     re.IGNORECASE,
 )
+# a real daily recap is always a bullet list - a short follow-up re-ping
+# ("<!subteam^ID> ^^", "@matthias-day see above :)", "... yeah this one
+# Slack") also opens with the ping but has no actual content of its own
+# (the real day got captured separately, in a message that pinged
+# correctly the first time), so requiring at least one bullet line is what
+# tells a real entry apart from one of these.
+_HAS_BULLET_RE = re.compile(r"^\s*• ", re.MULTILINE)
 # the "today:" / "today" / "Today i did:" lead-in right after the ping
 _TODAY_RE = re.compile(r"^\s*today\s*(?:i\s+did)?\s*:?\s*\n?", re.IGNORECASE)
 # the "please talk in the thread below! ..." signature newer pings end with
@@ -33,7 +41,27 @@ def clean_ping_text(raw: str) -> str:
     text = _PING_PREFIX_RE.sub("", text, count=1)
     text = _TODAY_RE.sub("", text, count=1)
     text = _TRAILING_RE.sub("", text)
-    return text.strip()
+    text = _normalize_bullets(text.strip())
+    return text
+
+
+def _normalize_bullets(text: str) -> str:
+    """some days got typed via slack's own mobile bullet list (which uses
+    "-" or "*") instead of matthias's own posting ui (which uses the real
+    "•" character) - normalize every top-level list line to "•" so the
+    journal reads consistently. only touches a line that's ACTUALLY a
+    bullet (starts with "- "/"* " at the start of a line, after optional
+    leading whitespace for nested "◦" sub-bullets, which are left alone).
+    """
+    lines = text.split("\n")
+    fixed = []
+    for line in lines:
+        m = re.match(r"^(\s*)[-*] (.*)$", line)
+        if m and not line.lstrip().startswith("◦"):
+            fixed.append(f"{m.group(1)}• {m.group(2)}")
+        else:
+            fixed.append(line)
+    return "\n".join(fixed)
 
 
 def conv_key(channel: str) -> str:
@@ -50,6 +78,16 @@ def persist_ping(client, channel: str, ts: str, raw_text: str) -> None:
     """
     content = clean_ping_text(raw_text)
     if not content:
+        return
+    if not _HAS_BULLET_RE.search(content):
+        # not a real daily recap - a short re-ping ("^^", "see above :)",
+        # a complaint that the ping didn't notify) with no content of its
+        # own. the actual day, if there was one, already got captured by
+        # whichever message pinged correctly the first time around.
+        logger.info(
+            "skipping non-bullet @matthias-day match (not a real recap): %r",
+            content[:60],
+        )
         return
     permalink = None
     try:

@@ -32,7 +32,13 @@ def _matthias_day_pinged(text: str) -> bool:
         return True
     # also catches a plain typed "@matthias-day"/"matthias-day" that slack
     # didn't expand into a real mention - still only at the start.
-    return bool(re.match(r"@?matthias-day\b", stripped, re.IGNORECASE))
+    if re.match(r"@?matthias-day\b", stripped, re.IGNORECASE):
+        return True
+    # rare slack glitch: the mention sometimes renders as a literal "@…"
+    # (a collapsed/broken autocomplete) instead of expanding at all - only
+    # counted as a ping when immediately followed by "today", to avoid
+    # matching an unrelated message that happens to start with "@someone".
+    return bool(re.match(r"@…\s*today\b", stripped, re.IGNORECASE))
 
 
 def _clean_text(text: str) -> str:
