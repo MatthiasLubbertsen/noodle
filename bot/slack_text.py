@@ -16,15 +16,23 @@ def _mention_in_text(text: str) -> bool:
 
 
 def _matthias_day_pinged(text: str) -> bool:
-    """did this message ping the '@matthias-day' usergroup?"""
+    """did this message OPEN with an @matthias-day ping - the real daily
+    recap, not just someone mentioning the group/ping in casual
+    conversation? (e.g. "can i copy ur matthias-day idea for my channel" is
+    NOT a ping, even though the text "matthias-day" appears in it - a real
+    ping always starts with the mention, so anchoring the match to the
+    start of the message is what tells the two apart.)
+    """
     if not text:
         return False
-    if config.MATTHIAS_DAY_GROUP_ID and f"<!subteam^{config.MATTHIAS_DAY_GROUP_ID}" in text:
+    stripped = text.lstrip()
+    if config.MATTHIAS_DAY_GROUP_ID and stripped.startswith(
+        f"<!subteam^{config.MATTHIAS_DAY_GROUP_ID}"
+    ):
         return True
-    # slack includes the readable handle in the mention markup
-    # (<!subteam^ID|@matthias-day>), and this also catches a plain typed
-    # "@matthias-day" that slack didn't expand into a real mention.
-    return "matthias-day" in text.lower()
+    # also catches a plain typed "@matthias-day"/"matthias-day" that slack
+    # didn't expand into a real mention - still only at the start.
+    return bool(re.match(r"@?matthias-day\b", stripped, re.IGNORECASE))
 
 
 def _clean_text(text: str) -> str:

@@ -196,13 +196,15 @@ def handle_message(event: dict) -> None:
     # confirmed cause: matthias posts it from a website that calls
     # chat.postMessage with his user token but without as_user=true, which
     # makes slack tag it bot-style even though it's genuinely him. gated on
-    # EITHER event["user"] matching USER_ID (the normal case) OR the
-    # message landing in MATTHIAS_DAY_CHANNEL_ID (in case that posting
-    # method also drops the real user field, leaving only bot_id/username) -
-    # so this can't be triggered by some other app/bot posting elsewhere.
+    # EITHER event["user"] matching USER_ID (the normal case) OR the "user"
+    # field being entirely missing while it lands in MATTHIAS_DAY_CHANNEL_ID
+    # (in case that posting method also drops the real user field, leaving
+    # only bot_id/username) - deliberately NOT "any message in that channel",
+    # so someone else's message (even one that starts with a real ping-style
+    # mention, however unlikely) never gets misattributed as matthias's own.
     is_matthias_day_ping = _matthias_day_pinged(text) and (
         event.get("user") == config.USER_ID
-        or event.get("channel") == config.MATTHIAS_DAY_CHANNEL_ID
+        or (event.get("user") is None and event.get("channel") == config.MATTHIAS_DAY_CHANNEL_ID)
     )
     if _is_noise(event):
         if not is_matthias_day_ping:
