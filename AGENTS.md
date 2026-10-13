@@ -397,21 +397,22 @@ no nested `noodle/noodle` folder.
 - **the real bug: `handlers._is_noise()` was silently dropping the ping
   before its text was ever even checked.** `_is_noise()` treats any event
   with `bot_id` or `subtype` set as noise (to avoid reply loops / reacting
-  to other bots). comparing a `slack_read_channel` read of a recent
-  @matthias-day ping against the same message through slack's search api
-  showed the search api flagging it `[BOT]` while the raw channel history
-  didn't - inconclusive on its own, but consistent with some of matthias's
-  daily pings arriving with `bot_id`/`subtype` set despite genuinely being
-  his own message (`event["user"] == USER_ID`), which `_is_noise()` doesn't
-  check at all. `handle_message()` now computes
-  `is_matthias_day_ping = event.get("user") == config.USER_ID and
-  _matthias_day_pinged(text)` **before** the noise check, and if `_is_noise()`
-  would have dropped it, responds anyway (logging the actual `bot_id`/
-  `subtype` values first) rather than silently eating it - gated on the
-  real `USER_ID` match so this can't be triggered by some other app/bot
-  pinging the group. this also logs hard evidence the next time a real
-  ping comes in, in case the root cause turns out to be something else
-  entirely.
+  to other bots) - confirmed cause: matthias posts the daily ping from a
+  website that calls `chat.postMessage` with his own user token, but
+  without `as_user=true`, which makes slack tag the message bot-style
+  (`bot_id`/`subtype: "bot_message"`) even though it's genuinely him, not
+  some other app. `_is_noise()` doesn't check who the message is actually
+  from, so it ate every one of these. `handle_message()` now computes
+  `is_matthias_day_ping` **before** the noise check - true when the text
+  matches a ping AND either `event["user"] == USER_ID` (the normal case) or
+  the message landed in `MATTHIAS_DAY_CHANNEL_ID` (in case that posting
+  method also drops the real `user` field, leaving only `bot_id`) - and if
+  `_is_noise()` would have dropped it, responds anyway, logging the actual
+  `bot_id`/`subtype` values first rather than silently eating it. the
+  channel check is intentionally the looser of the two conditions (matches
+  on channel alone, no user check), since this channel is matthias's own
+  personal daily-update channel - an acceptable tradeoff for a personal
+  single-user bot.
 - `bot/scheduler.py` runs a background thread (started from `build_app()`)
   that DMs `USER_ID` a plain reminder to go send that ping, every day at
   `DAILY_PING_REMINDER` (default 19:00 Europe/Amsterdam) — this reminder DM
