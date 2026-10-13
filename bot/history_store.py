@@ -26,10 +26,15 @@ def init_db() -> None:
                 content TEXT NOT NULL,
                 user_id TEXT,
                 embedding TEXT,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                permalink TEXT
             )
             """
         )
+        # lightweight migration for dbs created before "permalink" existed
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+        if "permalink" not in existing_cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN permalink TEXT")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_conv_key ON messages (conv_key, id)"
         )
@@ -39,34 +44,50 @@ def init_db() -> None:
 
 
 def append_message(
-    conv_key: str, kind: str, role: str, content: str, user_id: str | None = None
+    conv_key: str,
+    kind: str,
+    role: str,
+    content: str,
+    user_id: str | None = None,
+    created_at: str | None = None,
+    permalink: str | None = None,
 ) -> None:
     """persist one turn (and its embedding, if that succeeds).
 
     user_id is the slack id of whoever actually said this - only meaningful
     for "user" turns (noodle's own "assistant" turns pass None, since role
-    already disambiguates those). never raises - a storage or embedding
-    hiccup shouldn't break chat.
+    already disambiguates those). created_at overrides the recorded
+    timestamp - used for backfilling a message to the day it actually
+    happened instead of now(). permalink is an optional link back to the
+    original slack message (e.g. for @matthias-day ping entries, see
+    bot/matthias_day.py); if given and already stored, this is a no-op, so
+    a backfill script can be re-run safely without duplicating rows. never
+    raises - a storage or embedding hiccup shouldn't break chat.
     """
     if not content:
         return
+    try:
+        conn = sqlite3.connect(config.MEMORY_DB_PATH)
+        try:
+            if permalink and conn.execute(
+                "SELECT 1 FROM messages WHERE permalink = ? LIMIT 1", (permalink,)
+            ).fetchone():
+                return
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to check for a duplicate permalink")
+
     embedding = embed_text(content)
     embedding_json = json.dumps(embedding) if embedding is not None else None
+    timestamp = created_at or datetime.datetime.now(AMSTERDAM_TZ).isoformat()
     try:
         conn = sqlite3.connect(config.MEMORY_DB_PATH)
         try:
             conn.execute(
-                "INSERT INTO messages (conv_key, kind, role, content, user_id, embedding, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    conv_key,
-                    kind,
-                    role,
-                    content,
-                    user_id,
-                    embedding_json,
-                    datetime.datetime.now(AMSTERDAM_TZ).isoformat(),
-                ),
+                "INSERT INTO messages (conv_key, kind, role, content, user_id, embedding, created_at, permalink) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (conv_key, kind, role, content, user_id, embedding_json, timestamp, permalink),
             )
             conn.commit()
         finally:
@@ -132,7 +153,7 @@ def search_similar(query_embedding: list[float], limit: int = 5) -> list[dict]:
         conn = sqlite3.connect(config.MEMORY_DB_PATH)
         try:
             rows = conn.execute(
-                "SELECT kind, role, content, user_id, embedding, created_at FROM messages "
+                "SELECT kind, role, content, user_id, embedding, created_at, permalink FROM messages "
                 "WHERE embedding IS NOT NULL"
             ).fetchall()
         finally:
@@ -142,13 +163,13 @@ def search_similar(query_embedding: list[float], limit: int = 5) -> list[dict]:
         return []
 
     scored = []
-    for kind, role, content, user_id, embedding_json, created_at in rows:
+    for kind, role, content, user_id, embedding_json, created_at, permalink in rows:
         try:
             vector = json.loads(embedding_json)
         except (TypeError, ValueError):
             continue
         score = _cosine(query_embedding, vector)
-        scored.append((score, kind, role, content, user_id, created_at))
+        scored.append((score, kind, role, content, user_id, created_at, permalink))
     scored.sort(key=lambda t: t[0], reverse=True)
     return [
         {
@@ -158,6 +179,7 @@ def search_similar(query_embedding: list[float], limit: int = 5) -> list[dict]:
             "content": content,
             "user_id": user_id,
             "created_at": created_at,
+            "permalink": permalink,
         }
-        for score, kind, role, content, user_id, created_at in scored[:limit]
+        for score, kind, role, content, user_id, created_at, permalink in scored[:limit]
     ]

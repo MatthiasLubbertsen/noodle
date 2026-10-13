@@ -38,7 +38,11 @@ noodle/
     tz.py                 # shared Europe/Amsterdam timezone constant
     usergroups.py         # add/remove a user from a slack usergroup
     watch.py              # channel join/leave analytics + automations
+    matthias_day.py       # clean + persist @matthias-day recap pings into memory
     log.py                # logging setup
+    netlog.py             # concise "called hcai .../called tool ..." log lines
+  scripts/
+    backfill_matthias_day.py  # one-time: backfill historical pings into memory
   requirements.txt        # python dependencies
   Dockerfile              # non-root `appuser`, see the data/logs volume note below
   docker-compose.yml      # bind-mounts ./data and ./logs - see "running it with docker"
@@ -372,18 +376,80 @@ no nested `noodle/noodle` folder.
   `messages.total` field from the slack search response; "today" is always
   Europe/Amsterdam, `bot/tz.py`).
 - whenever a message pings the `@matthias-day` usergroup (matched by
-  `MATTHIAS_DAY_GROUP_ID` if set, and always by the literal text
-  "matthias-day" as a fallback), `handlers.handle_message()` replies with
-  that recap **as a new top-level channel message, never a thread reply**
+  `MATTHIAS_DAY_GROUP_ID`, and always by the literal text "matthias-day" as
+  a fallback), `handlers.handle_message()` replies with that recap **as a
+  new top-level channel message, never a thread reply**
   (`_send_daily_stats_reply()`). this check runs before the normal
   mention/gate logic, is not subject to `ALLOWED_CHANNELS` or the
   unprompted-reply cooldown, and is skipped by the `# `-prefix ignore rule
   like everything else.
+- **this detection only works when `MATTHIAS_DAY_GROUP_ID` is actually set
+  to the real usergroup id.** a real subteam ping renders as a bare
+  `<!subteam^ID>` with no readable label - unlike a user mention, slack does
+  NOT store the group's name inline - so the literal-text fallback
+  ("matthias-day" appearing somewhere in the message) essentially never
+  matches a real ping; it only catches the rare case where matthias types
+  `@matthias-day` as plain text and slack doesn't expand it into a real
+  mention. this was a real bug: `MATTHIAS_DAY_GROUP_ID` had no non-empty
+  default, so unless it happened to be set correctly in `.env`, the ping
+  went undetected and the stats recap silently never fired. `config.py` now
+  defaults it to the actual usergroup id (`S0AK8LYJ8FR`), confirmed against
+  real pings in `#matthias` - still overridable via `.env` if the usergroup
+  is ever recreated.
 - `bot/scheduler.py` runs a background thread (started from `build_app()`)
   that DMs `USER_ID` a plain reminder to go send that ping, every day at
   `DAILY_PING_REMINDER` (default 19:00 Europe/Amsterdam) — this reminder DM
   itself does NOT contain the stats recap, it just nudges matthias to do the
   ping himself.
+
+### 6b. @matthias-day pings are also persisted as a searchable daily journal
+- every ping also gets cleaned and persisted into memory
+  (`bot/matthias_day.py`'s `persist_ping()`, called from
+  `handlers.handle_message()` in its own background thread, right alongside
+  the stats-reply thread) - this makes matthias's own daily recaps
+  semantically searchable via `search_memory` (4b-iii) months later, not
+  just visible in the slack channel itself.
+- `clean_ping_text()` strips three things off the raw message before it's
+  stored: the ping itself (a real `<!subteam^ID>` mention, or an unexpanded
+  literal `@matthias-day`/`matthias-day`), the `today:` / `today` / `Today i
+  did:` lead-in right after it, and - for newer pings that have it - the
+  trailing `please talk in the thread below! • join this usergroup with
+  ...` signature. what's left is just the day's actual bullet-point
+  content. these patterns were derived from reading real pings spanning the
+  entire history (first ones in march, a batch from june, the most recent
+  ones in october), not guessed - the format drifted slightly over time
+  (capitalization, the colon, and the trailing signature only exists on
+  pings sent after thread-replies got enabled), hence matching all of them
+  with tolerant regexes rather than one exact string.
+- each row is stored with `kind="matthias_day"`, `role="user"`,
+  `user_id=USER_ID`, under its own `conv_key` (`matthias_day:<channel>` -
+  separate from the dm/thread/mention conv_keys, since these aren't live
+  back-and-forth conversation turns). critically, `created_at` is set to
+  the **message's own original timestamp** (converted to Europe/Amsterdam),
+  not "now" - so a backfilled entry from march shows up dated march, not
+  dated whenever the backfill script happened to run.
+- a `permalink` column (added via a small `ALTER TABLE` migration in
+  `history_store.init_db()`, so it's safe on a db created before this
+  existed) stores a real link back to the original slack message, fetched
+  via `chat.getPermalink`. `search_memory` includes it in its output
+  whenever present, so noodle can hand back a real link, and matthias can
+  open the original message himself instead of trusting a paraphrase.
+- `history_store.append_message()` now takes optional `created_at` and
+  `permalink` params, and - when `permalink` is given - skips the insert
+  entirely if that exact permalink is already stored. this is what makes
+  **the backfill script safe to re-run**: every row it inserts carries a
+  permalink, so running it twice (or running it once the live listener has
+  already captured today's ping) never creates a duplicate.
+- **`scripts/backfill_matthias_day.py`** is the one-time backfill: run
+  manually via `python -m scripts.backfill_matthias_day`. it walks the
+  *entire* history of `MATTHIAS_DAY_CHANNEL_ID` via `conversations_history`
+  (cursor-paginated, not slack's search index - a plain channel history
+  scan is complete and deterministic, which matters for a one-time backfill
+  that has to catch everything), filters for messages `_matthias_day_pinged()`
+  recognizes, and calls `persist_ping()` on each one. it's a standalone
+  script (its own `slack_sdk.WebClient`, no socket mode connection) meant to
+  be run once, by hand, after deploying this feature - not wired into
+  `build_app()`'s startup.
 
 ### 7. morning wakeup dm
 - also from `bot/scheduler.py`, a second daily background job DMs `USER_ID`
@@ -466,7 +532,8 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in one channel |
 | `DAILY_PING_REMINDER` | `HH:MM`, when the `@matthias-day` reminder dm goes out |
 | `DAILY_MORNING_DM` | `HH:MM`, when the morning wakeup dm goes out |
-| `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
+| `MATTHIAS_DAY_GROUP_ID` | usergroup id for `@matthias-day` (defaults to the real id, `S0AK8LYJ8FR`) |
+| `MATTHIAS_DAY_CHANNEL_ID` | channel the daily recap pings are posted in (defaults to `#matthias`, `C0A9NJT2BCJ`) |
 | `WATCHED_CHANNEL_ID` | channel watched for joins/leaves; empty disables it |
 | `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
 | `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |

@@ -61,9 +61,17 @@ DAILY_PING_REMINDER = os.getenv("DAILY_PING_REMINDER", "19:00")
 DAILY_MORNING_DM = os.getenv("DAILY_MORNING_DM", "08:00")
 
 # the "@matthias-day" usergroup: pinging it triggers a "messages sent today" recap.
-# optional - if set, matched by id (<!subteam^ID>); the label "matthias-day" is
-# always matched too as a fallback.
-MATTHIAS_DAY_GROUP_ID = os.getenv("MATTHIAS_DAY_GROUP_ID", "")
+# matched by id (<!subteam^ID>); the label "matthias-day" is always matched
+# too as a fallback (catches a plain, unexpanded "@matthias-day" typed as
+# text). defaults to the real usergroup id - a real subteam mention never
+# contains the literal text "matthias-day" (slack renders it as a bare
+# <!subteam^ID>, no readable label), so without this id configured the
+# fallback alone essentially never matches and the ping goes undetected.
+MATTHIAS_DAY_GROUP_ID = os.getenv("MATTHIAS_DAY_GROUP_ID", "S0AK8LYJ8FR")
+
+# the one channel matthias posts his daily @matthias-day recap in - used by
+# bot/matthias_day.py (the live listener) and scripts/backfill_matthias_day.py.
+MATTHIAS_DAY_CHANNEL_ID = os.getenv("MATTHIAS_DAY_CHANNEL_ID", "C0A9NJT2BCJ")
 
 # --- channel join/leave analytics ---
 # the one channel noodle watches for member_joined_channel/member_left_channel.

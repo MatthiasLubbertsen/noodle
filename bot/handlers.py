@@ -5,7 +5,7 @@ import time
 import config
 from openai import APIConnectionError
 
-from bot import state
+from bot import matthias_day, state
 from bot.chunk import chunk_response
 from bot.gate import should_reply_unprompted
 from bot.llm import ask_noodle
@@ -200,9 +200,17 @@ def handle_message(event: dict) -> None:
     # pinging the @matthias-day usergroup always gets today's stats recap,
     # regardless of mentions/allowed-channels/the unprompted-reply gate.
     if _matthias_day_pinged(text):
+        channel = event.get("channel")
         threading.Thread(
             target=_send_daily_stats_reply,
-            args=(event.get("channel"),),
+            args=(channel,),
+            daemon=True,
+        ).start()
+        # also persist the cleaned ping into memory (see bot/matthias_day.py)
+        # so it's searchable later and linked back to the original message.
+        threading.Thread(
+            target=matthias_day.persist_ping,
+            args=(state.app.client, channel, event.get("ts"), text),
             daemon=True,
         ).start()
         return

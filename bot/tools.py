@@ -310,7 +310,8 @@ def _search_memory(query: str) -> str:
             who = f"{name} (<@{uid}>)" if name else f"<@{uid}>"
         else:
             who = "someone"
-        lines.append(f"- [{r['kind']} @ {r['created_at']}] {who}: {r['content']}")
+        link = f" ({r['permalink']})" if r.get("permalink") else ""
+        lines.append(f"- [{r['kind']} @ {r['created_at']}] {who}: {r['content']}{link}")
     log_tool("search_memory", query, f"{len(results)} matches")
     return "\n".join(lines)
 
