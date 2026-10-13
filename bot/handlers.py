@@ -190,16 +190,33 @@ def _is_ignored(text: str) -> bool:
 
 
 def handle_message(event: dict) -> None:
-    if _is_noise(event):
-        return
-
     text = event.get("text", "") or ""
+    # a @matthias-day ping always gets the stats recap, even if this
+    # particular event got flagged as "noise" (bot_id/subtype set) - some
+    # of matthias's own daily pings apparently arrive that way (how exactly
+    # is still unconfirmed; this logs the raw fields so the next real ping
+    # tells us for sure), and _is_noise() would otherwise silently eat the
+    # ping before its text is ever even looked at. gated on event["user"]
+    # matching USER_ID so this can't be triggered by some other app/bot.
+    is_matthias_day_ping = (
+        event.get("user") == config.USER_ID and _matthias_day_pinged(text)
+    )
+    if _is_noise(event):
+        if not is_matthias_day_ping:
+            return
+        logger.info(
+            "@matthias-day ping had bot_id=%r subtype=%r (would've been "
+            "filtered as noise) - responding anyway",
+            event.get("bot_id"),
+            event.get("subtype"),
+        )
+
     if _is_ignored(text):
         return
 
     # pinging the @matthias-day usergroup always gets today's stats recap,
     # regardless of mentions/allowed-channels/the unprompted-reply gate.
-    if _matthias_day_pinged(text):
+    if is_matthias_day_ping:
         channel = event.get("channel")
         threading.Thread(
             target=_send_daily_stats_reply,

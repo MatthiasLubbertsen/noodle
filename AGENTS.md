@@ -383,19 +383,35 @@ no nested `noodle/noodle` folder.
   mention/gate logic, is not subject to `ALLOWED_CHANNELS` or the
   unprompted-reply cooldown, and is skipped by the `# `-prefix ignore rule
   like everything else.
-- **this detection only works when `MATTHIAS_DAY_GROUP_ID` is actually set
-  to the real usergroup id.** a real subteam ping renders as a bare
-  `<!subteam^ID>` with no readable label - unlike a user mention, slack does
-  NOT store the group's name inline - so the literal-text fallback
-  ("matthias-day" appearing somewhere in the message) essentially never
-  matches a real ping; it only catches the rare case where matthias types
-  `@matthias-day` as plain text and slack doesn't expand it into a real
-  mention. this was a real bug: `MATTHIAS_DAY_GROUP_ID` had no non-empty
-  default, so unless it happened to be set correctly in `.env`, the ping
-  went undetected and the stats recap silently never fired. `config.py` now
-  defaults it to the actual usergroup id (`S0AK8LYJ8FR`), confirmed against
-  real pings in `#matthias` - still overridable via `.env` if the usergroup
-  is ever recreated.
+- **this detection depends on `MATTHIAS_DAY_GROUP_ID` matching the real
+  usergroup id.** a real subteam ping renders as a bare `<!subteam^ID>` with
+  no readable label - unlike a user mention, slack does NOT store the
+  group's name inline - so the literal-text fallback ("matthias-day"
+  appearing somewhere in the message) essentially never matches a real
+  ping; it only catches the rare case where matthias types `@matthias-day`
+  as plain text and slack doesn't expand it into a real mention. `config.py`
+  defaults `MATTHIAS_DAY_GROUP_ID` to the actual usergroup id (`S0AK8LYJ8FR`),
+  confirmed against real pings in `#matthias` - harmless hardening, but
+  **not actually the cause of the stats-recap bug below** (matthias's `.env`
+  already had this set correctly).
+- **the real bug: `handlers._is_noise()` was silently dropping the ping
+  before its text was ever even checked.** `_is_noise()` treats any event
+  with `bot_id` or `subtype` set as noise (to avoid reply loops / reacting
+  to other bots). comparing a `slack_read_channel` read of a recent
+  @matthias-day ping against the same message through slack's search api
+  showed the search api flagging it `[BOT]` while the raw channel history
+  didn't - inconclusive on its own, but consistent with some of matthias's
+  daily pings arriving with `bot_id`/`subtype` set despite genuinely being
+  his own message (`event["user"] == USER_ID`), which `_is_noise()` doesn't
+  check at all. `handle_message()` now computes
+  `is_matthias_day_ping = event.get("user") == config.USER_ID and
+  _matthias_day_pinged(text)` **before** the noise check, and if `_is_noise()`
+  would have dropped it, responds anyway (logging the actual `bot_id`/
+  `subtype` values first) rather than silently eating it - gated on the
+  real `USER_ID` match so this can't be triggered by some other app/bot
+  pinging the group. this also logs hard evidence the next time a real
+  ping comes in, in case the root cause turns out to be something else
+  entirely.
 - `bot/scheduler.py` runs a background thread (started from `build_app()`)
   that DMs `USER_ID` a plain reminder to go send that ping, every day at
   `DAILY_PING_REMINDER` (default 19:00 Europe/Amsterdam) — this reminder DM
