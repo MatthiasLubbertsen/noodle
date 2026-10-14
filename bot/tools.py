@@ -6,6 +6,7 @@ from bot import state
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
 from bot.exa import web_answer
+from bot.freedom import list_devices as freedom_list_devices
 from bot.freedom import start_session as freedom_start_session
 from bot.history_store import search_similar
 from bot.netlog import log_tool
@@ -373,7 +374,25 @@ def _start_freedom_session(duration_minutes, user_id: str | None) -> str:
     if not 1 <= minutes <= 1440:
         return "freedom sessions have to be between 1 and 1440 minutes (24 hours)."
 
-    result = freedom_start_session(minutes)
+    # the freedom account is SHARED with matthias's dad - resolve ONLY
+    # matthias's own devices by name (config.FREEDOM_DEVICE_NAMES) every
+    # time, rather than ever targeting "all devices on the account".
+    devices = freedom_list_devices()
+    if devices is None:
+        log_tool("start_freedom_session", f"{minutes}m", "device lookup failed")
+        return "couldn't reach freedom to look up devices, check logs."
+    wanted = {n.lower() for n in config.FREEDOM_DEVICE_NAMES}
+    device_ids = [d["id"] for d in devices if (d.get("name") or "").strip().lower() in wanted]
+    if not device_ids:
+        log_tool("start_freedom_session", f"{minutes}m", "no matching devices")
+        return (
+            "couldn't find matthias's own devices in freedom by name "
+            f"({', '.join(config.FREEDOM_DEVICE_NAMES)}) - not starting a "
+            "session, since the account is shared and guessing could block "
+            "someone else's device."
+        )
+
+    result = freedom_start_session(minutes, device_ids)
     if result is None:
         log_tool("start_freedom_session", f"{minutes}m", "failed")
         return "couldn't reach freedom to start the session, check logs."
@@ -386,11 +405,11 @@ def _start_freedom_session(duration_minutes, user_id: str | None) -> str:
         if code == "premium_required":
             return "that needs a freedom premium feature that isn't available on this account."
         if code == "no_devices":
-            return "freedom says there are no devices to block on."
+            return "freedom says none of matthias's devices are registered to block on."
         return f"freedom rejected the request: {error.get('message') or code}"
     session = (result.get("session") or {})
     log_tool("start_freedom_session", f"{minutes}m", "success")
-    return f"started a {minutes}-minute freedom session, blocking everything on every device (session id {session.get('id')})."
+    return f"started a {minutes}-minute freedom session, blocking everything on matthias's devices (session id {session.get('id')})."
 
 
 def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None = None) -> str:

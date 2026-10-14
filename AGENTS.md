@@ -213,13 +213,25 @@ no nested `noodle/noodle` folder.
   self-hosted api (`github.com/MatthiasLubbertsen/freedom`, deployed at
   `FREEDOM_API_BASE`, default `https://freedom.matthiaz.dev`). `POST
   /api/sessions` with `{"duration_minutes": N, "block_everything": true,
-  "all_devices": true}` and `Authorization: Bearer FREEDOM_API_KEY` - blocks
-  everything, on every one of his devices, for `duration_minutes` (1-1440).
-  no blocklist/device selection is exposed - this is a simple "block me for
-  X minutes" button, not the full freedom api (which also supports specific
-  blocklists/devices, scheduled/recurring sessions, ending sessions, device
-  and blocklist listing - see the repo's `docs/freedom-endpoints.md` and
-  `web/openapi.yaml` if any of that gets added later).
+  "device_ids": [...]}` and `Authorization: Bearer FREEDOM_API_KEY` - blocks
+  everything, for `duration_minutes` (1-1440). no blocklist selection is
+  exposed - this is a simple "block me for X minutes" button, not the full
+  freedom api (which also supports specific blocklists, scheduled/recurring
+  sessions, ending sessions, device/blocklist listing - see the repo's
+  `docs/freedom-endpoints.md` and `web/openapi.yaml` if any of that gets
+  added later).
+- **the freedom account is SHARED with matthias's dad, so this never uses
+  `all_devices: true`** (the first version of this tool did, and would have
+  blocked his dad's devices too). instead, `_start_freedom_session()` calls
+  `freedom.list_devices()` (`GET /api/devices`) every time and resolves
+  `config.FREEDOM_DEVICE_NAMES` (a comma-separated allowlist of device
+  names exactly as shown in freedom's dashboard, default `"Matthias
+  Windows,mopa5m"`) to their current ids, then passes only those as
+  `device_ids`. if none of those names match a registered device (renamed,
+  typo'd env var, api hiccup), it refuses outright rather than falling back
+  to blocking everything on the account - guessing wrong here means
+  blocking someone else's device, which is worse than just not starting
+  the session.
 - **this only works when the actual slack message is from `USER_ID`, checked
   in `_start_freedom_session()` itself, not left to the model's judgment** -
   the tool's own description tells the model not to call it for anyone else
@@ -632,6 +644,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `MATTHIAS_DAY_CHANNEL_ID` | channel the daily recap pings are posted in (defaults to `#matthias`, `C0A9NJT2BCJ`) |
 | `FREEDOM_API_BASE` | base url of matthias's self-hosted freedom api (defaults to `https://freedom.matthiaz.dev`) |
 | `FREEDOM_API_KEY` | bearer key for that api; optional - unset just disables `start_freedom_session` |
+| `FREEDOM_DEVICE_NAMES` | comma separated device names (as shown in freedom's dashboard) allowed to be blocked - the account is shared, so this is never "all devices" (defaults to `Matthias Windows,mopa5m`) |
 | `WATCHED_CHANNEL_ID` | channel watched for joins/leaves; empty disables it |
 | `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
 | `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |

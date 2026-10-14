@@ -80,6 +80,15 @@ MATTHIAS_DAY_CHANNEL_ID = os.getenv("MATTHIAS_DAY_CHANNEL_ID", "C0A9NJT2BCJ")
 # rather than this being a _require()d startup failure (it's optional).
 FREEDOM_API_BASE = os.getenv("FREEDOM_API_BASE", "https://freedom.matthiaz.dev")
 FREEDOM_API_KEY = os.getenv("FREEDOM_API_KEY", "")
+# comma-separated device NAMES (exactly as shown in freedom's dashboard) -
+# ONLY these may ever be blocked. the freedom account is SHARED with
+# matthias's dad, so "every device on the account" is never safe here - it
+# would block his dad's devices too. resolved to ids at call time via
+# GET /api/devices, so renaming a device in freedom just means updating
+# this list, not redeploying code.
+FREEDOM_DEVICE_NAMES = [
+    n.strip() for n in os.getenv("FREEDOM_DEVICE_NAMES", "Matthias Windows,mopa5m").split(",") if n.strip()
+]
 
 # --- channel join/leave analytics ---
 # the one channel noodle watches for member_joined_channel/member_left_channel.
