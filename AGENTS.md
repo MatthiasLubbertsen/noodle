@@ -526,12 +526,15 @@ no nested `noodle/noodle` folder.
   mention slack sometimes renders when the autocomplete glitches, only
   counted when immediately followed by "today"), the `today:` / `today` /
   `Today i did:` lead-in right after it, and - for newer pings that have
-  it - the trailing `please talk in the thread below! • join this
-  usergroup with ...` signature. `_normalize_bullets()` then turns every
-  top-level `-`/`*` list line into `•` (matthias's own posting ui always
-  used `•`; slack's own mobile bullet list - used on days he didn't have
-  that ui yet, or it was down - defaults to `-`/`*`), so the journal reads
-  consistently regardless of which device/ui actually posted it. what's
+  it - the trailing signature: the whole last line containing `join this
+  usergroup with`, which covers both the usual `please talk in the thread
+  below! • join this usergroup with ...` and one-off variants like the
+  vacation `I'm ooo, so I likely won't be reading reactions ... • join this
+  usergroup with ...`. `_normalize_bullets()` then turns every
+  markdown-style `-`/`*` list line into slack's own bullets - `•` at the
+  top level, `◦` when indented (keeping the indentation) - since some days
+  were posted as `-` lists and others with real `•`/`◦`, so the journal
+  reads consistently regardless of how it was posted. what's
   left is just the day's actual bullet-point content. these patterns were
   derived from reading real pings spanning the entire history (first ones
   in march, a batch from june, the most recent ones in october), not
@@ -597,6 +600,14 @@ no nested `noodle/noodle` folder.
   script (its own `slack_sdk.WebClient`, no socket mode connection) meant to
   be run once, by hand, after deploying this feature - not wired into
   `build_app()`'s startup.
+- because of the permalink dedup, a plain re-run never touches rows that
+  are already stored - so rows saved by an older version of the cleaning
+  rules (e.g. a junk `^^` re-ping row, un-normalized `-` bullets, an
+  un-stripped signature) stay as they were. `--rebuild`
+  (`python -m scripts.backfill_matthias_day --rebuild`) first deletes every
+  `kind="matthias_day"` row (`history_store.delete_kind()`) and then
+  re-saves the whole journal with the current rules. other memory (dms,
+  threads, mentions) is untouched.
 
 ### 7. morning wakeup dm
 - also from `bot/scheduler.py`, a second daily background job DMs `USER_ID`

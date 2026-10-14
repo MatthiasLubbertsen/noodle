@@ -11,14 +11,20 @@ run once, manually, from the project root (needs the same .env as the bot):
     python -m scripts.backfill_matthias_day
 
 safe to re-run: bot.history_store.append_message() skips any permalink it
-has already stored, so nothing gets duplicated.
+has already stored, so nothing gets duplicated. that also means a re-run
+never touches rows that are already stored - to re-clean everything with
+the current cleaning rules (e.g. after they changed), wipe the journal
+first and re-save it all:
+
+    python -m scripts.backfill_matthias_day --rebuild
 """
 import logging
+import sys
 
 from slack_sdk import WebClient
 
 import config
-from bot.history_store import init_db
+from bot.history_store import delete_kind, init_db
 from bot.log import setup_logging
 from bot.matthias_day import persist_ping
 from bot.slack_text import _matthias_day_pinged
@@ -55,6 +61,9 @@ def _iter_matthias_day_messages(client: WebClient):
 def main() -> None:
     setup_logging()
     init_db()
+    if "--rebuild" in sys.argv[1:]:
+        removed = delete_kind("matthias_day")
+        logger.info("--rebuild: deleted %d existing matthias-day row(s)", removed)
     client = WebClient(token=config.SLACK_USER_TOKEN)
     count = 0
     for msg in _iter_matthias_day_messages(client):

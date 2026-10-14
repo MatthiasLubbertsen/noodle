@@ -30,9 +30,14 @@ _RECOVER_LOOKBACK = 10
 _RECOVER_MAX_GAP_SECONDS = 12 * 60 * 60
 # the "today:" / "today" / "Today i did:" lead-in right after the ping
 _TODAY_RE = re.compile(r"^\s*today\s*(?:i\s+did)?\s*:?\s*\n?", re.IGNORECASE)
-# the "please talk in the thread below! ..." signature newer pings end with
+# the signature newer pings end with: "please talk in the thread below! •
+# join this usergroup with ..." normally, or a one-off line like "I'm ooo,
+# so I likely won't be reading reactions ... • join this usergroup with
+# ..." while on vacation - so match the whole last line containing "join
+# this usergroup with", whatever comes before it.
 _TRAILING_RE = re.compile(
-    r"\n?please talk in the thread below.*$", re.IGNORECASE | re.DOTALL
+    r"\n?(?:please talk in the thread below.*|[^\n]*join this usergroup with[^\n]*)$",
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -50,19 +55,19 @@ def clean_ping_text(raw: str) -> str:
 
 
 def _normalize_bullets(text: str) -> str:
-    """some days got typed via slack's own mobile bullet list (which uses
-    "-" or "*") instead of matthias's own posting ui (which uses the real
-    "•" character) - normalize every top-level list line to "•" so the
-    journal reads consistently. only touches a line that's ACTUALLY a
-    bullet (starts with "- "/"* " at the start of a line, after optional
-    leading whitespace for nested "◦" sub-bullets, which are left alone).
+    """some days were posted as markdown-style "-"/"*" lists instead of
+    slack's own "•" bullets - normalize them so the journal reads
+    consistently: a top-level "- "/"* " line becomes "• ", an indented one
+    becomes "◦ " (slack's own nested-bullet character), keeping its
+    indentation. lines that already use "•"/"◦" are left alone.
     """
     lines = text.split("\n")
     fixed = []
     for line in lines:
         m = re.match(r"^(\s*)[-*] (.*)$", line)
-        if m and not line.lstrip().startswith("◦"):
-            fixed.append(f"{m.group(1)}• {m.group(2)}")
+        if m:
+            bullet = "◦" if m.group(1) else "•"
+            fixed.append(f"{m.group(1)}{bullet} {m.group(2)}")
         else:
             fixed.append(line)
     return "\n".join(fixed)
