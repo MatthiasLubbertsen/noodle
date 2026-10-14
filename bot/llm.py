@@ -14,6 +14,12 @@ logger = logging.getLogger("noodle")
 _TOOL_NAMES = {t["function"]["name"] for t in TOOLS}
 
 
+def _leaked_tool_name_paragraphs(text: str) -> list[str]:
+    if not text:
+        return []
+    return [p for p in text.split("\n\n") if p.strip().lower() in _TOOL_NAMES]
+
+
 def _strip_leaked_tool_names(text: str) -> str:
     """defense in depth: some models occasionally narrate a tool call by
     writing its bare function name as its own paragraph (e.g.
@@ -22,11 +28,19 @@ def _strip_leaked_tool_names(text: str) -> str:
     posted straight to slack as its own confusing one-word message since
     chunk_response() sends each paragraph separately. strip any paragraph
     that's exactly a known tool's name before it ever reaches slack.
+
+    this is only the last-resort cleanup for the final text actually sent -
+    ask_noodle() tries a real retry first (see _has_leaked_tool_name), since
+    a leaked name means the model never actually ran the tool at all (just
+    wrote its name and then typically fabricates a plausible-sounding
+    excuse instead), not just a formatting slip to clean up.
     """
     if not text:
         return text
-    paragraphs = text.split("\n\n")
-    kept = [p for p in paragraphs if p.strip().lower() not in _TOOL_NAMES]
+    leaked = set(_leaked_tool_name_paragraphs(text))
+    if not leaked:
+        return text
+    kept = [p for p in text.split("\n\n") if p not in leaked]
     return "\n\n".join(kept)
 
 
@@ -92,11 +106,26 @@ def ask_noodle(
         )
 
     messages = [{"role": "system", "content": system_content}] + history
+    leak_retried = False
     for _ in range(5):
         response = _call_chat(messages, tools=TOOLS, tool_choice="auto", detail=first4)
         message = response.choices[0].message
         if not message.tool_calls:
-            final = _strip_leaked_tool_names(_clean_reply(message.content or ""))
+            raw_content = message.content or ""
+            if _leaked_tool_name_paragraphs(raw_content) and not leak_retried:
+                # the model wrote a tool's name as plain text instead of
+                # actually calling it - it never ran the tool, so whatever
+                # comes after (often a fabricated excuse) isn't trustworthy
+                # either. give it one real shot at calling the tool for
+                # real before falling back to just hiding the leaked text.
+                leak_retried = True
+                logger.warning(
+                    "model wrote a tool name as text instead of calling it "
+                    "(%r) - retrying once",
+                    raw_content[:120],
+                )
+                continue
+            final = _strip_leaked_tool_names(_clean_reply(raw_content))
             history.append({"role": "assistant", "content": final})
             _remember(conv_key, "assistant", final, persist)
             trim_memory(history)

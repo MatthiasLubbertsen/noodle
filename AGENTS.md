@@ -301,12 +301,23 @@ no nested `noodle/noodle` folder.
   with a stray one-word paragraph like that gets chunked by
   `chunk_response()` into its own confusing standalone slack message (real
   example: noodle posted the literal word "fetch_slack_message" as a
-  message in `#matthias`, visible to everyone). `bot/llm.py`'s
-  `_strip_leaked_tool_names()` strips any paragraph that's exactly a known
-  tool's name (built from `TOOLS`) before the reply is ever sent, applied
-  everywhere `_clean_reply()` is - a code-level backstop alongside the
-  "using tools" section's explicit instruction not to write a tool's name
-  in a reply at all.
+  message in `#matthias`, visible to everyone).
+- a leaked tool name means the tool was never actually called at all - the
+  model just wrote its name and, in the real incident, followed it with a
+  fabricated excuse ("oh no, the link you gave me is a bit mangled") rather
+  than an actual attempt, so the whole reply after the leak isn't
+  trustworthy either. `ask_noodle()`'s tool loop checks every tool-call-free
+  response for a leaked name (`_leaked_tool_name_paragraphs()`) and, the
+  first time it sees one, retries the SAME turn once (re-sends the
+  unchanged `messages`/history) instead of accepting that response - giving
+  the model a real second chance to actually call the tool, which is what
+  fixes the underlying problem, not just the visible symptom. only if the
+  retry ALSO leaks (or any other turn just doesn't call tools) does
+  `_strip_leaked_tool_names()` fall back to quietly removing the leaked
+  paragraph from whatever text does get sent - a last-resort cosmetic
+  cleanup, applied everywhere `_clean_reply()` is, alongside the "using
+  tools" section's explicit instruction not to write a tool's name in a
+  reply at all.
 
 ### 4d. memory: live context (in-memory) + persisted, embedded history
 - **live context.** noodle keeps a per-conversation history (`state.MEMORY`,
