@@ -608,6 +608,12 @@ no nested `noodle/noodle` folder.
   `kind="matthias_day"` row (`history_store.delete_kind()`) and then
   re-saves the whole journal with the current rules. other memory (dms,
   threads, mentions) is untouched.
+- a ping whose permalink can't be fetched (`chat.getPermalink` failing,
+  rate limits) is skipped rather than stored without one - the permalink
+  is the only thing that dedups re-runs, so a link-less row would be
+  inserted again on every backfill. same idea as `require_embedding`:
+  any failure leaves no trace, and simply re-running the backfill fills
+  in whatever was missed.
 
 ### 7. morning wakeup dm
 - also from `bot/scheduler.py`, a second daily background job DMs `USER_ID`

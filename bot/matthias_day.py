@@ -152,6 +152,12 @@ def _persist_recap(client, channel: str, ts: str, content: str) -> None:
             permalink = resp.get("permalink")
     except Exception:  # noqa: BLE001
         logger.exception("failed to fetch permalink for matthias-day ping %s", ts)
+    if not permalink:
+        # the permalink is what dedups re-runs - a row without one would
+        # get inserted again on every backfill. skip it instead; the next
+        # backfill run retries it.
+        logger.warning("skipping matthias-day ping %s (no permalink) - safe to retry later", ts)
+        return
     created_at = datetime.datetime.fromtimestamp(float(ts), AMSTERDAM_TZ).isoformat()
     append_message(
         conv_key(channel),
