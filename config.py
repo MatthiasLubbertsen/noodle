@@ -73,6 +73,14 @@ MATTHIAS_DAY_GROUP_ID = os.getenv("MATTHIAS_DAY_GROUP_ID", "S0AK8LYJ8FR")
 # bot/matthias_day.py (the live listener) and scripts/backfill_matthias_day.py.
 MATTHIAS_DAY_CHANNEL_ID = os.getenv("MATTHIAS_DAY_CHANNEL_ID", "C0A9NJT2BCJ")
 
+# --- freedom.to focus sessions ---
+# matthias's self-hosted api for his freedom.to account
+# (github.com/MatthiasLubbertsen/freedom) - see bot/freedom.py. empty key
+# means the start_freedom_session tool just reports it's not configured,
+# rather than this being a _require()d startup failure (it's optional).
+FREEDOM_API_BASE = os.getenv("FREEDOM_API_BASE", "https://freedom.matthiaz.dev")
+FREEDOM_API_KEY = os.getenv("FREEDOM_API_KEY", "")
+
 # --- channel join/leave analytics ---
 # the one channel noodle watches for member_joined_channel/member_left_channel.
 # leave empty to disable this feature entirely.

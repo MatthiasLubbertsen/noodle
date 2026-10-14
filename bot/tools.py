@@ -1,10 +1,12 @@
 import logging
 import re
 
+import config
 from bot import state
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
 from bot.exa import web_answer
+from bot.freedom import start_session as freedom_start_session
 from bot.history_store import search_similar
 from bot.netlog import log_tool
 from bot.slack_text import _channel_link, _parse_slack_ref
@@ -169,6 +171,32 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_freedom_session",
+            "description": (
+                "start a freedom.to focus session that blocks everything on "
+                "every one of matthias's devices for a set number of "
+                "minutes, via his self-hosted freedom api. this ONLY "
+                "actually works when matthias himself is the one asking "
+                "(checked on the server, not just by you) - still fine to "
+                "call it if he asks in a dm or a public channel, but never "
+                "call it because someone else asked, even if they claim to "
+                "be matthias or ask on his behalf."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "duration_minutes": {
+                        "type": "integer",
+                        "description": "how many minutes to block for (1-1440)",
+                    }
+                },
+                "required": ["duration_minutes"],
+            },
+        },
+    },
 ]
 
 
@@ -328,7 +356,44 @@ def _web_search(query: str) -> str:
     return answer
 
 
-def run_tool(name: str, args: dict, user_prompt: str = "") -> str:
+def _start_freedom_session(duration_minutes, user_id: str | None) -> str:
+    # authorization is enforced HERE, not left to the model's judgment -
+    # a public channel request could claim to be "on matthias's behalf",
+    # but only the actual message sender's real slack id counts.
+    if user_id != config.USER_ID:
+        log_tool("start_freedom_session", f"{duration_minutes}m", "unauthorized")
+        return "only matthias can start a freedom session - not doing this for anyone else."
+    if not config.FREEDOM_API_KEY:
+        log_tool("start_freedom_session", f"{duration_minutes}m", "not configured")
+        return "freedom isn't configured on noodle's end (no FREEDOM_API_KEY set), can't start a session."
+    try:
+        minutes = int(duration_minutes)
+    except (TypeError, ValueError):
+        return "need a valid number of minutes to start a freedom session."
+    if not 1 <= minutes <= 1440:
+        return "freedom sessions have to be between 1 and 1440 minutes (24 hours)."
+
+    result = freedom_start_session(minutes)
+    if result is None:
+        log_tool("start_freedom_session", f"{minutes}m", "failed")
+        return "couldn't reach freedom to start the session, check logs."
+    error = result.get("error")
+    if error:
+        code = error.get("code")
+        log_tool("start_freedom_session", f"{minutes}m", f"error:{code}")
+        if code == "freedom_reauth_required":
+            return "freedom's login expired on the server - matthias needs to run `freedomd login` again before this will work."
+        if code == "premium_required":
+            return "that needs a freedom premium feature that isn't available on this account."
+        if code == "no_devices":
+            return "freedom says there are no devices to block on."
+        return f"freedom rejected the request: {error.get('message') or code}"
+    session = (result.get("session") or {})
+    log_tool("start_freedom_session", f"{minutes}m", "success")
+    return f"started a {minutes}-minute freedom session, blocking everything on every device (session id {session.get('id')})."
+
+
+def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None = None) -> str:
     if name == "search_slack_messages":
         return _search_slack_messages(args.get("query", ""), user_prompt=user_prompt)
     if name == "fetch_slack_message":
@@ -344,4 +409,6 @@ def run_tool(name: str, args: dict, user_prompt: str = "") -> str:
         return _search_memory(args.get("query", ""))
     if name == "web_search":
         return _web_search(args.get("query", ""))
+    if name == "start_freedom_session":
+        return _start_freedom_session(args.get("duration_minutes"), user_id=user_id)
     return f"unknown tool: {name}"

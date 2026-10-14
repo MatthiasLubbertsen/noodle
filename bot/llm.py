@@ -105,7 +105,7 @@ def ask_noodle(
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
-            result = run_tool(tc.function.name, args, user_prompt=user_text)
+            result = run_tool(tc.function.name, args, user_prompt=user_text, user_id=user_id)
             history.append(
                 {"role": "tool", "tool_call_id": tc.id, "content": result}
             )

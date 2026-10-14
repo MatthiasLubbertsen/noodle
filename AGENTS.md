@@ -39,6 +39,7 @@ noodle/
     usergroups.py         # add/remove a user from a slack usergroup
     watch.py              # channel join/leave analytics + automations
     matthias_day.py       # clean + persist @matthias-day recap pings into memory
+    freedom.py            # calls matthias's self-hosted freedom.to focus-session api
     log.py                # logging setup
     netlog.py             # concise "called hcai .../called tool ..." log lines
   scripts/
@@ -204,6 +205,42 @@ no nested `noodle/noodle` folder.
   embeddings/jev. its description and the system prompt both say to use it
   ONLY for current/external info noodle doesn't already know - never for
   casual chat or things answerable from the conversation itself.
+
+### 4b-v. start_freedom_session tool (matthias-only, enforced server-side)
+- a `start_freedom_session` tool (`bot/freedom.py`, `_start_freedom_session()`
+  in `bot/tools.py`) starts a focus session on matthias's
+  [freedom.to](https://freedom.to) account (website/app blocker) via his
+  self-hosted api (`github.com/MatthiasLubbertsen/freedom`, deployed at
+  `FREEDOM_API_BASE`, default `https://freedom.matthiaz.dev`). `POST
+  /api/sessions` with `{"duration_minutes": N, "block_everything": true,
+  "all_devices": true}` and `Authorization: Bearer FREEDOM_API_KEY` - blocks
+  everything, on every one of his devices, for `duration_minutes` (1-1440).
+  no blocklist/device selection is exposed - this is a simple "block me for
+  X minutes" button, not the full freedom api (which also supports specific
+  blocklists/devices, scheduled/recurring sessions, ending sessions, device
+  and blocklist listing - see the repo's `docs/freedom-endpoints.md` and
+  `web/openapi.yaml` if any of that gets added later).
+- **this only works when the actual slack message is from `USER_ID`, checked
+  in `_start_freedom_session()` itself, not left to the model's judgment** -
+  the tool's own description tells the model not to call it for anyone else
+  or "on matthias's behalf", but that's a prompt-level nudge, not the real
+  guard. `handlers.handle_message()` → `ask_noodle(..., user_id=...)` →
+  `llm.py`'s tool loop → `run_tool(..., user_id=user_id)` threads the real
+  sender id of the message that triggered this reply all the way through,
+  and `_start_freedom_session()` refuses (`"only matthias can start a
+  freedom session"`) unless it equals `config.USER_ID` - this is what makes
+  it safe to allow the tool in public channels too (`ALLOWED_CHANNELS`),
+  not just dms: a DM already can't reach this tool from anyone but
+  `USER_ID` (section 3's security gate), but a public channel has no such
+  restriction, so the authorization has to happen here instead.
+- errors from freedom's own api come back as `{"error": {"code",
+  "message"}}`; the tool translates the ones matthias is likely to actually
+  hit into plain language (`freedom_reauth_required` → run `freedomd login`
+  again on the server; `premium_required` → that needs a paid freedom
+  feature; `no_devices` → no devices registered) and falls back to the raw
+  message for anything else. `FREEDOM_API_KEY` is optional in `.env` (no
+  `_require()`) - if it's unset, the tool just reports it isn't configured
+  instead of noodle failing to start.
 
 ### 4b-iv. the unprompted-reply gate runs on jev, not chat completions
 - `bot/gate.py`'s `should_reply_unprompted()` calls hack club ai's jev /
@@ -593,6 +630,8 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `DAILY_MORNING_DM` | `HH:MM`, when the morning wakeup dm goes out |
 | `MATTHIAS_DAY_GROUP_ID` | usergroup id for `@matthias-day` (defaults to the real id, `S0AK8LYJ8FR`) |
 | `MATTHIAS_DAY_CHANNEL_ID` | channel the daily recap pings are posted in (defaults to `#matthias`, `C0A9NJT2BCJ`) |
+| `FREEDOM_API_BASE` | base url of matthias's self-hosted freedom api (defaults to `https://freedom.matthiaz.dev`) |
+| `FREEDOM_API_KEY` | bearer key for that api; optional - unset just disables `start_freedom_session` |
 | `WATCHED_CHANNEL_ID` | channel watched for joins/leaves; empty disables it |
 | `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
 | `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |
