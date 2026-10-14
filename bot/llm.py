@@ -11,6 +11,24 @@ from bot.tools import TOOLS, run_tool
 
 logger = logging.getLogger("noodle")
 
+_TOOL_NAMES = {t["function"]["name"] for t in TOOLS}
+
+
+def _strip_leaked_tool_names(text: str) -> str:
+    """defense in depth: some models occasionally narrate a tool call by
+    writing its bare function name as its own paragraph (e.g.
+    "fetch_slack_message", "flaron") instead of silently invoking it via
+    the real tool-call mechanism - seen in production with deepseek-v3.2,
+    posted straight to slack as its own confusing one-word message since
+    chunk_response() sends each paragraph separately. strip any paragraph
+    that's exactly a known tool's name before it ever reaches slack.
+    """
+    if not text:
+        return text
+    paragraphs = text.split("\n\n")
+    kept = [p for p in paragraphs if p.strip().lower() not in _TOOL_NAMES]
+    return "\n\n".join(kept)
+
 
 def _call_chat(messages, tools=None, tool_choice=None, detail=""):
     kwargs = {
@@ -78,7 +96,7 @@ def ask_noodle(
         response = _call_chat(messages, tools=TOOLS, tool_choice="auto", detail=first4)
         message = response.choices[0].message
         if not message.tool_calls:
-            final = _clean_reply(message.content or "")
+            final = _strip_leaked_tool_names(_clean_reply(message.content or ""))
             history.append({"role": "assistant", "content": final})
             _remember(conv_key, "assistant", final, persist)
             trim_memory(history)
@@ -113,7 +131,7 @@ def ask_noodle(
 
     # safety net: answer without tools if we hit the round cap
     final_resp = _call_chat(messages, detail=first4)
-    final = _clean_reply(final_resp.choices[0].message.content or "")
+    final = _strip_leaked_tool_names(_clean_reply(final_resp.choices[0].message.content or ""))
     history.append({"role": "assistant", "content": final})
     _remember(conv_key, "assistant", final, persist)
     trim_memory(history)

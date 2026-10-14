@@ -154,7 +154,17 @@ def _process_locked(channel: str, prompt: str, thread_ts: str | None, key: str,
             payload = {"channel": channel, "text": fragment}
             if thread_ts:
                 payload["thread_ts"] = thread_ts
-            state.app.client.chat_postMessage(**payload)
+            resp = state.app.client.chat_postMessage(**payload)
+            if not thread_ts:
+                # this reply wasn't itself posted inside a thread, but
+                # anyone can still hit "reply in thread" on it afterwards -
+                # slack then uses ITS OWN ts as the new thread_ts, which
+                # noodle would otherwise never recognize as a thread it
+                # joined (a real case: someone replied to noodle's own
+                # standalone mention-reply and got ignored for an hour).
+                sent_ts = resp.get("ts")
+                if sent_ts:
+                    state.PARTICIPATING_THREADS.add(sent_ts)
             time.sleep(config.CHUNK_DELAY_SECONDS)
     except APIConnectionError:
         logger.exception("ai backend unreachable (network/proxy issue)")

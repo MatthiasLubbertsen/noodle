@@ -77,7 +77,19 @@ no nested `noodle/noodle` folder.
   - a message in an **allowed channel** mentions "noodle" (case-insensitive)
     or `@noodle` (the app/bot user id), or
   - a message arrives in a **thread noodle has joined** (it keeps answering
-    inside threads it has replied to, even without a fresh mention), or
+    inside threads it has replied to, even without a fresh mention) - this
+    also covers a thread that only exists because someone replied to
+    noodle's own standalone (non-threaded) message: `handlers._process()`
+    registers the `ts` of every message noodle posts with no `thread_ts` of
+    its own into `state.PARTICIPATING_THREADS` too (not just the triggering
+    event's `thread_ts`), since slack lets anyone "reply in thread" to ANY
+    message, turning its `ts` into a brand new `thread_ts` noodle couldn't
+    have anticipated otherwise. real bug this fixed: a mention-triggered
+    reply went out as a fresh top-level message (the triggering ping
+    wasn't itself threaded), someone replied in a thread off of *that*
+    message, and noodle silently ignored it for an hour since that
+    thread's `thread_ts` (noodle's own message's `ts`) was never in
+    `PARTICIPATING_THREADS` under the old code, or
   - a message arrives in an **allowed channel with no mention** and the
     response gate (`bot/gate.py`) decides it is a good idea to reply. the gate
     is jev (hack club ai's fast/cheap classifier model, see 4b-iv below), not
@@ -282,6 +294,19 @@ no nested `noodle/noodle` folder.
   chain-of-thought / `<think:6124c78e>...</think:6124c78e>` blocks are stripped before chunking,
   and tool results are used as context only (never posted). reasoning, debug
   logs, or raw tool output are never sent to a channel or thread.
+- **this also covers a model occasionally narrating a tool call by literally
+  writing the tool's bare function name as its own paragraph** (e.g.
+  `fetch_slack_message`, `flaron`) instead of silently invoking it through
+  the real tool-calling mechanism - seen live with `deepseek-v3.2`: a reply
+  with a stray one-word paragraph like that gets chunked by
+  `chunk_response()` into its own confusing standalone slack message (real
+  example: noodle posted the literal word "fetch_slack_message" as a
+  message in `#matthias`, visible to everyone). `bot/llm.py`'s
+  `_strip_leaked_tool_names()` strips any paragraph that's exactly a known
+  tool's name (built from `TOOLS`) before the reply is ever sent, applied
+  everywhere `_clean_reply()` is - a code-level backstop alongside the
+  "using tools" section's explicit instruction not to write a tool's name
+  in a reply at all.
 
 ### 4d. memory: live context (in-memory) + persisted, embedded history
 - **live context.** noodle keeps a per-conversation history (`state.MEMORY`,
