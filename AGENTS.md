@@ -526,12 +526,15 @@ no nested `noodle/noodle` folder.
   mention slack sometimes renders when the autocomplete glitches, only
   counted when immediately followed by "today"), the `today:` / `today` /
   `Today i did:` lead-in right after it, and - for newer pings that have
-  it - the trailing `please talk in the thread below! • join this
-  usergroup with ...` signature. `_normalize_bullets()` then turns every
-  top-level `-`/`*` list line into `•` (matthias's own posting ui always
-  used `•`; slack's own mobile bullet list - used on days he didn't have
-  that ui yet, or it was down - defaults to `-`/`*`), so the journal reads
-  consistently regardless of which device/ui actually posted it. what's
+  it - the trailing signature: the whole last line containing `join this
+  usergroup with`, which covers both the usual `please talk in the thread
+  below! • join this usergroup with ...` and one-off variants like the
+  vacation `I'm ooo, so I likely won't be reading reactions ... • join this
+  usergroup with ...`. `_normalize_bullets()` then turns every
+  markdown-style `-`/`*` list line into slack's own bullets - `•` at the
+  top level, `◦` when indented (keeping the indentation) - since some days
+  were posted as `-` lists and others with real `•`/`◦`, so the journal
+  reads consistently regardless of how it was posted. what's
   left is just the day's actual bullet-point content. these patterns were
   derived from reading real pings spanning the entire history (first ones
   in march, a batch from june, the most recent ones in october), not
@@ -539,24 +542,27 @@ no nested `noodle/noodle` folder.
   colon, and the trailing signature only exists on pings sent after
   thread-replies got enabled), hence matching all of them with tolerant
   regexes rather than one exact string.
-- **a real daily recap always contains at least one bullet line - anything
-  that pings but has no bullet gets skipped, not persisted.** before
-  matthias had his own posting ui, sometimes the group ping just didn't
-  fire, so he'd post the full bulleted recap as one message (which, if it
-  itself opened with a recognized ping, already gets captured normally)
-  and then send a short follow-up re-ping to actually notify - things like
+- **a real daily recap always contains at least one bullet line - a
+  re-ping without one is never stored itself, but the recap it points at
+  is.** before matthias had his own posting ui, sometimes the group ping
+  just didn't fire, so he'd post the full bulleted recap and then send a
+  short follow-up re-ping to actually notify - things like
   `<!subteam^ID> ^^`, `<!subteam^ID> see above :)`, `... yeah this one
-  Slack :sob-wx:`, `... ok it doesn't shows up but then I was recording it
-  it shows`. these all open with a real ping and would otherwise get
-  persisted as a garbage "day" with no real content - `persist_ping()`
-  requires at least one `• ` line (after bullet normalization) and silently
-  skips the entry if there isn't one, logging why. found and fixed after
-  several of these turned up as broken, content-less entries during a real
-  backfill run - each one confirmed by actually reading the surrounding
-  slack history to find the real recap it was a re-ping for (in every case
-  found so far, that real recap was already a separate, correctly-detected
-  message of its own, so nothing needed recovering beyond skipping the
-  junk re-ping - except one, see below).
+  Slack :sob-wx:`, `... :rac_ded:`, `... ^^ this only happens on mobile`.
+  these open with a real ping but have no content, so `persist_ping()`
+  never stores them as a "day". instead, `_recover_recap_before()` treats
+  the re-ping as a pointer: it fetches the ~10 messages right before it
+  (`conversations_history`, `latest=<re-ping ts>`) and persists
+  matthias's nearest bulleted message (dated + permalinked to *that*
+  message, not the re-ping). it skips other people's messages and
+  further re-pings (sometimes he re-pinged twice), and stops at the first
+  of his messages that's neither, or anything over 12h older than the
+  re-ping, so it can't grab an unrelated bulleted message from days
+  before. if that recap already pinged correctly and got stored on its
+  own, the permalink dedup makes this a no-op - so it's what saves a
+  recap whose own ping never registered at all (e.g. a mention that
+  didn't expand, or no ping in it at all), without risking duplicates.
+  runs the same way live and in the backfill.
 - **one real day actually recovered: a `@…` glitched mention.** may 25's
   recap opened with a literal `@…` instead of a real mention (the
   autocomplete broke), so it was never detected as a ping at all by the
@@ -594,6 +600,14 @@ no nested `noodle/noodle` folder.
   script (its own `slack_sdk.WebClient`, no socket mode connection) meant to
   be run once, by hand, after deploying this feature - not wired into
   `build_app()`'s startup.
+- because of the permalink dedup, a plain re-run never touches rows that
+  are already stored - so rows saved by an older version of the cleaning
+  rules (e.g. a junk `^^` re-ping row, un-normalized `-` bullets, an
+  un-stripped signature) stay as they were. `--rebuild`
+  (`python -m scripts.backfill_matthias_day --rebuild`) first deletes every
+  `kind="matthias_day"` row (`history_store.delete_kind()`) and then
+  re-saves the whole journal with the current rules. other memory (dms,
+  threads, mentions) is untouched.
 
 ### 7. morning wakeup dm
 - also from `bot/scheduler.py`, a second daily background job DMs `USER_ID`

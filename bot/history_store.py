@@ -111,6 +111,20 @@ def append_message(
         logger.exception("failed to persist message (conv_key=%s role=%s)", conv_key, role)
 
 
+def delete_kind(kind: str) -> int:
+    """delete every row of one kind, returning how many were removed - used
+    by scripts/backfill_matthias_day.py --rebuild to start the journal
+    over from scratch.
+    """
+    conn = sqlite3.connect(config.MEMORY_DB_PATH)
+    try:
+        cur = conn.execute("DELETE FROM messages WHERE kind = ?", (kind,))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 def append_message_async(
     conv_key: str, kind: str, role: str, content: str, user_id: str | None = None
 ) -> None:
