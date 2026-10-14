@@ -539,24 +539,27 @@ no nested `noodle/noodle` folder.
   colon, and the trailing signature only exists on pings sent after
   thread-replies got enabled), hence matching all of them with tolerant
   regexes rather than one exact string.
-- **a real daily recap always contains at least one bullet line - anything
-  that pings but has no bullet gets skipped, not persisted.** before
-  matthias had his own posting ui, sometimes the group ping just didn't
-  fire, so he'd post the full bulleted recap as one message (which, if it
-  itself opened with a recognized ping, already gets captured normally)
-  and then send a short follow-up re-ping to actually notify - things like
+- **a real daily recap always contains at least one bullet line - a
+  re-ping without one is never stored itself, but the recap it points at
+  is.** before matthias had his own posting ui, sometimes the group ping
+  just didn't fire, so he'd post the full bulleted recap and then send a
+  short follow-up re-ping to actually notify - things like
   `<!subteam^ID> ^^`, `<!subteam^ID> see above :)`, `... yeah this one
-  Slack :sob-wx:`, `... ok it doesn't shows up but then I was recording it
-  it shows`. these all open with a real ping and would otherwise get
-  persisted as a garbage "day" with no real content - `persist_ping()`
-  requires at least one `• ` line (after bullet normalization) and silently
-  skips the entry if there isn't one, logging why. found and fixed after
-  several of these turned up as broken, content-less entries during a real
-  backfill run - each one confirmed by actually reading the surrounding
-  slack history to find the real recap it was a re-ping for (in every case
-  found so far, that real recap was already a separate, correctly-detected
-  message of its own, so nothing needed recovering beyond skipping the
-  junk re-ping - except one, see below).
+  Slack :sob-wx:`, `... :rac_ded:`, `... ^^ this only happens on mobile`.
+  these open with a real ping but have no content, so `persist_ping()`
+  never stores them as a "day". instead, `_recover_recap_before()` treats
+  the re-ping as a pointer: it fetches the ~10 messages right before it
+  (`conversations_history`, `latest=<re-ping ts>`) and persists
+  matthias's nearest bulleted message (dated + permalinked to *that*
+  message, not the re-ping). it skips other people's messages and
+  further re-pings (sometimes he re-pinged twice), and stops at the first
+  of his messages that's neither, or anything over 12h older than the
+  re-ping, so it can't grab an unrelated bulleted message from days
+  before. if that recap already pinged correctly and got stored on its
+  own, the permalink dedup makes this a no-op - so it's what saves a
+  recap whose own ping never registered at all (e.g. a mention that
+  didn't expand, or no ping in it at all), without risking duplicates.
+  runs the same way live and in the backfill.
 - **one real day actually recovered: a `@…` glitched mention.** may 25's
   recap opened with a literal `@…` instead of a real mention (the
   autocomplete broke), so it was never detected as a ping at all by the
