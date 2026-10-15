@@ -68,6 +68,31 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
   order, so several messages arriving close together don't race each other
   and come out jumbled or delayed.
 
+## tools
+
+these are the tools the model can call (it decides when; results are used as
+context and never posted raw). "matthias only" is enforced in code against the
+real slack sender id, so it is safe in public channels too.
+
+| tool | what it does | who can use it |
+| --- | --- | --- |
+| `search_slack_messages` | search slack as noodle's own account (only what it can see) | anyone |
+| `fetch_slack_message` | read the real text of one message from its link; silently joins a public channel it can't read yet, but only when matthias asked | anyone |
+| `flaron` | look up users, channels, apps, emoji, commands in the public flaron directory | anyone |
+| `search_memory` | semantic (vector) search of noodle's persisted memory: dms, threads, pings, journal, daily facts | matthias only |
+| `web_search` | short cited answer from the live web (exa via hack club ai) | anyone |
+| `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
+| `now_playing` | what matthias is listening to, via last.fm scrobbles | anyone |
+| `github` | repo, commits, issues, pulls, search, notifications, commits today | matthias only |
+| `get_journal` | his `@matthias-day` recaps for a date range (plain date filter, not vector search) | matthias only |
+| `summarize_thread` | reads a whole thread (link or current thread) so the model can tl;dr it; same auto-join rule as `fetch_slack_message` | anyone |
+| `freedom` | the full freedom.to toolbox: devices, blocklists, sessions, schedules, history (13 actions); only ever touches matthias's own devices | matthias only |
+| `start_freedom_session` | simple "block everything on my devices for N minutes" | matthias only |
+| `schedule_freedom_session` | hand a later or recurring session to freedom's own scheduler | matthias only |
+| `schedule_reminder` | remind him later (one-off or repeating) in a dm, channel or thread | matthias only |
+| `list_scheduled` | list scheduled reminders and freedom sessions | matthias only |
+| `cancel_scheduled` | cancel one reminder or freedom session by id | matthias only |
+
 ## how mentioning works
 
 when noodle writes about a person or channel it uses slack's link syntax so the
@@ -76,8 +101,7 @@ client renders a real mention:
 - a user: `<@USERID>` (never `@john`)
 - a channel: `<#CHANNELID>` (never `#general`)
 
-if it only knows a name, it calls `lookup_slack_user` / `lookup_slack_channel` /
-`search_slack_users` to resolve the correct id first. the same idea works the
+if it only knows a name, it calls the `flaron` tool to resolve the correct id first. the same idea works the
 other way: paste a slack link and noodle can read what the message actually
 says with `fetch_slack_message`.
 
@@ -109,7 +133,22 @@ noodle/
     tz.py              # shared Europe/Amsterdam timezone constant
     usergroups.py      # add/remove a user from a slack usergroup
     watch.py           # channel join/leave analytics + automations
+    matthias_day.py    # clean + persist @matthias-day recap pings into memory
+    reminders.py       # scheduled reminders: sqlite store + recurrence math
+    freedom.py         # calls matthias's self-hosted freedom.to api
+    freedom_tool.py    # the full `freedom` tool (devices, blocklists, sessions, schedules)
+    httpjson.py        # tiny shared GET-json helper for the apis below
+    weather.py         # open-meteo forecasts (morning dm + get_weather)
+    lastfm.py          # last.fm now playing / tracks today (now_playing)
+    github.py          # github rest calls (github tool, commit count)
+    github_watch.py    # new-notification diffing + persisted "seen" state
+    proactive.py       # quiet hours + daily cap for unprompted pings
+    oneshot.py         # one-off persona completion + daily-facts memory rows
+    wrapup.py          # end-of-day wrap-up dm
+    weekly.py          # weekly journal recap + busiest-channel digest
+    channels.py        # silently join configured channels
     log.py             # logging setup
+    netlog.py          # concise "called hcai .../called tool ..." log lines
   prompts/
     system_prompt.md   # noodle's persona + reply style + tool instructions
   logs/                # created at runtime (noodle.log)
@@ -168,7 +207,15 @@ logs go to the console either way; the code also tries to write
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in a channel |
 | `DAILY_PING_REMINDER` | `HH:MM` time for the `@matthias-day` reminder dm (Europe/Amsterdam) |
 | `DAILY_MORNING_DM` | `HH:MM` time for the morning wakeup dm (Europe/Amsterdam) |
+| `DAILY_WRAPUP_DM` | `HH:MM` end-of-day wrap-up dm (default `21:30`) |
+| `WEEKLY_JOURNAL` / `WEEKLY_DIGEST` | `<mon..sun> HH:MM` weekly journal recap (`sun 18:00`) / busiest-channels digest (`mon 09:00`) |
+| `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`) / max per day (default 10) |
+| `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | private, set in `.env` only: morning dm places (comma separated) / default place for `get_weather` |
+| `LASTFM_API_KEY` / `LASTFM_USER` | optional, enables `now_playing` |
+| `GITHUB_TOKEN` / `GITHUB_USER` / `GITHUB_POLL_SECONDS` | optional classic token (`repo`, `notifications`): enables the `github` tool and the notification watcher |
+| `FREEDOM_API_BASE` / `FREEDOM_API_KEY` / `FREEDOM_DEVICE_NAMES` | matthias's self-hosted freedom api; key optional (unset disables the freedom tools); device names are the only devices ever blocked |
 | `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
+| `MATTHIAS_DAY_CHANNEL_ID` | channel the daily recap pings are posted in |
 | `WATCHED_CHANNEL_ID` | channel to watch for joins/leaves; empty disables the feature |
 | `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
 | `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |

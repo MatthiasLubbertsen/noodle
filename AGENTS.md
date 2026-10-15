@@ -191,6 +191,38 @@ no nested `noodle/noodle` folder.
   pattern without breaking legitimate lookups), so it reduces but doesn't
   100% guarantee this can't recur.
 
+### 4a. tool reference (all of them)
+every tool lives in `bot/tools.py` (definitions in `TOOLS`, dispatch in
+`run_tool()`); the `freedom` tool's logic is in `bot/freedom_tool.py`. "matthias
+only" is enforced in code against the real slack sender id, never left to the
+model. details for each are in the numbered sections below (4b-* search/fetch/
+memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
+
+| tool | what it does | who can use it |
+| --- | --- | --- |
+| `search_slack_messages` | search slack as noodle's own account (only what it can see) | anyone |
+| `fetch_slack_message` | read the real text of one message from its link; silently joins a public channel it can't read yet, but only when matthias asked | anyone |
+| `flaron` | look up users, channels, apps, emoji, commands in the public flaron directory | anyone |
+| `search_memory` | semantic (vector) search of noodle's persisted memory: dms, threads, pings, journal, daily facts | matthias only |
+| `web_search` | short cited answer from the live web (exa via hack club ai) | anyone |
+| `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
+| `now_playing` | what matthias is listening to, via last.fm scrobbles | anyone |
+| `github` | repo, commits, issues, pulls, search, notifications, commits today | matthias only |
+| `get_journal` | his `@matthias-day` recaps for a date range (plain date filter, not vector search) | matthias only |
+| `summarize_thread` | reads a whole thread (link or current thread) so the model can tl;dr it; same auto-join rule as `fetch_slack_message` | anyone |
+| `freedom` | the full freedom.to toolbox: devices, blocklists, sessions, schedules, history (13 actions); only ever touches matthias's own devices | matthias only |
+| `start_freedom_session` | simple "block everything on my devices for N minutes" | matthias only |
+| `schedule_freedom_session` | hand a later or recurring session to freedom's own scheduler | matthias only |
+| `schedule_reminder` | remind him later (one-off or repeating) in a dm, channel or thread | matthias only |
+| `list_scheduled` | list scheduled reminders and freedom sessions | matthias only |
+| `cancel_scheduled` | cancel one reminder or freedom session by id | matthias only |
+
+**adding or changing a tool?** update all of these together: the `TOOLS` entry
+and `run_tool()` dispatch in `bot/tools.py`, the "using tools" section and the
+leaked-name list in `prompts/system_prompt.md` (`_TOOL_NAMES` in `bot/llm.py`
+is derived from `TOOLS`, so that one is automatic), the matthias-only line in
+`llm._runtime_context()` if it's restricted, this table, and the README table.
+
 ### 4b. tools (slack search)
 - noodle can search slack using its own user token via the `search_messages`
   web api, exposed to the model as an openai-style **function/tool call**
