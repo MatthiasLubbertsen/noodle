@@ -126,3 +126,51 @@ def delete_schedule(schedule_id: int) -> dict | None:
     """DELETE /api/schedules/{id} - a recurring schedule or an upcoming
     one-off session."""
     return _call("DELETE", f"/api/schedules/{int(schedule_id)}")
+
+
+def get_devices_refreshed() -> list[dict] | None:
+    """POST /api/devices/refresh - ask freedom to refresh device states, then
+    the device list (None on failure)."""
+    data = _call("POST", "/api/devices/refresh")
+    if data is None or data.get("error"):
+        return None
+    return data.get("devices")
+
+
+def list_blocklists() -> dict | None:
+    """GET /api/blocklists -> {"blocklists": [...]} (or {"error": ...})"""
+    return _call("GET", "/api/blocklists")
+
+
+def auth_status() -> dict | None:
+    """GET /api/auth/status -> whether the stored freedom login works, plus
+    account type, timezone and Locked Mode."""
+    return _call("GET", "/api/auth/status")
+
+
+def session_history(page: int = 1) -> dict | None:
+    """GET /api/sessions/history?page=N -> {"sessions": [...], "meta": {...}}"""
+    return _call("GET", f"/api/sessions/history?page={int(page)}")
+
+
+def start_session_raw(payload: dict) -> dict | None:
+    """POST /api/sessions with a caller-built payload (blocklists, device
+    ids, start/end time...). the caller owns the device-safety rules."""
+    return _call("POST", "/api/sessions", payload)
+
+
+def create_schedule_raw(payload: dict) -> dict | None:
+    """POST /api/schedules with a caller-built payload."""
+    return _call("POST", "/api/schedules", payload)
+
+
+def update_schedule(schedule_id: int, changes: dict) -> dict | None:
+    """PATCH /api/schedules/{id} - partial update."""
+    return _call("PATCH", f"/api/schedules/{int(schedule_id)}", changes)
+
+
+def end_session(session_id: int, use_credit: bool = False) -> dict | None:
+    """POST /api/sessions/{id}/end - end ONE running session (never the
+    account-wide end-all: that would also end matthias's dad's sessions)."""
+    payload = {"use_end_session_credit": True} if use_credit else None
+    return _call("POST", f"/api/sessions/{int(session_id)}/end", payload)

@@ -87,9 +87,10 @@ def forecast_text(location: str, days: int = 1) -> str:
     return "\n".join(lines)
 
 
-def morning_weather_message() -> str | None:
-    """one short, hand-written weather message for the morning dm covering
-    every configured location, or None if nothing could be fetched."""
+def morning_weather_facts() -> str | None:
+    """plain-text forecast lines for every configured location (the facts the
+    morning dm's weather message is written from), or None if nothing could
+    be fetched."""
     lines = []
     for place in config.WEATHER_LOCATIONS:
         try:
@@ -113,4 +114,4 @@ def morning_weather_message() -> str | None:
             logger.exception("morning weather failed for %r", place)
     if not lines:
         return None
-    return "weather today:\n" + "\n".join(lines)
+    return "\n".join(lines)

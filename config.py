@@ -77,7 +77,9 @@ QUIET_HOURS = os.getenv("QUIET_HOURS", "23:00-07:30")
 PROACTIVE_DAILY_CAP = int(os.getenv("PROACTIVE_DAILY_CAP", "10"))
 
 # --- weather (open-meteo, no key needed) ---
-# places for the morning dm and the default for the get_weather tool
+# the get_weather tool's default when no place is given
+WEATHER_DEFAULT_LOCATION = os.getenv("WEATHER_DEFAULT_LOCATION", "")
+# places covered by the morning dm
 WEATHER_LOCATIONS = [
     n.strip() for n in os.getenv("WEATHER_LOCATIONS", "").split(",") if n.strip()
 ]

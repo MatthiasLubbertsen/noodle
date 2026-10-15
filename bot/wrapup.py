@@ -2,7 +2,7 @@ import logging
 
 import config
 from bot import github, lastfm
-from bot.oneshot import complete
+from bot.oneshot import complete, remember_facts
 from bot.stats import messages_sent_today
 
 logger = logging.getLogger("noodle")
@@ -29,11 +29,12 @@ def build_wrapup_message() -> str | None:
         facts.append(f"tracks played today: {tracks}")
     if not facts:
         return None
+    remember_facts("end-of-day stats", "\n".join(facts))
 
     text = complete(
         "it's the end of the day. write ONE short wrap-up message for matthias in "
         "your own voice, 2-3 sentences max, using only the facts below. be warm, "
-        "not a report; skip any stat that is zero or boring. do NOT mention, "
+        "not a report; mention the actual numbers, but skip any stat that is zero or boring. do NOT mention, "
         "remind about or draft his @matthias-day recap - he writes that himself.\n\n"
         "facts:\n" + "\n".join(facts),
         max_tokens=200,

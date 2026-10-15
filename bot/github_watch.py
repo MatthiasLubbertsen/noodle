@@ -3,6 +3,7 @@ import logging
 
 import config
 from bot import github
+from bot.oneshot import complete, remember_facts
 
 logger = logging.getLogger("noodle")
 
@@ -51,9 +52,8 @@ def mark_seen(items: list[dict]) -> None:
     _save_seen(seen)
 
 
-def format_message(items: list[dict]) -> str:
-    plural = "notification" if len(items) == 1 else "notifications"
-    lines = [f"github: {len(items)} new {plural}"]
+def format_facts(items: list[dict]) -> str:
+    lines = []
     for n in items[:MAX_LINES]:
         repo = n["repository"]["full_name"]
         url = github.html_url(n["subject"].get("url"), repo)
@@ -62,3 +62,24 @@ def format_message(items: list[dict]) -> str:
     if len(items) > MAX_LINES:
         lines.append(f"...and {len(items) - MAX_LINES} more")
     return "\n".join(lines)
+
+
+def compose_message(items: list[dict]) -> str:
+    """the dm about new notifications: persona-written from the facts (not a
+    templated line), links kept verbatim. the raw facts are saved to memory too."""
+    facts = format_facts(items)
+    remember_facts("github notifications", facts)
+    text = complete(
+        "new github notifications just came in for matthias. tell him about them in "
+        "your own voice, short and casual: what each one is and why it matters "
+        "(review requested, ci failed, mention...). keep every link exactly as given. "
+        "use ONLY these facts.\n\nfacts:\n" + facts,
+        max_tokens=350,
+    )
+    if text and all(url in text for url in _urls(facts)):
+        return text
+    return "github, new notifications:\n" + facts
+
+
+def _urls(facts: str) -> list[str]:
+    return [w for line in facts.splitlines() for w in line.split() if w.startswith("https://")]

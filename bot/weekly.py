@@ -5,7 +5,7 @@ import time
 import config
 from bot import state
 from bot.history_store import load_kind_between
-from bot.oneshot import complete
+from bot.oneshot import complete, remember_facts
 from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
@@ -88,21 +88,17 @@ def build_channel_digest() -> str | None:
         return None
     if not top:
         return None
-    blocks = "\n\n".join(f"### {cid}\n{_transcript(msgs)}" for cid, _, msgs in top)
-    raw = complete(
-        "below are recent messages from the busiest slack channels this week. for "
-        "EACH channel write ONE short plain sentence on what it was mostly about, "
-        "no mentions or names. answer with exactly one line per channel, in the "
-        "same order, formatted `CHANNELID|sentence` and nothing else.\n\n" + blocks,
-        max_tokens=400,
+    blocks = "\n\n".join(f"### <#{cid}> ({count} messages)\n{_transcript(msgs)}" for cid, count, msgs in top)
+    facts = "\n".join(f"- <#{cid}>: {count}{'+' if count >= 200 else ''} messages" for cid, count, _ in top)
+    remember_facts("busiest channels this week", facts)
+    text = complete(
+        "below are recent messages from the busiest slack channels this week. write "
+        "matthias a short weekly digest in your own voice: one line per channel on "
+        "what it was mostly about, with the message count. refer to each channel by "
+        "its <#CHANNELID> mention exactly as given (never plain #names), and don't "
+        "name or tag people. use ONLY what's below.\n\n" + blocks,
+        max_tokens=500,
     )
-    summaries = {}
-    for line in (raw or "").splitlines():
-        cid, _, sentence = line.partition("|")
-        if sentence.strip():
-            summaries[cid.strip()] = sentence.strip()
-    lines = ["busiest channels this week:"]
-    for cid, count, _ in top:
-        suffix = f" - {summaries[cid]}" if cid in summaries else ""
-        lines.append(f"- <#{cid}> ({count}{'+' if count >= 200 else ''} messages){suffix}")
-    return "\n".join(lines)
+    if text and all(f"<#{cid}>" in text for cid, _, _ in top):
+        return text
+    return "busiest channels this week:\n" + facts

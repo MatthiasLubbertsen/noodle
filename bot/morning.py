@@ -4,7 +4,9 @@ import config
 from bot import state
 from bot.almanac import fun_holidays_today
 from bot.news import unread_articles
+from bot.oneshot import complete, remember_facts
 from bot.slack_text import _clean_reply
+from bot.weather import morning_weather_facts
 
 logger = logging.getLogger("noodle")
 
@@ -52,3 +54,21 @@ def build_news_message() -> str | None:
     lines = [f"oh and {count} new hack club news {plural} dropped:"]
     lines += [f"- {a['title']}: {a['link']}" for a in articles[:5]]
     return "\n".join(lines)
+
+
+def build_weather_message() -> str | None:
+    """a short persona-written weather update (from open-meteo facts) for the
+    morning dm, or None if the forecast couldn't be fetched. the raw facts are
+    also saved to memory."""
+    facts = morning_weather_facts()
+    if not facts:
+        return None
+    remember_facts("weather forecast", facts)
+    text = complete(
+        "it's morning. tell matthias today's weather in your own voice: 1-3 short "
+        "sentences covering the places below, with the actual temperatures and any "
+        "rain. if the places are about the same, say so once instead of repeating "
+        "yourself. use ONLY these facts.\n\nfacts:\n" + facts,
+        max_tokens=200,
+    )
+    return text or "weather today:\n" + facts

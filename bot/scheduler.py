@@ -9,9 +9,8 @@ from bot.chunk import chunk_response
 from bot.history_store import append_message_async
 from bot.llm import _kind_for
 from bot.memory import dm_conv_key, trim_memory
-from bot.morning import build_greeting_message, build_news_message
+from bot.morning import build_greeting_message, build_news_message, build_weather_message
 from bot.tz import AMSTERDAM_TZ
-from bot.weather import morning_weather_message
 from bot.weekly import build_channel_digest, build_journal_recap
 from bot.wrapup import build_wrapup_message
 
@@ -91,7 +90,7 @@ def _send_ping_reminder() -> None:
 def _send_morning_dm() -> None:
     try:
         _post_dm(build_greeting_message())
-        weather = morning_weather_message()
+        weather = build_weather_message()
         if weather:
             time.sleep(config.CHUNK_DELAY_SECONDS)
             _post_dm(weather)
@@ -143,7 +142,7 @@ def _check_github() -> None:
     items = github_watch.new_notifications()
     if not items:
         return
-    _post_dm(github_watch.format_message(items))
+    _post_dm(github_watch.compose_message(items))
     github_watch.mark_seen(items)
     proactive.record_sent()
     logger.info("sent github watcher dm (%d notification(s))", len(items))

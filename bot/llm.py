@@ -13,6 +13,10 @@ from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
 
+# each round the model can call several tools at once (run in order); results go
+# back and it can call more, e.g. list devices -> list blocklists -> start session.
+MAX_TOOL_ROUNDS = 8
+
 _TOOL_NAMES = {t["function"]["name"] for t in TOOLS}
 
 
@@ -157,7 +161,7 @@ def ask_noodle(
 
     messages = [{"role": "system", "content": system_content}] + history
     leak_retried = False
-    for _ in range(5):
+    for _ in range(MAX_TOOL_ROUNDS):
         response = _call_chat(messages, tools=TOOLS, tool_choice="auto", detail=first4)
         message = response.choices[0].message
         if not message.tool_calls:

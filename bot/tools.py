@@ -10,6 +10,9 @@ from bot.embeddings import embed_text
 from bot import github as github_api
 from bot import lastfm
 from bot.exa import web_answer
+from bot import freedom_tool
+from bot.freedom_tool import error_message as _freedom_error_message
+from bot.freedom_tool import my_schedules
 from bot.freedom import create_schedule as freedom_create_schedule
 from bot.freedom import delete_schedule as freedom_delete_schedule
 from bot.freedom import list_devices as freedom_list_devices
@@ -41,6 +44,8 @@ FLARON_DOCS = (
     "returns the FULL json from flaron, so you can read every field (ids, names, "
     "titles, descriptions, topics, counts, etc)."
 )
+
+ACTIONS_LIST = freedom_tool.ACTIONS
 
 TOOLS = [
     {
@@ -211,6 +216,51 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "freedom",
+            "description": (
+                "the full freedom.to toolbox for matthias's account (matthias only, "
+                "enforced on the server). use it for anything more specific than "
+                "start_freedom_session's plain 'block everything on all my "
+                "devices': blocking only certain devices and/or certain blocklists, "
+                "listing devices/blocklists/sessions/schedules/history, ending a "
+                "running session, creating/editing/deleting recurring schedules. "
+                "the account is shared with his dad, so noodle can only ever target "
+                "and see matthias's own devices (anything else is refused). actions: "
+                "auth_status, list_devices, refresh_devices, list_blocklists, "
+                "list_sessions (running + upcoming one-offs), session_history, "
+                "start_session, end_session, end_all_sessions, list_schedules "
+                "(recurring), create_schedule, update_schedule, delete_schedule. "
+                "you can chain several calls in a row (e.g. list_blocklists, then "
+                "start_session with the right names). devices and blocklists can be "
+                "given by name or id; leave devices empty for all of matthias's "
+                "devices. times are HH:MM in freedom's timezone (see auth_status "
+                "or list_sessions)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ACTIONS_LIST},
+                    "id": {"type": "string", "description": "session/schedule id (e.g. 'freedom:123' or '123') for end_session, update_schedule, delete_schedule"},
+                    "duration_minutes": {"type": "integer", "description": "1-1440"},
+                    "start_time": {"type": "string", "description": "HH:MM; start_session starts then (today/tomorrow, premium); create/update_schedule start"},
+                    "end_time": {"type": "string", "description": "HH:MM, alternative to duration_minutes"},
+                    "name": {"type": "string", "description": "schedule/session name"},
+                    "days": {"type": "array", "items": {"type": "string", "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}, "description": "for create/update_schedule"},
+                    "devices": {"type": "array", "items": {"type": "string"}, "description": "device names or ids to block on; must be matthias's own. empty = all of his"},
+                    "blocklists": {"type": "array", "items": {"type": "string"}, "description": "blocklist names or ids to block. if given (and block_everything isn't), only these are blocked"},
+                    "block_everything": {"type": "boolean", "description": "block all websites (default when no blocklists/apps are given)"},
+                    "block_apps": {"type": "boolean", "description": "also block desktop apps"},
+                    "page": {"type": "integer", "description": "session_history page"},
+                    "use_end_session_credit": {"type": "boolean", "description": "ONLY if matthias explicitly says to spend a Locked Mode end-session credit"},
+                    "confirm_permanent": {"type": "boolean", "description": "ONLY after matthias confirms a 24h x 7 day block under Locked Mode"},
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "schedule_reminder",
             "description": (
                 "schedule a reminder for LATER (or on a repeat): noodle posts a "
@@ -344,14 +394,13 @@ TOOLS = [
             "name": "get_weather",
             "description": (
                 "get the weather forecast (right now + the next few days) for a "
-                "place, via open-meteo. leave location empty for matthias's usual "
-                "places (set in the env). use only when weather is actually "
+                "place, via open-meteo. leave location empty for matthias's own location. use only when weather is actually "
                 "asked about."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "location": {"type": "string", "description": "a place name, e.g. 'utrecht'. empty = matthias's usual places"},
+                    "location": {"type": "string", "description": "a place name, e.g. 'utrecht'. empty = matthias's own location"},
                     "days": {"type": "integer", "description": "days to cover incl. today (1-7), default 1"},
                 },
             },
@@ -594,7 +643,7 @@ def _web_search(query: str) -> str:
 
 
 def _get_weather(location: str | None, days) -> str:
-    places = [location.strip()] if location and location.strip() else config.WEATHER_LOCATIONS
+    places = [location.strip()] if location and location.strip() else [config.WEATHER_DEFAULT_LOCATION]
     log_tool("get_weather", ", ".join(places), "success")
     return "\n".join(forecast_text(p, days or 1) for p in places)
 
@@ -764,17 +813,6 @@ def _schedule_reminder(args: dict, user_id: str | None, origin: dict | None) -> 
 _FREEDOM_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
-def _freedom_error_message(error: dict) -> str:
-    code = error.get("code")
-    if code == "freedom_reauth_required":
-        return "freedom's login expired on the server - matthias needs to run `freedomd login` again before this will work."
-    if code == "premium_required":
-        return "that needs a freedom premium feature that isn't available on this account."
-    if code == "no_devices":
-        return "freedom says none of matthias's devices are registered to block on."
-    return f"freedom rejected the request: {error.get('message') or code}"
-
-
 def _my_freedom_device_ids():
     """ids of matthias's OWN freedom devices, or an error string.
 
@@ -912,27 +950,6 @@ def _schedule_freedom_session(args: dict, user_id: str | None) -> str:
     )
 
 
-def _my_freedom_schedules(device_ids: list) -> tuple[list[dict], str]:
-    """upcoming one-off + recurring freedom sessions that are matthias's:
-    every device on them must be one of his (the account is shared)."""
-    mine = set(device_ids)
-    found: dict = {}
-    tz = ""
-    for data, keys in (
-        (freedom_list_schedules(), ("schedules",)),
-        (freedom_list_sessions(), ("active", "upcoming")),
-    ):
-        if not data or data.get("error"):
-            continue
-        tz = tz or data.get("timezone") or ""
-        for k in keys:
-            for s in data.get(k) or []:
-                ids = s.get("device_ids") or []
-                if ids and set(ids) <= mine:
-                    found[s["id"]] = s
-    return list(found.values()), tz
-
-
 def _describe_freedom(s: dict, tz: str) -> str:
     mins = s.get("duration_minutes") or (s.get("duration_seconds") or 0) // 60
     if s.get("recurring"):
@@ -957,8 +974,8 @@ def _list_scheduled(user_id: str | None) -> str:
         if isinstance(device_ids, str):
             lines.append(f"(couldn't list freedom sessions: {device_ids})")
         else:
-            sessions, tz = _my_freedom_schedules(device_ids)
-            lines += [_describe_freedom(s, tz) for s in sessions]
+            sessions, tz = my_schedules(device_ids)
+            lines += [_describe_freedom(s, tz) for s in sessions.values()]
     log_tool("list_scheduled", "", f"{len(lines)} items")
     return "\n".join(lines) if lines else "nothing is scheduled right now."
 
@@ -979,8 +996,8 @@ def _cancel_scheduled(raw_id, user_id: str | None) -> str:
         if isinstance(device_ids, str):
             return device_ids
         # only ever touch sessions that are matthias's (shared account)
-        sessions, _tz = _my_freedom_schedules(device_ids)
-        target = next((s for s in sessions if s["id"] == fid), None)
+        sessions, _tz = my_schedules(device_ids)
+        target = sessions.get(fid)
         if target is None:
             log_tool("cancel_scheduled", raw, "not found")
             return f"no freedom session {raw} among matthias's scheduled ones."
@@ -1025,6 +1042,8 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return _web_search(args.get("query", ""))
     if name == "start_freedom_session":
         return _start_freedom_session(args.get("duration_minutes"), user_id=user_id)
+    if name == "freedom":
+        return freedom_tool.run(args, user_id)
     if name == "schedule_reminder":
         return _schedule_reminder(args, user_id=user_id, origin=origin)
     if name == "schedule_freedom_session":
