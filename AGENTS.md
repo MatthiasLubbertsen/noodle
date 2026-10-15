@@ -56,6 +56,16 @@ noodle/
     matthias_day.py       # clean + persist @matthias-day recap pings into memory
     reminders.py          # scheduled reminders: sqlite store + recurrence math
     freedom.py            # calls matthias's self-hosted freedom.to focus-session api
+    freedom_tool.py       # the full `freedom` tool (devices, blocklists, sessions, schedules)
+    httpjson.py           # tiny shared GET-json helper (one retry) for the apis below
+    weather.py            # open-meteo forecasts (morning dm + get_weather tool)
+    lastfm.py             # last.fm now playing / tracks today (now_playing tool)
+    github.py             # github rest calls (github tool, commit count)
+    github_watch.py       # new-notification diffing + persisted "seen" state
+    proactive.py          # quiet hours + daily cap for unprompted pings
+    oneshot.py            # one-off persona completion for scheduled messages
+    wrapup.py             # end-of-day wrap-up dm
+    weekly.py             # weekly journal recap + busiest-channel digest
     log.py                # logging setup
     netlog.py             # concise "called hcai .../called tool ..." log lines
   scripts/
@@ -696,6 +706,104 @@ no nested `noodle/noodle` folder.
   history turns are prefixed `<@USERID>:` (persisted text is unchanged).
   short-term memory is `state.MEMORY` (last ~12 turns).
 
+### 7c. weather, music, github, wrap-ups, weekly jobs, thread tl;drs
+all of these are optional and fail soft (a missing key or a dead api just
+skips that piece, never breaks startup or a dm).
+- **everything new goes through the model and into memory.** every message
+  below is persona-written from facts (never a templated line; a plain-text
+  fallback is only used if the model call fails or drops a link/channel
+  mention), delivered through `_deliver()` (so the message itself is embedded
+  and persisted as a dm turn), AND the raw facts behind it are saved as their
+  own `kind="daily_facts"` rows (`oneshot.remember_facts()`, conv_key
+  `facts:<date>`) so `search_memory` can find e.g. a day's weather, tracks
+  played or commit count even if the message left a detail out.
+- **morning dm** (`scheduler._send_morning_dm`): greeting, then a separate
+  model-written weather message (`morning.build_weather_message()`, facts from
+  `weather.morning_weather_facts()`, open-meteo, no key, places from
+  `WEATHER_LOCATIONS`, set in `.env` only), then news if any.
+  `get_weather` with no place uses `WEATHER_DEFAULT_LOCATION` (also `.env`). calendar is NOT included: matthias can't create the google
+  oauth app it needs.
+- **tools** (`bot/tools.py`): `get_weather` (any place; none = `WEATHER_DEFAULT_LOCATION`), `now_playing` (last.fm, since
+  matthias can't create more spotify apps - spotify scrobbling to last.fm
+  needs no oauth), `github` (repo/commits/issues/pulls/search/notifications/
+  today; **matthias-only, checked server-side**, because his token sees
+  private repos), `get_journal` (his `@matthias-day` recaps for a date range - a plain
+  sql date filter on the `matthias_day` rows, NOT vector search; `search_memory`
+  is the vector/topic lookup) and `summarize_thread` (returns a
+  thread transcript, from a permalink or the current thread, for the model to
+  tl;dr). notes/`remember_this` tools were deliberately NOT built: every dm,
+  thread and ping is already persisted and embedded.
+- **end-of-day wrap-up** (`wrapup.py`, `DAILY_WRAPUP_DM`, default 21:30): a
+  short persona message from slack message count, github commits today and
+  last.fm tracks today. it NEVER drafts or mentions the `@matthias-day`
+  recap - matthias writes that himself.
+- **weekly** (`weekly.py`, `_run_weekly()` in the scheduler): a recap of the
+  last 7 days of `matthias_day` rows built only from those rows
+  (`WEEKLY_JOURNAL`, default `sun 18:00`), and a digest of the busiest
+  channels noodle is in (`WEEKLY_DIGEST`, default `mon 09:00`: scans
+  `users_conversations` + 7 days of `conversations_history`, top 5 with >=10
+  messages, one model call for a sentence each, links as `<#ID>`). like all
+  scheduled dms they go through `_deliver()`, so they are saved to memory and
+  searchable.
+- **github watcher** (`github_watch.py`, started only if `GITHUB_TOKEN` is
+  set): polls `/notifications` every `GITHUB_POLL_SECONDS`, DMs one message
+  per poll for notifications not yet reported (ignores `subscribed`), state in
+  `data/github_seen.json`. first run ever baselines what is already unread and
+  reports nothing. needs a CLASSIC token (`repo` + `notifications`); fine-
+  grained tokens can't read notifications.
+- **proactivity guardrails** (`proactive.py`): the watcher is the only
+  unprompted ping, so it's held during `QUIET_HOURS` (default 23:00-07:30) and
+  capped at `PROACTIVE_DAILY_CAP` dms/day (state in
+  `data/proactive_state.json`). held notifications stay unreported and go out
+  on the next allowed poll. fixed-time dms are exempt.
+
+### 7d. the `freedom` tool (full freedom api / mcp surface)
+`bot/freedom_tool.py` exposes everything freedom's mcp has as ONE tool with an
+`action`: `auth_status`, `list_devices`, `refresh_devices`, `list_blocklists`,
+`list_sessions`, `session_history`, `start_session`, `end_session`,
+`end_all_sessions`, `list_schedules`, `create_schedule`, `update_schedule`,
+`delete_schedule`. start/create/update take `devices` and `blocklists` by name
+or id (so "block only mopa5m with the social blocklist" works),
+`block_everything`/`block_apps`, `start_time`/`end_time`/`duration_minutes`,
+`days`. the simple `start_freedom_session` / `schedule_freedom_session` /
+`list_scheduled` / `cancel_scheduled` tools still exist for the plain cases.
+- **safety, enforced in code, because the account is shared with his dad:**
+  matthias-only; never `all_devices`; any requested device outside
+  `FREEDOM_DEVICE_NAMES` is REFUSED (not silently dropped); noodle only lists,
+  ends, edits or deletes sessions/schedules whose devices are ALL his;
+  `end_all_sessions` ends his running sessions one by one rather than calling
+  freedom's account-wide end-all; history is filtered to his devices; session
+  stats are not exposed (freedom only gives them account-wide). blocklists are
+  account-wide, so `list_blocklists` shows all of them (names, counts, domains).
+- no devices given = all of matthias's devices; no blocklists/apps given =
+  block everything; blocklists given = only those. `use_end_session_credit` and
+  `confirm_permanent` are only to be set when he explicitly says so.
+- **multiple tool calls:** `llm.ask_noodle()` runs up to `MAX_TOOL_ROUNDS` (8)
+  rounds; each round may contain several tool calls (run in order) and their
+  results go back to the model, so chains like list devices -> list blocklists
+  -> start session all happen before the reply. only the final text is sent.
+
+### 7e. privacy: weather location, memory access, channel joining
+- **matthias's location is private.** `WEATHER_LOCATIONS` and
+  `WEATHER_DEFAULT_LOCATION` come only from `.env` (no defaults in code, docs
+  or prompts). the morning weather goes to his dm only. `get_weather` outside a
+  dm (`origin["is_dm"]` false) never gives the model or anyone the place name
+  for his own location: the forecast is labelled "current location" (this also
+  applies if the model passes one of his configured places by name). a place
+  someone else names is looked up normally. the system prompt also forbids
+  naming/guessing where he lives outside a dm.
+- **`search_memory` and `get_journal` are matthias-only**, checked in
+  `bot/tools.py` against the real sender id (memory holds his dms with noodle).
+  `github` and `freedom` already were.
+- **joining channels** (`bot/channels.py`, nothing is ever posted): at startup
+  `ensure_joined()` joins the configured channels it isn't in
+  (`MATTHIAS_DAY_CHANNEL_ID`, `WATCHED_CHANNEL_ID`, `LOGS_CHANNEL_ID`, explicit
+  `ALLOWED_CHANNELS` ids; not `*`). also, `fetch_slack_message` and
+  `summarize_thread` auto-join a public channel they can't read yet and retry,
+  but only when matthias asked. needs the `channels:join` scope; private
+  channels still need an invite (logged as a warning). slack itself shows a
+  standard "noodle joined" line.
+
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
   (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore
@@ -755,6 +863,12 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `FREEDOM_API_BASE` | base url of matthias's self-hosted freedom api (defaults to `https://freedom.matthiaz.dev`) |
 | `FREEDOM_API_KEY` | bearer key for that api; optional - unset just disables `start_freedom_session` |
 | `FREEDOM_DEVICE_NAMES` | comma separated device names (as shown in freedom's dashboard) allowed to be blocked - the account is shared, so this is never "all devices" (defaults to `Matthias Windows,mopa5m`) |
+| `DAILY_WRAPUP_DM` | `HH:MM`, end-of-day wrap-up dm (default `21:30`) |
+| `WEEKLY_JOURNAL` / `WEEKLY_DIGEST` | `<mon..sun> HH:MM`, weekly journal recap (`sun 18:00`) / busiest-channels digest (`mon 09:00`) |
+| `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`), max per day (default 10) |
+| `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | PRIVATE, no defaults in code: morning dm places (comma separated) / get_weather default place |
+| `LASTFM_API_KEY` / `LASTFM_USER` | last.fm key + username; optional, enables `now_playing` |
+| `GITHUB_TOKEN` / `GITHUB_USER` / `GITHUB_POLL_SECONDS` | classic token (`repo`, `notifications`); optional, enables the github tool + watcher |
 | `WATCHED_CHANNEL_ID` | channel watched for joins/leaves; empty disables it |
 | `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
 | `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |

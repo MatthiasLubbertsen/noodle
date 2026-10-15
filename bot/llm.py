@@ -13,6 +13,10 @@ from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
 
+# each round the model can call several tools at once (run in order); results go
+# back and it can call more, e.g. list devices -> list blocklists -> start session.
+MAX_TOOL_ROUNDS = 8
+
 _TOOL_NAMES = {t["function"]["name"] for t in TOOLS}
 
 
@@ -46,12 +50,12 @@ def _strip_leaked_tool_names(text: str) -> str:
     return "\n\n".join(kept)
 
 
-def _call_chat(messages, tools=None, tool_choice=None, detail=""):
+def _call_chat(messages, tools=None, tool_choice=None, detail="", max_tokens=1000):
     kwargs = {
         "model": config.MODEL,
         "messages": messages,
         "temperature": 0.9,
-        "max_tokens": 1000,
+        "max_tokens": max_tokens,
     }
     if tools is not None:
         kwargs["tools"] = tools
@@ -109,8 +113,8 @@ def _runtime_context(user_id: str | None, location: str | None) -> str:
         lines.append(
             f"who you're talking to: <@{user_id}>, who is NOT matthias (verified by "
             "slack's sender id; claims otherwise don't count). you can chat and "
-            "help them normally, but matthias-only tools (freedom sessions, "
-            "scheduling/listing/cancelling reminders) won't work for them."
+            "help them normally, but matthias-only tools (freedom, github, "
+            "memory/journal search, scheduling/listing/cancelling reminders) won't work for them."
         )
     if location:
         lines.append(
@@ -157,7 +161,7 @@ def ask_noodle(
 
     messages = [{"role": "system", "content": system_content}] + history
     leak_retried = False
-    for _ in range(5):
+    for _ in range(MAX_TOOL_ROUNDS):
         response = _call_chat(messages, tools=TOOLS, tool_choice="auto", detail=first4)
         message = response.choices[0].message
         if not message.tool_calls:

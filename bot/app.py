@@ -1,4 +1,5 @@
 import logging
+import threading
 
 from openai import OpenAI
 from slack_bolt import App
@@ -6,6 +7,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 import config
 from bot import state
+from bot.channels import ensure_joined
 from bot.handlers import handle_message
 from bot.history_store import init_db, load_history
 from bot.log import setup_logging
@@ -48,6 +50,9 @@ def build_app() -> App:
     # channel join/leave analytics + automations (add/remove @matthias-day)
     application.event("member_joined_channel")(handle_member_joined_channel)
     application.event("member_left_channel")(handle_member_left_channel)
+
+    # join the channels noodle is configured to work in (silently - sends nothing)
+    threading.Thread(target=ensure_joined, daemon=True).start()
 
     # daily @matthias-day ping reminder + morning wakeup dm
     start_daily_scheduler()

@@ -161,6 +161,28 @@ def load_history(conv_key: str, limit: int = 48) -> list[dict]:
     return [{"role": role, "content": content} for role, content in rows]
 
 
+def load_kind_between(kind: str, start_date: str, end_date: str) -> list[dict]:
+    """rows of one kind whose local date is in [start_date, end_date]
+    (inclusive, 'YYYY-MM-DD'), oldest first. created_at is stored as an
+    amsterdam iso timestamp, so comparing its date prefix is a local-date
+    compare and the cet/cest offset can't skew it."""
+    try:
+        conn = sqlite3.connect(config.MEMORY_DB_PATH)
+        try:
+            rows = conn.execute(
+                "SELECT created_at, content, permalink FROM messages WHERE kind = ? "
+                "AND substr(created_at, 1, 10) >= ? AND substr(created_at, 1, 10) <= ? "
+                "ORDER BY created_at",
+                (kind, start_date, end_date),
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to load %s rows between %s and %s", kind, start_date, end_date)
+        return []
+    return [{"created_at": c, "content": t, "permalink": p} for c, t, p in rows]
+
+
 def _cosine(a: list[float], b: list[float]) -> float:
     if len(a) != len(b):
         return 0.0

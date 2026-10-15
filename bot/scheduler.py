@@ -4,13 +4,15 @@ import threading
 import time
 
 import config
-from bot import reminders, state
+from bot import github, github_watch, proactive, reminders, state
 from bot.chunk import chunk_response
 from bot.history_store import append_message_async
 from bot.llm import _kind_for
 from bot.memory import dm_conv_key, trim_memory
-from bot.morning import build_greeting_message, build_news_message
+from bot.morning import build_greeting_message, build_news_message, build_weather_message
 from bot.tz import AMSTERDAM_TZ
+from bot.weekly import build_channel_digest, build_journal_recap
+from bot.wrapup import build_wrapup_message
 
 logger = logging.getLogger("noodle")
 
@@ -88,6 +90,10 @@ def _send_ping_reminder() -> None:
 def _send_morning_dm() -> None:
     try:
         _post_dm(build_greeting_message())
+        weather = build_weather_message()
+        if weather:
+            time.sleep(config.CHUNK_DELAY_SECONDS)
+            _post_dm(weather)
         news = build_news_message()
         if news:
             time.sleep(config.CHUNK_DELAY_SECONDS)
@@ -95,6 +101,60 @@ def _send_morning_dm() -> None:
         logger.info("sent morning wakeup dm(s) to %s", config.USER_ID)
     except Exception:  # noqa: BLE001
         logger.exception("failed to send morning wakeup dm")
+
+
+def _send_wrapup_dm() -> None:
+    try:
+        text = build_wrapup_message()
+        if text:
+            _post_dm(text)
+            logger.info("sent end-of-day wrap-up dm to %s", config.USER_ID)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to send wrap-up dm")
+
+
+def _send_weekly_journal_dm() -> None:
+    try:
+        text = build_journal_recap()
+        if text:
+            _post_dm(text)
+            logger.info("sent weekly journal recap dm to %s", config.USER_ID)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to send weekly journal recap dm")
+
+
+def _send_weekly_digest_dm() -> None:
+    try:
+        text = build_channel_digest()
+        if text:
+            _post_dm(text)
+            logger.info("sent weekly channel digest dm to %s", config.USER_ID)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to send weekly channel digest dm")
+
+
+def _check_github() -> None:
+    """dm about new github notifications - one dm per poll, held back during
+    quiet hours and once the daily cap is hit (they stay unreported, so they
+    go out in the next allowed poll)."""
+    if not proactive.can_send():
+        return
+    items = github_watch.new_notifications()
+    if not items:
+        return
+    _post_dm(github_watch.compose_message(items))
+    github_watch.mark_seen(items)
+    proactive.record_sent()
+    logger.info("sent github watcher dm (%d notification(s))", len(items))
+
+
+def _run_github_watcher() -> None:
+    while True:
+        try:
+            _check_github()
+        except Exception:  # noqa: BLE001
+            logger.exception("github watcher poll failed")
+        time.sleep(config.GITHUB_POLL_SECONDS)
 
 
 def _fire_reminder(reminder: dict) -> None:
@@ -121,6 +181,31 @@ def _run_reminder_poller() -> None:
         time.sleep(15)
 
 
+_WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def _parse_weekly(value: str, default: tuple[int, int, int]) -> tuple[int, int, int]:
+    """'sun 18:00' -> (weekday 0=mon, hour, minute)"""
+    try:
+        day, hhmm = value.strip().lower().split()
+        hour, minute = _parse_hhmm(hhmm, (default[1], default[2]))
+        return _WEEKDAYS.index(day[:3]), hour, minute
+    except Exception:  # noqa: BLE001
+        logger.warning("invalid weekly time %r, falling back to %s", value, default)
+        return default
+
+
+def _run_weekly(weekday: int, hour: int, minute: int, job) -> None:
+    while True:
+        run_at = _next_run_at(hour, minute)
+        while run_at.weekday() != weekday:
+            run_at += datetime.timedelta(days=1)
+        wait_seconds = (run_at - datetime.datetime.now(AMSTERDAM_TZ)).total_seconds()
+        logger.info("next %s scheduled for %s", job.__name__, run_at.isoformat())
+        time.sleep(max(wait_seconds, 1))
+        job()
+
+
 def _run_daily(hour: int, minute: int, job) -> None:
     while True:
         run_at = _next_run_at(hour, minute)
@@ -139,4 +224,16 @@ def start_daily_scheduler() -> None:
     threading.Thread(
         target=_run_daily, args=(morning_hour, morning_minute, _send_morning_dm), daemon=True
     ).start()
+    wrap_hour, wrap_minute = _parse_hhmm(config.DAILY_WRAPUP_DM, (21, 30))
+    threading.Thread(
+        target=_run_daily, args=(wrap_hour, wrap_minute, _send_wrapup_dm), daemon=True
+    ).start()
+    for raw, default, job in (
+        (config.WEEKLY_JOURNAL, (6, 18, 0), _send_weekly_journal_dm),
+        (config.WEEKLY_DIGEST, (0, 9, 0), _send_weekly_digest_dm),
+    ):
+        weekday, hour, minute = _parse_weekly(raw, default)
+        threading.Thread(target=_run_weekly, args=(weekday, hour, minute, job), daemon=True).start()
+    if github.configured():
+        threading.Thread(target=_run_github_watcher, daemon=True).start()
     threading.Thread(target=_run_reminder_poller, daemon=True).start()

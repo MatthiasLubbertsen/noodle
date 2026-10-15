@@ -7,17 +7,24 @@ import config
 from bot import reminders, state
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
+from bot import github as github_api
+from bot.channels import with_join
+from bot import lastfm
 from bot.exa import web_answer
+from bot import freedom_tool
+from bot.freedom_tool import error_message as _freedom_error_message
+from bot.freedom_tool import my_schedules
 from bot.freedom import create_schedule as freedom_create_schedule
 from bot.freedom import delete_schedule as freedom_delete_schedule
 from bot.freedom import list_devices as freedom_list_devices
 from bot.freedom import list_schedules as freedom_list_schedules
 from bot.freedom import list_sessions as freedom_list_sessions
 from bot.freedom import start_session as freedom_start_session
-from bot.history_store import search_similar
+from bot.history_store import load_kind_between, search_similar
 from bot.netlog import log_tool
 from bot.slack_text import _channel_link, _parse_slack_ref
 from bot.tz import AMSTERDAM_TZ
+from bot.weather import forecast_text
 
 logger = logging.getLogger("noodle")
 
@@ -38,6 +45,8 @@ FLARON_DOCS = (
     "returns the FULL json from flaron, so you can read every field (ids, names, "
     "titles, descriptions, topics, counts, etc)."
 )
+
+ACTIONS_LIST = freedom_tool.ACTIONS
 
 TOOLS = [
     {
@@ -137,7 +146,7 @@ TOOLS = [
         "function": {
             "name": "search_memory",
             "description": (
-                "semantically search noodle's own persisted memory - past dms, "
+                "(matthias only, checked on the server) semantically search noodle's own persisted memory - past dms, "
                 "threads, and direct pings (not ambient channel chatter noodle "
                 "wasn't addressed in) - for anything related to a topic, even "
                 "from weeks ago. use this when asked to recall something from a "
@@ -202,6 +211,51 @@ TOOLS = [
                     }
                 },
                 "required": ["duration_minutes"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "freedom",
+            "description": (
+                "the full freedom.to toolbox for matthias's account (matthias only, "
+                "enforced on the server). use it for anything more specific than "
+                "start_freedom_session's plain 'block everything on all my "
+                "devices': blocking only certain devices and/or certain blocklists, "
+                "listing devices/blocklists/sessions/schedules/history, ending a "
+                "running session, creating/editing/deleting recurring schedules. "
+                "the account is shared with his dad, so noodle can only ever target "
+                "and see matthias's own devices (anything else is refused). actions: "
+                "auth_status, list_devices, refresh_devices, list_blocklists, "
+                "list_sessions (running + upcoming one-offs), session_history, "
+                "start_session, end_session, end_all_sessions, list_schedules "
+                "(recurring), create_schedule, update_schedule, delete_schedule. "
+                "you can chain several calls in a row (e.g. list_blocklists, then "
+                "start_session with the right names). devices and blocklists can be "
+                "given by name or id; leave devices empty for all of matthias's "
+                "devices. times are HH:MM in freedom's timezone (see auth_status "
+                "or list_sessions)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ACTIONS_LIST},
+                    "id": {"type": "string", "description": "session/schedule id (e.g. 'freedom:123' or '123') for end_session, update_schedule, delete_schedule"},
+                    "duration_minutes": {"type": "integer", "description": "1-1440"},
+                    "start_time": {"type": "string", "description": "HH:MM; start_session starts then (today/tomorrow, premium); create/update_schedule start"},
+                    "end_time": {"type": "string", "description": "HH:MM, alternative to duration_minutes"},
+                    "name": {"type": "string", "description": "schedule/session name"},
+                    "days": {"type": "array", "items": {"type": "string", "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}, "description": "for create/update_schedule"},
+                    "devices": {"type": "array", "items": {"type": "string"}, "description": "device names or ids to block on; must be matthias's own. empty = all of his"},
+                    "blocklists": {"type": "array", "items": {"type": "string"}, "description": "blocklist names or ids to block. if given (and block_everything isn't), only these are blocked"},
+                    "block_everything": {"type": "boolean", "description": "block all websites (default when no blocklists/apps are given)"},
+                    "block_apps": {"type": "boolean", "description": "also block desktop apps"},
+                    "page": {"type": "integer", "description": "session_history page"},
+                    "use_end_session_credit": {"type": "boolean", "description": "ONLY if matthias explicitly says to spend a Locked Mode end-session credit"},
+                    "confirm_permanent": {"type": "boolean", "description": "ONLY after matthias confirms a 24h x 7 day block under Locked Mode"},
+                },
+                "required": ["action"],
             },
         },
     },
@@ -335,6 +389,102 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": (
+                "get the weather forecast (right now + the next few days) for a "
+                "place, via open-meteo. leave location empty for matthias's own location (outside dms it is only ever "
+                "reported as 'current location' - never name or guess the place). use only when "
+                "weather is actually asked about."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "a place name, e.g. 'utrecht'. empty = matthias's own location"},
+                    "days": {"type": "integer", "description": "days to cover incl. today (1-7), default 1"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "now_playing",
+            "description": (
+                "what matthias is listening to right now (plus the last few "
+                "tracks), from his last.fm scrobbles. use when asked what's "
+                "playing / what he's listening to."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "github",
+            "description": (
+                "look things up on github with matthias's account (matthias "
+                "only, checked on the server - it can see his private repos). "
+                "actions: repo (repo summary), commits (recent commits of a "
+                "repo), issues / pulls (open ones of a repo; state=closed|all "
+                "for others), search (issue/pr search with github search "
+                "syntax in q), notifications (his unread notifications), today "
+                "(his commit count today). repo may be 'name' (his own) or "
+                "'owner/name'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["repo", "commits", "issues", "pulls", "search", "notifications", "today"],
+                    },
+                    "repo": {"type": "string", "description": "for repo/commits/issues/pulls"},
+                    "q": {"type": "string", "description": "for search"},
+                    "state": {"type": "string", "enum": ["open", "closed", "all"], "description": "for issues/pulls, default open"},
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_journal",
+            "description": (
+                "(matthias only) read matthias's own @matthias-day daily recaps for a date range, "
+                "in order, with links to the originals. use for 'what did i do "
+                "in march' / 'what was last week like' style questions where a "
+                "date range matters (search_memory is for topic lookups)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string", "description": "YYYY-MM-DD, inclusive"},
+                    "end_date": {"type": "string", "description": "YYYY-MM-DD, inclusive (default: same as start)"},
+                },
+                "required": ["start_date"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "summarize_thread",
+            "description": (
+                "read a whole slack thread so you can give a tldr. pass a "
+                "permalink to any message in it, or leave ref empty to use the "
+                "thread you're currently in. returns the transcript; you write "
+                "the summary."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"ref": {"type": "string", "description": "a slack permalink, or empty for the current thread"}},
+            },
+        },
+    },
 ]
 
 
@@ -414,7 +564,7 @@ def _search_slack_messages(query: str, user_prompt: str = "") -> str:
         return f"slack search failed: {exc}"
 
 
-def _fetch_slack_message(ref: str) -> str:
+def _fetch_slack_message(ref: str, user_id: str | None = None) -> str:
     cid, ts = _parse_slack_ref(ref)
     if not cid:
         log_tool("fetch_slack_message", ref, "bad ref")
@@ -427,12 +577,13 @@ def _fetch_slack_message(ref: str) -> str:
         )
     logger.info("fetch %s %s", cid, ts)
     try:
-        resp = state.app.client.conversations_history(
+        join_ok = _is_matthias(user_id)  # only his requests may make noodle join a channel
+        resp = with_join(cid, join_ok, lambda: state.app.client.conversations_history(
             channel=cid, latest=ts, inclusive=True, limit=1
-        )
+        ))
         msgs = (resp.get("messages") or []) if resp.get("ok") else []
         if not msgs:
-            resp2 = state.app.client.conversations_replies(channel=cid, ts=ts, limit=1)
+            resp2 = with_join(cid, join_ok, lambda: state.app.client.conversations_replies(channel=cid, ts=ts, limit=1))
             msgs = (resp2.get("messages") or []) if resp2.get("ok") else []
         if not msgs:
             log_tool("fetch_slack_message", ref, "not found")
@@ -449,7 +600,13 @@ def _fetch_slack_message(ref: str) -> str:
         return f"fetch failed: {exc}"
 
 
-def _search_memory(query: str) -> str:
+def _search_memory(query: str, user_id: str | None) -> str:
+    # memory holds matthias's dms with noodle, his threads and his journal -
+    # anyone else (e.g. in a public channel) must never be able to read it,
+    # so this is checked here on the real sender id, not left to the model.
+    if not _is_matthias(user_id):
+        log_tool("search_memory", "", "unauthorized")
+        return "only matthias can search noodle's memory - it holds his private dms."
     query = (query or "").strip()
     if not query:
         return "no search query given"
@@ -492,6 +649,94 @@ def _web_search(query: str) -> str:
         return "web search failed, check logs"
     log_tool("web_search", query, "success")
     return answer
+
+
+_CURRENT_LOCATION = "current location"
+
+
+def _get_weather(location: str | None, days, origin: dict | None) -> str:
+    """matthias's home/usual places are private: outside a dm they are never
+    named (to the model or anyone else) - the forecast is labelled "current
+    location" instead. a place someone else names is just looked up normally."""
+    asked = (location or "").strip() or config.WEATHER_DEFAULT_LOCATION
+    if not asked:
+        return "no default location is configured, so i need a place name."
+    private = {p.lower() for p in [*config.WEATHER_LOCATIONS, config.WEATHER_DEFAULT_LOCATION] if p}
+    in_dm = bool(origin and origin.get("is_dm"))
+    hide = not in_dm and asked.lower() in private
+    log_tool("get_weather", _CURRENT_LOCATION if hide else asked, "success")
+    return forecast_text(asked, days or 1, label=_CURRENT_LOCATION if hide else None)
+
+
+def _now_playing() -> str:
+    result = lastfm.now_playing()
+    log_tool("now_playing", "", "success" if not result.startswith("last.fm") else "failed")
+    return result
+
+
+def _github(args: dict, user_id: str | None) -> str:
+    if not _is_matthias(user_id):
+        return "only matthias can use the github tool"
+    action = args.get("action", "")
+    result = github_api.query(action, repo=args.get("repo"), q=args.get("q"), state=args.get("state") or "open")
+    log_tool("github", f"{action} {args.get('repo') or args.get('q') or ''}".strip(), "done")
+    return result
+
+
+def _get_journal(start_date, end_date, user_id: str | None) -> str:
+    if not _is_matthias(user_id):
+        log_tool("get_journal", "", "unauthorized")
+        return "only matthias can read his journal."
+    try:
+        start = datetime.date.fromisoformat((start_date or "").strip())
+        end = datetime.date.fromisoformat((end_date or start_date).strip())
+    except ValueError:
+        return "dates must be YYYY-MM-DD"
+    entries = load_kind_between("matthias_day", start.isoformat(), end.isoformat())
+    log_tool("get_journal", f"{start} to {end}", f"{len(entries)} entries")
+    if not entries:
+        return f"no journal entries between {start} and {end}"
+    out = []
+    for e in entries[:31]:
+        link = f" ({e['permalink']})" if e.get("permalink") else ""
+        out.append(f"[{e['created_at'][:10]}]{link}\n{e['content']}")
+    return "\n\n".join(out)
+
+
+_THREAD_MAX_CHARS = 14000
+
+
+def _summarize_thread(ref: str, origin: dict | None, user_id: str | None = None) -> str:
+    join_ok = _is_matthias(user_id)
+    ref = (ref or "").strip()
+    if ref:
+        cid, ts = _parse_slack_ref(ref)
+    elif origin and origin.get("thread_ts"):
+        cid, ts = origin["channel"], origin["thread_ts"]
+    else:
+        return "no thread given - ask for a link to a message in the thread"
+    if not cid or not ts:
+        log_tool("summarize_thread", ref, "bad ref")
+        return "could not parse a slack channel/timestamp from that reference"
+    try:
+        resp = with_join(
+            cid, join_ok,
+            lambda: state.app.client.conversations_replies(channel=cid, ts=ts, limit=200),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("summarize_thread failed for %s %s", cid, ts)
+        log_tool("summarize_thread", ref or ts, "failed")
+        return f"couldn't read that thread: {exc}"
+    msgs = resp.get("messages") or []
+    if not msgs:
+        log_tool("summarize_thread", ref or ts, "empty")
+        return "that thread has no messages (or i can't see it)"
+    lines = [f"<@{m.get('user', 'unknown')}>: {(m.get('text') or '').strip()}" for m in msgs]
+    text = "\n".join(lines)
+    if len(text) > _THREAD_MAX_CHARS:
+        text = text[:_THREAD_MAX_CHARS] + "\n[...thread truncated]"
+    log_tool("summarize_thread", ref or ts, f"{len(msgs)} messages")
+    return f"thread in {_channel_link(cid)} ({len(msgs)} messages):\n{text}"
 
 
 def _is_matthias(user_id: str | None) -> bool:
@@ -593,17 +838,6 @@ def _schedule_reminder(args: dict, user_id: str | None, origin: dict | None) -> 
 
 
 _FREEDOM_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-
-
-def _freedom_error_message(error: dict) -> str:
-    code = error.get("code")
-    if code == "freedom_reauth_required":
-        return "freedom's login expired on the server - matthias needs to run `freedomd login` again before this will work."
-    if code == "premium_required":
-        return "that needs a freedom premium feature that isn't available on this account."
-    if code == "no_devices":
-        return "freedom says none of matthias's devices are registered to block on."
-    return f"freedom rejected the request: {error.get('message') or code}"
 
 
 def _my_freedom_device_ids():
@@ -743,27 +977,6 @@ def _schedule_freedom_session(args: dict, user_id: str | None) -> str:
     )
 
 
-def _my_freedom_schedules(device_ids: list) -> tuple[list[dict], str]:
-    """upcoming one-off + recurring freedom sessions that are matthias's:
-    every device on them must be one of his (the account is shared)."""
-    mine = set(device_ids)
-    found: dict = {}
-    tz = ""
-    for data, keys in (
-        (freedom_list_schedules(), ("schedules",)),
-        (freedom_list_sessions(), ("active", "upcoming")),
-    ):
-        if not data or data.get("error"):
-            continue
-        tz = tz or data.get("timezone") or ""
-        for k in keys:
-            for s in data.get(k) or []:
-                ids = s.get("device_ids") or []
-                if ids and set(ids) <= mine:
-                    found[s["id"]] = s
-    return list(found.values()), tz
-
-
 def _describe_freedom(s: dict, tz: str) -> str:
     mins = s.get("duration_minutes") or (s.get("duration_seconds") or 0) // 60
     if s.get("recurring"):
@@ -788,8 +1001,8 @@ def _list_scheduled(user_id: str | None) -> str:
         if isinstance(device_ids, str):
             lines.append(f"(couldn't list freedom sessions: {device_ids})")
         else:
-            sessions, tz = _my_freedom_schedules(device_ids)
-            lines += [_describe_freedom(s, tz) for s in sessions]
+            sessions, tz = my_schedules(device_ids)
+            lines += [_describe_freedom(s, tz) for s in sessions.values()]
     log_tool("list_scheduled", "", f"{len(lines)} items")
     return "\n".join(lines) if lines else "nothing is scheduled right now."
 
@@ -810,8 +1023,8 @@ def _cancel_scheduled(raw_id, user_id: str | None) -> str:
         if isinstance(device_ids, str):
             return device_ids
         # only ever touch sessions that are matthias's (shared account)
-        sessions, _tz = _my_freedom_schedules(device_ids)
-        target = next((s for s in sessions if s["id"] == fid), None)
+        sessions, _tz = my_schedules(device_ids)
+        target = sessions.get(fid)
         if target is None:
             log_tool("cancel_scheduled", raw, "not found")
             return f"no freedom session {raw} among matthias's scheduled ones."
@@ -842,7 +1055,7 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
     if name == "search_slack_messages":
         return _search_slack_messages(args.get("query", ""), user_prompt=user_prompt)
     if name == "fetch_slack_message":
-        return _fetch_slack_message(args.get("ref", ""))
+        return _fetch_slack_message(args.get("ref", ""), user_id)
     if name == "flaron":
         return flaron_query(
             args.get("action", ""),
@@ -851,11 +1064,13 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
             query=args.get("query"),
         )
     if name == "search_memory":
-        return _search_memory(args.get("query", ""))
+        return _search_memory(args.get("query", ""), user_id)
     if name == "web_search":
         return _web_search(args.get("query", ""))
     if name == "start_freedom_session":
         return _start_freedom_session(args.get("duration_minutes"), user_id=user_id)
+    if name == "freedom":
+        return freedom_tool.run(args, user_id)
     if name == "schedule_reminder":
         return _schedule_reminder(args, user_id=user_id, origin=origin)
     if name == "schedule_freedom_session":
@@ -864,4 +1079,14 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return _list_scheduled(user_id)
     if name == "cancel_scheduled":
         return _cancel_scheduled(args.get("id"), user_id)
+    if name == "get_weather":
+        return _get_weather(args.get("location"), args.get("days"), origin)
+    if name == "now_playing":
+        return _now_playing()
+    if name == "github":
+        return _github(args, user_id)
+    if name == "get_journal":
+        return _get_journal(args.get("start_date"), args.get("end_date"), user_id)
+    if name == "summarize_thread":
+        return _summarize_thread(args.get("ref", ""), origin, user_id)
     return f"unknown tool: {name}"
