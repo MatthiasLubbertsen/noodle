@@ -1,8 +1,9 @@
+import datetime
 import logging
 import re
 
 import config
-from bot import state
+from bot import state, tasks
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
 from bot.exa import web_answer
@@ -11,6 +12,7 @@ from bot.freedom import start_session as freedom_start_session
 from bot.history_store import search_similar
 from bot.netlog import log_tool
 from bot.slack_text import _channel_link, _parse_slack_ref
+from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
 
@@ -195,6 +197,100 @@ TOOLS = [
                     }
                 },
                 "required": ["duration_minutes"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_task",
+            "description": (
+                "schedule something for LATER (or on a repeat), instead of right "
+                "now. action 'remind' posts a reminder message at that time; "
+                "action 'freedom_session' starts a freedom focus session at that "
+                "time. use it when matthias asks e.g. 'remind me in 10 minutes to "
+                "dm xyz', 'every weekday at 9 remind me to stretch', 'block me "
+                "tomorrow at 20:00 for 2 hours'. give EITHER in_minutes (relative) "
+                "OR at (absolute amsterdam wall time, 'YYYY-MM-DD HH:MM'; work it "
+                "out from the current time in your context). for recurring tasks, "
+                "'at' is the FIRST occurrence and repeat says how it repeats "
+                "(weekly keeps the weekday of 'at', monthly keeps the day of "
+                "month). by default it is delivered where the request was made "
+                "(dms stay dms, a channel stays that channel/thread); only set "
+                "destination if matthias explicitly asked for somewhere else. "
+                "this only works when matthias himself is the one asking "
+                "(checked on the server)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": list(tasks.ACTIONS)},
+                    "text": {
+                        "type": "string",
+                        "description": (
+                            "for 'remind': what to remind him of, a short phrase "
+                            "that reads naturally after 'reminder: ' (e.g. 'dm "
+                            "xyz', 'drink some water'). lowercase, no mention needed."
+                        ),
+                    },
+                    "duration_minutes": {
+                        "type": "integer",
+                        "description": "for 'freedom_session': how long to block, 1-1440",
+                    },
+                    "in_minutes": {
+                        "type": "integer",
+                        "description": "run this many minutes from now (use this OR at)",
+                    },
+                    "at": {
+                        "type": "string",
+                        "description": "absolute amsterdam time 'YYYY-MM-DD HH:MM' (use this OR in_minutes)",
+                    },
+                    "repeat": {
+                        "type": "string",
+                        "enum": list(tasks.REPEATS),
+                        "description": "how it repeats, default none (one-off)",
+                    },
+                    "interval_minutes": {
+                        "type": "integer",
+                        "description": f"for repeat=every_n_minutes: the gap in minutes (min {tasks.MIN_INTERVAL_MINUTES})",
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": (
+                            "OPTIONAL override: 'dm' for matthias's dms, or a "
+                            "channel id (C...) noodle is allowed in. leave empty "
+                            "to deliver where the request was made."
+                        ),
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_scheduled_tasks",
+            "description": (
+                "list every active scheduled reminder/freedom session with its "
+                "id, next run time, repeat and destination. matthias only."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_scheduled_task",
+            "description": (
+                "cancel/remove one scheduled task by its id (see "
+                "list_scheduled_tasks). if matthias refers to one by description "
+                "instead of id, list them first to find the id. matthias only."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"id": {"type": "integer", "description": "the task id"}},
+                "required": ["id"],
             },
         },
     },
@@ -412,7 +508,140 @@ def _start_freedom_session(duration_minutes, user_id: str | None) -> str:
     return f"started a {minutes}-minute freedom session, blocking everything on matthias's devices (session id {session.get('id')})."
 
 
-def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None = None) -> str:
+def _is_matthias(user_id: str | None) -> bool:
+    return user_id == config.USER_ID
+
+
+def _resolve_destination(destination, origin: dict | None):
+    """returns (channel, thread_ts) or an error string.
+
+    default is wherever the request was made: dms stay dms, a channel
+    (and the thread, if it was in one) stays there. an explicit override
+    is only accepted for 'dm' or a channel noodle is allowed to talk in.
+    """
+    destination = (destination or "").strip()
+    if not destination or destination.lower() in ("here", "same", "default"):
+        if not origin or origin.get("is_dm") or not origin.get("channel"):
+            return config.USER_ID, None
+        return origin["channel"], origin.get("thread_ts")
+    if destination.lower() in ("dm", "dms"):
+        return config.USER_ID, None
+    m = re.search(r"\b([CG][A-Z0-9]{6,})\b", destination.upper())
+    if not m:
+        return "couldn't tell where to send that - destination should be 'dm' or a channel id."
+    channel = m.group(1)
+    if not (config.ALLOW_CHANNEL_WILDCARD or channel in config.ALLOWED_CHANNELS):
+        return f"i'm not allowed to post in <#{channel}>, so can't schedule things there."
+    return channel, None
+
+
+def _schedule_task(args: dict, user_id: str | None, origin: dict | None) -> str:
+    # same server-side guard as start_freedom_session: the real slack
+    # sender id decides, not the model's (or a channel message's) say-so.
+    if not _is_matthias(user_id):
+        log_tool("schedule_task", args.get("action", ""), "unauthorized")
+        return "only matthias can schedule things - not doing this for anyone else."
+    action = args.get("action")
+    if action not in tasks.ACTIONS:
+        return f"unknown action {action!r}, use one of: {', '.join(tasks.ACTIONS)}."
+
+    text = (args.get("text") or "").strip() or None
+    duration = None
+    if action == "remind":
+        if not text:
+            return "need the text of what to remind about."
+    else:
+        if not config.FREEDOM_API_KEY:
+            return "freedom isn't configured on noodle's end (no FREEDOM_API_KEY set), can't schedule a session."
+        try:
+            duration = int(args.get("duration_minutes"))
+        except (TypeError, ValueError):
+            return "need a valid number of minutes for the freedom session."
+        if not 1 <= duration <= 1440:
+            return "freedom sessions have to be between 1 and 1440 minutes (24 hours)."
+
+    repeat = args.get("repeat") or "none"
+    if repeat not in tasks.REPEATS:
+        return f"unknown repeat {repeat!r}, use one of: {', '.join(tasks.REPEATS)}."
+    interval = None
+    if repeat == "every_n_minutes":
+        try:
+            interval = int(args.get("interval_minutes"))
+        except (TypeError, ValueError):
+            return "need interval_minutes for an every_n_minutes repeat."
+        if interval < tasks.MIN_INTERVAL_MINUTES:
+            return f"the shortest repeat gap is {tasks.MIN_INTERVAL_MINUTES} minutes."
+
+    now = datetime.datetime.now(AMSTERDAM_TZ)
+    if args.get("in_minutes") not in (None, ""):
+        try:
+            minutes = int(args["in_minutes"])
+        except (TypeError, ValueError):
+            return "in_minutes has to be a whole number."
+        if minutes < 1:
+            return "in_minutes has to be at least 1."
+        first = (now + datetime.timedelta(minutes=minutes)).replace(second=0, microsecond=0)
+    elif args.get("at"):
+        first = tasks.parse_local(args["at"])
+        if first is None:
+            return "couldn't read that time, use 'YYYY-MM-DD HH:MM' (amsterdam time)."
+        if first <= now and repeat == "none":
+            return f"that time is already in the past (it's {now.strftime('%Y-%m-%d %H:%M')} in amsterdam right now)."
+    else:
+        return "need either in_minutes or at to know when."
+
+    dest = _resolve_destination(args.get("destination"), origin)
+    if isinstance(dest, str):
+        return dest
+    channel, thread_ts = dest
+
+    created = tasks.add_task(
+        action, text, duration, channel, thread_ts, repeat, interval, first, user_id
+    )
+    if created is None:
+        log_tool("schedule_task", action, "failed")
+        return (
+            f"couldn't schedule that (already at the limit of {tasks.MAX_ACTIVE_TASKS} "
+            "active tasks, or that schedule never fires again)."
+        )
+    task = {
+        "id": created["id"], "action": action, "text": text,
+        "duration_minutes": duration, "channel": channel, "thread_ts": thread_ts,
+        "repeat": repeat, "interval_minutes": interval,
+        "next_run_ts": created["next_run"].timestamp(),
+    }
+    log_tool("schedule_task", f"{action} #{created['id']}", "success")
+    return "scheduled and saved: " + tasks.describe(task)
+
+
+def _list_scheduled_tasks(user_id: str | None) -> str:
+    if not _is_matthias(user_id):
+        log_tool("list_scheduled_tasks", "", "unauthorized")
+        return "only matthias can see scheduled tasks."
+    rows = tasks.list_active()
+    log_tool("list_scheduled_tasks", "", f"{len(rows)} tasks")
+    if not rows:
+        return "nothing is scheduled right now."
+    return "\n".join(tasks.describe(r) for r in rows)
+
+
+def _cancel_scheduled_task(task_id, user_id: str | None) -> str:
+    if not _is_matthias(user_id):
+        log_tool("cancel_scheduled_task", str(task_id), "unauthorized")
+        return "only matthias can cancel scheduled tasks."
+    try:
+        task_id = int(task_id)
+    except (TypeError, ValueError):
+        return "need the numeric id of the task to cancel."
+    if tasks.delete_task(task_id):
+        log_tool("cancel_scheduled_task", f"#{task_id}", "success")
+        return f"cancelled and removed task #{task_id}."
+    log_tool("cancel_scheduled_task", f"#{task_id}", "not found")
+    return f"no scheduled task with id #{task_id}."
+
+
+def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None = None,
+             origin: dict | None = None) -> str:
     if name == "search_slack_messages":
         return _search_slack_messages(args.get("query", ""), user_prompt=user_prompt)
     if name == "fetch_slack_message":
@@ -430,4 +659,10 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return _web_search(args.get("query", ""))
     if name == "start_freedom_session":
         return _start_freedom_session(args.get("duration_minutes"), user_id=user_id)
+    if name == "schedule_task":
+        return _schedule_task(args, user_id=user_id, origin=origin)
+    if name == "list_scheduled_tasks":
+        return _list_scheduled_tasks(user_id)
+    if name == "cancel_scheduled_task":
+        return _cancel_scheduled_task(args.get("id"), user_id)
     return f"unknown tool: {name}"

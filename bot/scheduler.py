@@ -4,11 +4,13 @@ import threading
 import time
 
 import config
-from bot import state
+from bot import state, tasks
 from bot.chunk import chunk_response
 from bot.history_store import append_message_async
+from bot.llm import _kind_for
 from bot.memory import dm_conv_key, trim_memory
 from bot.morning import build_greeting_message, build_news_message
+from bot.tools import _start_freedom_session
 from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
@@ -39,19 +41,37 @@ def _next_run_at(hour: int, minute: int) -> datetime.datetime:
     return run_at
 
 
-def _post_dm(text: str) -> None:
+def _deliver(channel: str, thread_ts: str | None, text: str) -> None:
+    """post noodle's own message (dm, channel or thread) and remember it,
+    live and persisted, so it has the context if someone replies to it."""
     fragments = chunk_response(text)[:8]
     for fragment in fragments:
-        state.app.client.chat_postMessage(channel=config.USER_ID, text=fragment)
+        payload = {"channel": channel, "text": fragment}
+        if thread_ts:
+            payload["thread_ts"] = thread_ts
+        resp = state.app.client.chat_postMessage(**payload)
+        if not thread_ts and channel != config.USER_ID:
+            # a reply in thread to this message must count as a thread
+            # noodle joined (same reason as handlers._process_locked)
+            sent_ts = resp.get("ts")
+            if sent_ts:
+                state.PARTICIPATING_THREADS.add(sent_ts)
         time.sleep(config.CHUNK_DELAY_SECONDS)
 
-    # remember noodle sent this, both live and persisted, so it has the
-    # context if matthias replies to it (even across a restart)
-    key = dm_conv_key()
+    if channel == config.USER_ID:
+        key = dm_conv_key()
+    elif thread_ts:
+        key = f"thread:{thread_ts}"
+    else:
+        key = f"chan:{channel}"
     history = state.MEMORY.setdefault(key, [])
     history.append({"role": "assistant", "content": text})
     trim_memory(history)
-    append_message_async(key, "dm", "assistant", text)
+    append_message_async(key, _kind_for(key), "assistant", text)
+
+
+def _post_dm(text: str) -> None:
+    _deliver(config.USER_ID, None, text)
 
 
 def _send_ping_reminder() -> None:
@@ -78,6 +98,41 @@ def _send_morning_dm() -> None:
         logger.exception("failed to send morning wakeup dm")
 
 
+def _fire_task(task: dict, due_ts: float) -> None:
+    channel, thread_ts = task["channel"], task["thread_ts"]
+    mention = "" if channel == config.USER_ID else f"<@{config.USER_ID}> "
+    late_minutes = int((time.time() - due_ts) // 60)
+    if task["action"] == "freedom_session":
+        minutes = task["duration_minutes"]
+        if late_minutes > 10:
+            # blocking him at a surprise time is worse than skipping
+            text = (
+                f"{mention}i was supposed to start your {minutes}-minute freedom "
+                f"session {late_minutes} minutes ago but i was offline, so i skipped it."
+            )
+        else:
+            text = f"{mention}{_start_freedom_session(minutes, user_id=config.USER_ID)}"
+    else:
+        text = f"{mention}reminder: {task['text']}"
+        if late_minutes > 5:
+            text += f" (sorry, this is {late_minutes} minutes late, i was offline)"
+    _deliver(channel, thread_ts, text)
+    logger.info("fired scheduled task #%s (%s)", task["id"], task["action"])
+
+
+def _run_task_poller() -> None:
+    while True:
+        try:
+            for task in tasks.pop_due():
+                try:
+                    _fire_task(task, task["next_run_ts"])
+                except Exception:  # noqa: BLE001
+                    logger.exception("failed to fire scheduled task #%s", task.get("id"))
+        except Exception:  # noqa: BLE001
+            logger.exception("scheduled task poll failed")
+        time.sleep(15)
+
+
 def _run_daily(hour: int, minute: int, job) -> None:
     while True:
         run_at = _next_run_at(hour, minute)
@@ -96,3 +151,4 @@ def start_daily_scheduler() -> None:
     threading.Thread(
         target=_run_daily, args=(morning_hour, morning_minute, _send_morning_dm), daemon=True
     ).start()
+    threading.Thread(target=_run_task_poller, daemon=True).start()

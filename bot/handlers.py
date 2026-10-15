@@ -130,7 +130,7 @@ def _should_respond(event: dict):
 
 def _process(channel: str, prompt: str, thread_ts: str | None, key: str,
              location: str | None = None, persist: bool = False,
-             user_id: str | None = None) -> None:
+             user_id: str | None = None, origin: dict | None = None) -> None:
     # serialize everything for this conv_key: without this, several messages
     # arriving close together each run in their own thread and race on the
     # same state.MEMORY[key] list, which both corrupts the conversation
@@ -138,16 +138,19 @@ def _process(channel: str, prompt: str, thread_ts: str | None, key: str,
     # noodle is answering several different messages at once in the wrong
     # order. this just makes them wait their turn, in order, instead.
     with _get_conv_lock(key):
-        _process_locked(channel, prompt, thread_ts, key, location, persist, user_id)
+        _process_locked(channel, prompt, thread_ts, key, location, persist, user_id, origin)
 
 
 def _process_locked(channel: str, prompt: str, thread_ts: str | None, key: str,
-                     location: str | None, persist: bool, user_id: str | None) -> None:
+                     location: str | None, persist: bool, user_id: str | None,
+                     origin: dict | None = None) -> None:
     try:
         if thread_ts:
             # remember this thread so we keep answering in it
             state.PARTICIPATING_THREADS.add(thread_ts)
-        reply = ask_noodle(key, prompt, location=location, persist=persist, user_id=user_id)
+        reply = ask_noodle(
+            key, prompt, location=location, persist=persist, user_id=user_id, origin=origin
+        )
         # cap fragments so noodle never spams the channel
         fragments = chunk_response(reply)[:8]
         for fragment in fragments:
@@ -254,9 +257,12 @@ def handle_message(event: dict) -> None:
     key = conv_key(event)
     location = location_label(event)
     sender_id = event.get("user")
+    # where this message came from, so scheduled reminders can default to
+    # being delivered back to the same dm/channel/thread
+    origin = {"channel": channel, "thread_ts": thread_ts, "is_dm": _is_dm(event)}
     # run the (slow) ai call + chunked sending off the socket thread
     threading.Thread(
         target=_process,
-        args=(channel, prompt, thread_ts, key, location, persist, sender_id),
+        args=(channel, prompt, thread_ts, key, location, persist, sender_id, origin),
         daemon=True,
     ).start()

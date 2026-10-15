@@ -39,6 +39,7 @@ noodle/
     usergroups.py         # add/remove a user from a slack usergroup
     watch.py              # channel join/leave analytics + automations
     matthias_day.py       # clean + persist @matthias-day recap pings into memory
+    tasks.py              # scheduled reminders / freedom sessions: sqlite store + recurrence math
     freedom.py            # calls matthias's self-hosted freedom.to focus-session api
     log.py                # logging setup
     netlog.py             # concise "called hcai .../called tool ..." log lines
@@ -641,6 +642,32 @@ no nested `noodle/noodle` folder.
     message listing new hack club news articles, returning `None` when
     there's nothing new - in which case `_send_morning_dm()` sends only the
     greeting and skips the news message entirely.
+
+### 7b. scheduled reminders + freedom sessions, and who/when awareness
+- `schedule_task` / `list_scheduled_tasks` / `cancel_scheduled_task`
+  (`bot/tools.py`, store in `bot/tasks.py`) let matthias schedule a
+  `remind` message or a `freedom_session` for later, one-off or repeating
+  (`daily`, `weekdays`, `weekly`, `monthly`, `every_n_minutes`, min 5). all
+  matthias-only, checked server-side against the real sender id, same as
+  `start_freedom_session`. rows live in the `scheduled_tasks` table of
+  `data/noodle_memory.db` (so they survive restarts; created by
+  `tasks.init_table()` in `build_app()`).
+- default destination is where it was asked: `handlers.handle_message()`
+  passes `origin` (`channel`, `thread_ts`, `is_dm`) through `ask_noodle()` →
+  `run_tool()`. dms stay dms, a channel/thread stays there; an explicit
+  `destination` ("dm" or an allowed channel id) overrides it.
+- `scheduler._run_task_poller()` polls every 15s. `tasks.pop_due()` advances
+  (or deactivates) a task BEFORE it runs, so a crash drops a firing instead
+  of repeating it; recurring tasks skip occurrences missed while offline. a
+  late reminder is sent with a note; a freedom session more than 10 minutes
+  late is skipped (and says so). `scheduler._deliver()` posts + remembers the
+  message (live + persisted) like the morning dm.
+- awareness: `llm._runtime_context()` appends the current amsterdam time, who
+  is talking (matthias = verified, from slack's sender id; anyone else =
+  explicitly not matthias), the location, and that noodle itself sends the
+  morning dm and the @matthias-day reminder. in channels/threads, live
+  history turns are prefixed `<@USERID>:` (persisted text is unchanged).
+  short-term memory is `state.MEMORY` (last ~12 turns).
 
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`

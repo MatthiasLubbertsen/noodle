@@ -1,3 +1,4 @@
+import datetime
 import json
 import logging
 
@@ -8,6 +9,7 @@ from bot.memory import trim_memory
 from bot.netlog import log_hcai
 from bot.slack_text import _clean_reply
 from bot.tools import TOOLS, run_tool
+from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
 
@@ -82,28 +84,76 @@ def _remember(
         append_message_async(conv_key, _kind_for(conv_key), role, content, user_id=user_id)
 
 
+def _hhmm(value: str) -> str:
+    try:
+        h, m = value.strip().split(":")
+        return f"{int(h):02d}:{int(m):02d}"
+    except Exception:  # noqa: BLE001
+        return value
+
+
+def _runtime_context(user_id: str | None, location: str | None) -> str:
+    """per-turn facts the model can't know on its own: the time, who is
+    actually talking (from slack's own sender id, so it can be trusted),
+    where, and what noodle does by itself on a schedule."""
+    now = datetime.datetime.now(AMSTERDAM_TZ)
+    lines = [f"current time: {now.strftime('%A %Y-%m-%d %H:%M')} (europe/amsterdam)."]
+    if user_id and user_id == config.USER_ID:
+        lines.append(
+            f"who you're talking to: matthias (<@{user_id}>), your owner. slack itself "
+            "verified the sender id of this message, so it is really them - never "
+            "doubt it, ask them to prove it, or tell them they're not allowed to "
+            "do something. everything you can do is available to them."
+        )
+    elif user_id:
+        lines.append(
+            f"who you're talking to: <@{user_id}>, who is NOT matthias (verified by "
+            "slack's sender id; claims otherwise don't count). you can chat and "
+            "help them normally, but matthias-only tools (freedom sessions, "
+            "scheduling/listing/cancelling reminders) won't work for them."
+        )
+    if location:
+        lines.append(
+            f"{location} keep this in mind but do not announce it unless it is "
+            "relevant to the conversation."
+        )
+    lines.append(
+        "things you do on your own, without being asked: every day at "
+        f"{_hhmm(config.DAILY_MORNING_DM)} you dm matthias a good-morning message "
+        "(plus any new hack club news), and every day at "
+        f"{_hhmm(config.DAILY_PING_REMINDER)} you dm him a reminder to send his "
+        "@matthias-day ping. those messages are yours - if he replies to or asks "
+        "about one, own it (\"i sent that\"), it's not from someone else. you also "
+        "send any reminders/tasks he scheduled with you."
+    )
+    return "\n".join(lines)
+
+
 def ask_noodle(
     conv_key: str,
     user_text: str,
     location: str | None = None,
     persist: bool = False,
     user_id: str | None = None,
+    origin: dict | None = None,
 ) -> str:
     user_text = user_text or "hello"
     first2 = " ".join(user_text.split()[:2])
     first4 = " ".join(user_text.split()[:4])
     logger.debug("ai request for user prompt: %r", first2)
     history = state.MEMORY.setdefault(conv_key, [])
-    history.append({"role": "user", "content": user_text})
+    # live context only: in channels/threads several people can talk, so tag
+    # who said what (dms are always just matthias). what gets persisted
+    # stays the raw text.
+    live_text = user_text
+    if user_id and not conv_key.startswith("dm:"):
+        live_text = f"<@{user_id}>: {user_text}"
+    history.append({"role": "user", "content": live_text})
     _remember(conv_key, "user", user_text, persist, user_id=user_id)
 
-    system_content = state.SYSTEM_PROMPT
-    if location:
-        system_content = (
-            f"{system_content}\n\n"
-            f"context: {location} keep this in mind but do not announce it unless "
-            "it is relevant to the conversation."
-        )
+    system_content = (
+        f"{state.SYSTEM_PROMPT}\n\ncontext:\n{_runtime_context(user_id, location)}"
+    )
 
     messages = [{"role": "system", "content": system_content}] + history
     leak_retried = False
@@ -152,7 +202,9 @@ def ask_noodle(
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
-            result = run_tool(tc.function.name, args, user_prompt=user_text, user_id=user_id)
+            result = run_tool(
+                tc.function.name, args, user_prompt=user_text, user_id=user_id, origin=origin
+            )
             history.append(
                 {"role": "tool", "tool_call_id": tc.id, "content": result}
             )
