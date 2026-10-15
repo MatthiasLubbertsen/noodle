@@ -4,13 +4,12 @@ import threading
 import time
 
 import config
-from bot import state, tasks
+from bot import reminders, state
 from bot.chunk import chunk_response
 from bot.history_store import append_message_async
 from bot.llm import _kind_for
 from bot.memory import dm_conv_key, trim_memory
 from bot.morning import build_greeting_message, build_news_message
-from bot.tools import _start_freedom_session
 from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
@@ -98,38 +97,27 @@ def _send_morning_dm() -> None:
         logger.exception("failed to send morning wakeup dm")
 
 
-def _fire_task(task: dict, due_ts: float) -> None:
-    channel, thread_ts = task["channel"], task["thread_ts"]
+def _fire_reminder(reminder: dict) -> None:
+    channel, thread_ts = reminder["channel"], reminder["thread_ts"]
     mention = "" if channel == config.USER_ID else f"<@{config.USER_ID}> "
-    late_minutes = int((time.time() - due_ts) // 60)
-    if task["action"] == "freedom_session":
-        minutes = task["duration_minutes"]
-        if late_minutes > 10:
-            # blocking him at a surprise time is worse than skipping
-            text = (
-                f"{mention}i was supposed to start your {minutes}-minute freedom "
-                f"session {late_minutes} minutes ago but i was offline, so i skipped it."
-            )
-        else:
-            text = f"{mention}{_start_freedom_session(minutes, user_id=config.USER_ID)}"
-    else:
-        text = f"{mention}reminder: {task['text']}"
-        if late_minutes > 5:
-            text += f" (sorry, this is {late_minutes} minutes late, i was offline)"
+    late_minutes = int((time.time() - reminder["next_run_ts"]) // 60)
+    text = f"{mention}reminder: {reminder['text']}"
+    if late_minutes > 5:
+        text += f" (sorry, this is {late_minutes} minutes late, i was offline)"
     _deliver(channel, thread_ts, text)
-    logger.info("fired scheduled task #%s (%s)", task["id"], task["action"])
+    logger.info("fired reminder #%s", reminder["id"])
 
 
-def _run_task_poller() -> None:
+def _run_reminder_poller() -> None:
     while True:
         try:
-            for task in tasks.pop_due():
+            for reminder in reminders.pop_due():
                 try:
-                    _fire_task(task, task["next_run_ts"])
+                    _fire_reminder(reminder)
                 except Exception:  # noqa: BLE001
-                    logger.exception("failed to fire scheduled task #%s", task.get("id"))
+                    logger.exception("failed to fire reminder #%s", reminder.get("id"))
         except Exception:  # noqa: BLE001
-            logger.exception("scheduled task poll failed")
+            logger.exception("reminder poll failed")
         time.sleep(15)
 
 
@@ -151,4 +139,4 @@ def start_daily_scheduler() -> None:
     threading.Thread(
         target=_run_daily, args=(morning_hour, morning_minute, _send_morning_dm), daemon=True
     ).start()
-    threading.Thread(target=_run_task_poller, daemon=True).start()
+    threading.Thread(target=_run_reminder_poller, daemon=True).start()

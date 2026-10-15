@@ -124,7 +124,7 @@ def _runtime_context(user_id: str | None, location: str | None) -> str:
         f"{_hhmm(config.DAILY_PING_REMINDER)} you dm him a reminder to send his "
         "@matthias-day ping. those messages are yours - if he replies to or asks "
         "about one, own it (\"i sent that\"), it's not from someone else. you also "
-        "send any reminders/tasks he scheduled with you."
+        "send any reminders he scheduled with you."
     )
     return "\n".join(lines)
 
