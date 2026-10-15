@@ -1,16 +1,23 @@
+import datetime
 import logging
 import re
+from zoneinfo import ZoneInfo
 
 import config
-from bot import state
+from bot import reminders, state
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
 from bot.exa import web_answer
+from bot.freedom import create_schedule as freedom_create_schedule
+from bot.freedom import delete_schedule as freedom_delete_schedule
 from bot.freedom import list_devices as freedom_list_devices
+from bot.freedom import list_schedules as freedom_list_schedules
+from bot.freedom import list_sessions as freedom_list_sessions
 from bot.freedom import start_session as freedom_start_session
 from bot.history_store import search_similar
 from bot.netlog import log_tool
 from bot.slack_text import _channel_link, _parse_slack_ref
+from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
 
@@ -198,6 +205,136 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_reminder",
+            "description": (
+                "schedule a reminder for LATER (or on a repeat): noodle posts a "
+                "message at that time. use it when matthias asks e.g. 'remind me "
+                "in 10 minutes to dm xyz' or 'every weekday at 9 remind me to "
+                "stretch'. give EITHER in_minutes (relative) OR at (absolute "
+                "amsterdam wall time, 'YYYY-MM-DD HH:MM'; work it out from the "
+                "current time in your context). for recurring reminders, 'at' is "
+                "the FIRST occurrence and repeat says how it repeats (weekly keeps "
+                "the weekday of 'at', monthly keeps the day of month). by default "
+                "it is delivered where the request was made (dms stay dms, a "
+                "channel stays that channel/thread); only set destination if "
+                "matthias explicitly asked for somewhere else. this only works "
+                "when matthias himself is the one asking (checked on the server)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": (
+                            "what to remind him of, a short phrase that reads "
+                            "naturally after 'reminder: ' (e.g. 'dm xyz', 'drink "
+                            "some water'). lowercase, no mention needed."
+                        ),
+                    },
+                    "in_minutes": {
+                        "type": "integer",
+                        "description": "remind this many minutes from now (use this OR at)",
+                    },
+                    "at": {
+                        "type": "string",
+                        "description": "absolute amsterdam time 'YYYY-MM-DD HH:MM' (use this OR in_minutes)",
+                    },
+                    "repeat": {
+                        "type": "string",
+                        "enum": list(reminders.REPEATS),
+                        "description": "how it repeats, default none (one-off)",
+                    },
+                    "interval_minutes": {
+                        "type": "integer",
+                        "description": f"for repeat=every_n_minutes: the gap in minutes (min {reminders.MIN_INTERVAL_MINUTES})",
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": (
+                            "OPTIONAL override: 'dm' for matthias's dms, or a "
+                            "channel id (C...) noodle is allowed in. leave empty "
+                            "to deliver where the request was made."
+                        ),
+                    },
+                },
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_freedom_session",
+            "description": (
+                "schedule a freedom.to focus session for LATER by handing it to "
+                "freedom's own scheduler (freedom starts it itself at that time, "
+                "noodle doesn't wait around). blocks everything on matthias's "
+                "devices for duration_minutes. give EITHER in_minutes OR at "
+                "(amsterdam time 'YYYY-MM-DD HH:MM', from the current time in "
+                "your context). one-off sessions can only be set up for the "
+                "next 24 hours; repeat can be daily, weekdays or weekly (the "
+                "weekday of 'at') - nothing else. to start one right now use "
+                "start_freedom_session instead. matthias only (checked on the "
+                "server)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "duration_minutes": {
+                        "type": "integer",
+                        "description": "how many minutes to block for (1-1440)",
+                    },
+                    "in_minutes": {
+                        "type": "integer",
+                        "description": "start this many minutes from now (use this OR at)",
+                    },
+                    "at": {
+                        "type": "string",
+                        "description": "start at this amsterdam time 'YYYY-MM-DD HH:MM' (use this OR in_minutes)",
+                    },
+                    "repeat": {
+                        "type": "string",
+                        "enum": ["none", "daily", "weekdays", "weekly"],
+                        "description": "default none (one-off)",
+                    },
+                },
+                "required": ["duration_minutes"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_scheduled",
+            "description": (
+                "list everything scheduled: reminders (ids like #3) and upcoming "
+                "or recurring freedom sessions (ids like freedom:123), with next "
+                "time, repeat and destination. matthias only."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_scheduled",
+            "description": (
+                "cancel/remove one scheduled reminder or freedom session by the "
+                "id list_scheduled shows (e.g. '3' or '#3' for a reminder, "
+                "'freedom:123' for a freedom session). if matthias refers to one "
+                "by description instead of id, list first to find the id. matthias "
+                "only."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"id": {"type": "string", "description": "the id, e.g. '3' or 'freedom:123'"}},
+                "required": ["id"],
+            },
+        },
+    },
 ]
 
 
@@ -357,6 +494,140 @@ def _web_search(query: str) -> str:
     return answer
 
 
+def _is_matthias(user_id: str | None) -> bool:
+    return user_id == config.USER_ID
+
+
+def _resolve_destination(destination, origin: dict | None):
+    """returns (channel, thread_ts) or an error string.
+
+    default is wherever the request was made: dms stay dms, a channel
+    (and the thread, if it was in one) stays there. an explicit override
+    is only accepted for 'dm' or a channel noodle is allowed to talk in.
+    """
+    destination = (destination or "").strip()
+    if not destination or destination.lower() in ("here", "same", "default"):
+        if not origin or origin.get("is_dm") or not origin.get("channel"):
+            return config.USER_ID, None
+        return origin["channel"], origin.get("thread_ts")
+    if destination.lower() in ("dm", "dms"):
+        return config.USER_ID, None
+    m = re.search(r"\b([CG][A-Z0-9]{6,})\b", destination.upper())
+    if not m:
+        return "couldn't tell where to send that - destination should be 'dm' or a channel id."
+    channel = m.group(1)
+    if not (config.ALLOW_CHANNEL_WILDCARD or channel in config.ALLOWED_CHANNELS):
+        return f"i'm not allowed to post in <#{channel}>, so can't schedule things there."
+    return channel, None
+
+
+def _parse_when(args: dict, repeat: str):
+    """returns (first occurrence as an amsterdam datetime, now) or an error string."""
+    now = datetime.datetime.now(AMSTERDAM_TZ)
+    if args.get("in_minutes") not in (None, ""):
+        try:
+            minutes = int(args["in_minutes"])
+        except (TypeError, ValueError):
+            return "in_minutes has to be a whole number."
+        if minutes < 1:
+            return "in_minutes has to be at least 1."
+        return (now + datetime.timedelta(minutes=minutes)).replace(second=0, microsecond=0), now
+    if args.get("at"):
+        first = reminders.parse_local(args["at"])
+        if first is None:
+            return "couldn't read that time, use 'YYYY-MM-DD HH:MM' (amsterdam time)."
+        if first <= now and repeat == "none":
+            return f"that time is already in the past (it's {now.strftime('%Y-%m-%d %H:%M')} in amsterdam right now)."
+        return first, now
+    return "need either in_minutes or at to know when."
+
+
+def _schedule_reminder(args: dict, user_id: str | None, origin: dict | None) -> str:
+    # same server-side guard as start_freedom_session: the real slack
+    # sender id decides, not the model's (or a channel message's) say-so.
+    if not _is_matthias(user_id):
+        log_tool("schedule_reminder", "", "unauthorized")
+        return "only matthias can schedule things - not doing this for anyone else."
+    text = (args.get("text") or "").strip()
+    if not text:
+        return "need the text of what to remind about."
+
+    repeat = args.get("repeat") or "none"
+    if repeat not in reminders.REPEATS:
+        return f"unknown repeat {repeat!r}, use one of: {', '.join(reminders.REPEATS)}."
+    interval = None
+    if repeat == "every_n_minutes":
+        try:
+            interval = int(args.get("interval_minutes"))
+        except (TypeError, ValueError):
+            return "need interval_minutes for an every_n_minutes repeat."
+        if interval < reminders.MIN_INTERVAL_MINUTES:
+            return f"the shortest repeat gap is {reminders.MIN_INTERVAL_MINUTES} minutes."
+
+    when = _parse_when(args, repeat)
+    if isinstance(when, str):
+        return when
+    first, _now = when
+
+    dest = _resolve_destination(args.get("destination"), origin)
+    if isinstance(dest, str):
+        return dest
+    channel, thread_ts = dest
+
+    created = reminders.add_reminder(
+        text, channel, thread_ts, repeat, interval, first, user_id
+    )
+    if created is None:
+        log_tool("schedule_reminder", text, "failed")
+        return (
+            f"couldn't schedule that (already at the limit of {reminders.MAX_ACTIVE_REMINDERS} "
+            "active reminders, or that schedule never fires again)."
+        )
+    row = {
+        "id": created["id"], "text": text, "channel": channel, "thread_ts": thread_ts,
+        "repeat": repeat, "interval_minutes": interval,
+        "next_run_ts": created["next_run"].timestamp(),
+    }
+    log_tool("schedule_reminder", f"#{created['id']}", "success")
+    return "scheduled and saved: " + reminders.describe(row)
+
+
+_FREEDOM_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def _freedom_error_message(error: dict) -> str:
+    code = error.get("code")
+    if code == "freedom_reauth_required":
+        return "freedom's login expired on the server - matthias needs to run `freedomd login` again before this will work."
+    if code == "premium_required":
+        return "that needs a freedom premium feature that isn't available on this account."
+    if code == "no_devices":
+        return "freedom says none of matthias's devices are registered to block on."
+    return f"freedom rejected the request: {error.get('message') or code}"
+
+
+def _my_freedom_device_ids():
+    """ids of matthias's OWN freedom devices, or an error string.
+
+    the freedom account is SHARED with matthias's dad - resolve ONLY the
+    devices named in config.FREEDOM_DEVICE_NAMES, every time, rather than
+    ever targeting "all devices on the account". refuses if none match.
+    """
+    devices = freedom_list_devices()
+    if devices is None:
+        return "couldn't reach freedom to look up devices, check logs."
+    wanted = {n.lower() for n in config.FREEDOM_DEVICE_NAMES}
+    device_ids = [d["id"] for d in devices if (d.get("name") or "").strip().lower() in wanted]
+    if not device_ids:
+        return (
+            "couldn't find matthias's own devices in freedom by name "
+            f"({', '.join(config.FREEDOM_DEVICE_NAMES)}) - not doing anything, "
+            "since the account is shared and guessing could block "
+            "someone else's device."
+        )
+    return device_ids
+
+
 def _start_freedom_session(duration_minutes, user_id: str | None) -> str:
     # authorization is enforced HERE, not left to the model's judgment -
     # a public channel request could claim to be "on matthias's behalf",
@@ -374,23 +645,10 @@ def _start_freedom_session(duration_minutes, user_id: str | None) -> str:
     if not 1 <= minutes <= 1440:
         return "freedom sessions have to be between 1 and 1440 minutes (24 hours)."
 
-    # the freedom account is SHARED with matthias's dad - resolve ONLY
-    # matthias's own devices by name (config.FREEDOM_DEVICE_NAMES) every
-    # time, rather than ever targeting "all devices on the account".
-    devices = freedom_list_devices()
-    if devices is None:
-        log_tool("start_freedom_session", f"{minutes}m", "device lookup failed")
-        return "couldn't reach freedom to look up devices, check logs."
-    wanted = {n.lower() for n in config.FREEDOM_DEVICE_NAMES}
-    device_ids = [d["id"] for d in devices if (d.get("name") or "").strip().lower() in wanted]
-    if not device_ids:
-        log_tool("start_freedom_session", f"{minutes}m", "no matching devices")
-        return (
-            "couldn't find matthias's own devices in freedom by name "
-            f"({', '.join(config.FREEDOM_DEVICE_NAMES)}) - not starting a "
-            "session, since the account is shared and guessing could block "
-            "someone else's device."
-        )
+    device_ids = _my_freedom_device_ids()
+    if isinstance(device_ids, str):
+        log_tool("start_freedom_session", f"{minutes}m", "devices")
+        return device_ids
 
     result = freedom_start_session(minutes, device_ids)
     if result is None:
@@ -398,21 +656,189 @@ def _start_freedom_session(duration_minutes, user_id: str | None) -> str:
         return "couldn't reach freedom to start the session, check logs."
     error = result.get("error")
     if error:
-        code = error.get("code")
-        log_tool("start_freedom_session", f"{minutes}m", f"error:{code}")
-        if code == "freedom_reauth_required":
-            return "freedom's login expired on the server - matthias needs to run `freedomd login` again before this will work."
-        if code == "premium_required":
-            return "that needs a freedom premium feature that isn't available on this account."
-        if code == "no_devices":
-            return "freedom says none of matthias's devices are registered to block on."
-        return f"freedom rejected the request: {error.get('message') or code}"
+        log_tool("start_freedom_session", f"{minutes}m", f"error:{error.get('code')}")
+        return _freedom_error_message(error)
     session = (result.get("session") or {})
     log_tool("start_freedom_session", f"{minutes}m", "success")
     return f"started a {minutes}-minute freedom session, blocking everything on matthias's devices (session id {session.get('id')})."
 
 
-def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None = None) -> str:
+def _schedule_freedom_session(args: dict, user_id: str | None) -> str:
+    """hand a later/recurring session to FREEDOM's own scheduler (one-off:
+    POST /api/sessions with start_time; recurring: POST /api/schedules) -
+    freedom starts it itself, noodle never has to be online or waiting."""
+    if not _is_matthias(user_id):
+        log_tool("schedule_freedom_session", "", "unauthorized")
+        return "only matthias can schedule a freedom session - not doing this for anyone else."
+    if not config.FREEDOM_API_KEY:
+        return "freedom isn't configured on noodle's end (no FREEDOM_API_KEY set), can't schedule a session."
+    try:
+        minutes = int(args.get("duration_minutes"))
+    except (TypeError, ValueError):
+        return "need a valid number of minutes for the freedom session."
+    if not 1 <= minutes <= 1440:
+        return "freedom sessions have to be between 1 and 1440 minutes (24 hours)."
+    repeat = args.get("repeat") or "none"
+    if repeat not in ("none", "daily", "weekdays", "weekly"):
+        return "freedom can only repeat sessions daily, weekdays or weekly."
+
+    when = _parse_when(args, repeat)
+    if isinstance(when, str):
+        return when
+    first, now = when
+
+    if repeat == "none":
+        delta = first - now
+        if delta < datetime.timedelta(minutes=2):
+            return "that's basically now - ask me to start it right now instead."
+        if delta >= datetime.timedelta(hours=24):
+            return (
+                "freedom can only schedule a one-off session for the next 24 hours "
+                "(later today or tomorrow), so i can't set that one up yet - ask me "
+                "again closer to the time, or make it a repeating one."
+            )
+
+    device_ids = _my_freedom_device_ids()
+    if isinstance(device_ids, str):
+        log_tool("schedule_freedom_session", f"{minutes}m", "devices")
+        return device_ids
+
+    # freedom takes HH:MM in ITS account timezone, which may not be amsterdam
+    tz_name = (freedom_list_sessions() or {}).get("timezone")
+    try:
+        tz = ZoneInfo(tz_name) if tz_name else AMSTERDAM_TZ
+    except Exception:  # noqa: BLE001
+        tz = AMSTERDAM_TZ
+    local = first.astimezone(tz)
+    start_time = local.strftime("%H:%M")
+
+    if repeat == "none":
+        result = freedom_start_session(minutes, device_ids, start_time=start_time)
+        key = "session"
+    else:
+        days = {
+            "daily": _FREEDOM_DAYS,
+            "weekdays": _FREEDOM_DAYS[:5],
+            "weekly": [_FREEDOM_DAYS[local.weekday()]],
+        }[repeat]
+        result = freedom_create_schedule(
+            f"noodle {minutes}m block", start_time, days, minutes, device_ids
+        )
+        key = "schedule"
+    if result is None:
+        log_tool("schedule_freedom_session", f"{minutes}m", "failed")
+        return "couldn't reach freedom to schedule the session, check logs."
+    error = result.get("error")
+    if error:
+        log_tool("schedule_freedom_session", f"{minutes}m", f"error:{error.get('code')}")
+        return _freedom_error_message(error)
+    item = result.get(key) or {}
+    log_tool("schedule_freedom_session", f"{minutes}m", "success")
+    when_text = first.astimezone(AMSTERDAM_TZ).strftime("%a %H:%M")
+    rep = "one-off" if repeat == "none" else f"repeating {repeat}"
+    return (
+        f"scheduled a {minutes}-minute freedom session ({rep}) for {when_text} "
+        f"amsterdam time, blocking everything on matthias's devices (freedom:{item.get('id')}). "
+        "freedom itself will start it, noodle doesn't need to be online then."
+    )
+
+
+def _my_freedom_schedules(device_ids: list) -> tuple[list[dict], str]:
+    """upcoming one-off + recurring freedom sessions that are matthias's:
+    every device on them must be one of his (the account is shared)."""
+    mine = set(device_ids)
+    found: dict = {}
+    tz = ""
+    for data, keys in (
+        (freedom_list_schedules(), ("schedules",)),
+        (freedom_list_sessions(), ("active", "upcoming")),
+    ):
+        if not data or data.get("error"):
+            continue
+        tz = tz or data.get("timezone") or ""
+        for k in keys:
+            for s in data.get(k) or []:
+                ids = s.get("device_ids") or []
+                if ids and set(ids) <= mine:
+                    found[s["id"]] = s
+    return list(found.values()), tz
+
+
+def _describe_freedom(s: dict, tz: str) -> str:
+    mins = s.get("duration_minutes") or (s.get("duration_seconds") or 0) // 60
+    if s.get("recurring"):
+        rep = "repeats " + ",".join(s.get("days") or [])
+    else:
+        rep = "one-off"
+    parts = [f"freedom:{s['id']} {mins}-minute freedom session", f"starts {s.get('start_time')} ({tz or 'freedom tz'})", rep]
+    if s.get("active"):
+        parts.append("running right now")
+    elif s.get("seconds_until_start") is not None:
+        parts.append(f"in ~{int(s['seconds_until_start']) // 60} min")
+    return " | ".join(parts)
+
+
+def _list_scheduled(user_id: str | None) -> str:
+    if not _is_matthias(user_id):
+        log_tool("list_scheduled", "", "unauthorized")
+        return "only matthias can see what's scheduled."
+    lines = [reminders.describe(r) for r in reminders.list_active()]
+    if config.FREEDOM_API_KEY:
+        device_ids = _my_freedom_device_ids()
+        if isinstance(device_ids, str):
+            lines.append(f"(couldn't list freedom sessions: {device_ids})")
+        else:
+            sessions, tz = _my_freedom_schedules(device_ids)
+            lines += [_describe_freedom(s, tz) for s in sessions]
+    log_tool("list_scheduled", "", f"{len(lines)} items")
+    return "\n".join(lines) if lines else "nothing is scheduled right now."
+
+
+def _cancel_scheduled(raw_id, user_id: str | None) -> str:
+    if not _is_matthias(user_id):
+        log_tool("cancel_scheduled", str(raw_id), "unauthorized")
+        return "only matthias can cancel scheduled things."
+    raw = str(raw_id or "").strip().lower().lstrip("#")
+    if raw.startswith("freedom:"):
+        try:
+            fid = int(raw.split(":", 1)[1])
+        except ValueError:
+            return "that freedom id doesn't look right, expected freedom:<number>."
+        if not config.FREEDOM_API_KEY:
+            return "freedom isn't configured on noodle's end (no FREEDOM_API_KEY set)."
+        device_ids = _my_freedom_device_ids()
+        if isinstance(device_ids, str):
+            return device_ids
+        # only ever touch sessions that are matthias's (shared account)
+        sessions, _tz = _my_freedom_schedules(device_ids)
+        target = next((s for s in sessions if s["id"] == fid), None)
+        if target is None:
+            log_tool("cancel_scheduled", raw, "not found")
+            return f"no freedom session {raw} among matthias's scheduled ones."
+        if target.get("active"):
+            log_tool("cancel_scheduled", raw, "running")
+            return "that freedom session is running right now, i can't cancel one that's already started."
+        result = freedom_delete_schedule(fid)
+        if result is None:
+            return "couldn't reach freedom to cancel that, check logs."
+        if result.get("error"):
+            log_tool("cancel_scheduled", raw, f"error:{result['error'].get('code')}")
+            return _freedom_error_message(result["error"])
+        log_tool("cancel_scheduled", raw, "success")
+        return f"cancelled freedom session {raw}."
+    try:
+        rid = int(raw)
+    except ValueError:
+        return "need the id of what to cancel, like 3 or freedom:123."
+    if reminders.delete_reminder(rid):
+        log_tool("cancel_scheduled", f"#{rid}", "success")
+        return f"cancelled and removed reminder #{rid}."
+    log_tool("cancel_scheduled", f"#{rid}", "not found")
+    return f"no reminder with id #{rid}."
+
+
+def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None = None,
+             origin: dict | None = None) -> str:
     if name == "search_slack_messages":
         return _search_slack_messages(args.get("query", ""), user_prompt=user_prompt)
     if name == "fetch_slack_message":
@@ -430,4 +856,12 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return _web_search(args.get("query", ""))
     if name == "start_freedom_session":
         return _start_freedom_session(args.get("duration_minutes"), user_id=user_id)
+    if name == "schedule_reminder":
+        return _schedule_reminder(args, user_id=user_id, origin=origin)
+    if name == "schedule_freedom_session":
+        return _schedule_freedom_session(args, user_id=user_id)
+    if name == "list_scheduled":
+        return _list_scheduled(user_id)
+    if name == "cancel_scheduled":
+        return _cancel_scheduled(args.get("id"), user_id)
     return f"unknown tool: {name}"

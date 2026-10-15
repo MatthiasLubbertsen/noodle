@@ -11,6 +11,7 @@ from bot.history_store import init_db, load_history
 from bot.log import setup_logging
 from bot.memory import dm_conv_key, trim_memory
 from bot.scheduler import start_daily_scheduler
+from bot.reminders import init_table as init_reminders_table
 from bot.watch import handle_member_joined_channel, handle_member_left_channel
 
 logger = logging.getLogger("noodle")
@@ -34,6 +35,7 @@ def build_app() -> App:
     # restore persisted dm history (dms only, for now) so conversations
     # survive a restart
     init_db()
+    init_reminders_table()
     dm_key = dm_conv_key()
     dm_history = load_history(dm_key)
     trim_memory(dm_history)
