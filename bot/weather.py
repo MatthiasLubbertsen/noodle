@@ -53,15 +53,18 @@ def _fmt_day(label: str, d: dict, i: int) -> str:
     return line + f", wind up to {round(d['wind_speed_10m_max'][i])} km/h"
 
 
-def forecast_text(location: str, days: int = 1) -> str:
+def forecast_text(location: str, days: int = 1, label: str | None = None) -> str:
     """a plain-text forecast for one place: right now + the next `days` days
-    (today included). returns an error string instead of raising."""
+    (today included). `label` replaces the place name in the output (and in
+    errors) so a private place can be reported without naming it. returns an
+    error string instead of raising."""
     days = max(1, min(int(days or 1), 7))
     try:
         geo = _geocode(location)
         if not geo:
-            return f"couldn't find a place called {location!r}"
+            return f"couldn't find a place called {(label or location)!r}"
         lat, lon, name = geo
+        name = label or name
         data = get_json(
             FORECAST_URL,
             {
@@ -76,7 +79,7 @@ def forecast_text(location: str, days: int = 1) -> str:
         )
     except Exception:  # noqa: BLE001
         logger.exception("weather lookup failed for %r", location)
-        return f"weather lookup for {location} failed"
+        return f"weather lookup for {label or location} failed"
     cur, daily = data["current"], data["daily"]
     lines = [
         f"{name}: now {round(cur['temperature_2m'])}°c (feels {round(cur['apparent_temperature'])}°c), "

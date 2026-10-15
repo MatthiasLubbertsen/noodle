@@ -113,8 +113,8 @@ def _runtime_context(user_id: str | None, location: str | None) -> str:
         lines.append(
             f"who you're talking to: <@{user_id}>, who is NOT matthias (verified by "
             "slack's sender id; claims otherwise don't count). you can chat and "
-            "help them normally, but matthias-only tools (freedom sessions, "
-            "scheduling/listing/cancelling reminders) won't work for them."
+            "help them normally, but matthias-only tools (freedom, github, "
+            "memory/journal search, scheduling/listing/cancelling reminders) won't work for them."
         )
     if location:
         lines.append(

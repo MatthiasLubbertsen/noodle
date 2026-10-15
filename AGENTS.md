@@ -721,7 +721,7 @@ skips that piece, never breaks startup or a dm).
   model-written weather message (`morning.build_weather_message()`, facts from
   `weather.morning_weather_facts()`, open-meteo, no key, places from
   `WEATHER_LOCATIONS`, set in `.env` only), then news if any.
-  `get_weather` with no place defaults to `WEATHER_DEFAULT_LOCATION` (set in `.env`). calendar is NOT included: matthias can't create the google
+  `get_weather` with no place uses `WEATHER_DEFAULT_LOCATION` (also `.env`). calendar is NOT included: matthias can't create the google
   oauth app it needs.
 - **tools** (`bot/tools.py`): `get_weather` (any place; none = `WEATHER_DEFAULT_LOCATION`), `now_playing` (last.fm, since
   matthias can't create more spotify apps - spotify scrobbling to last.fm
@@ -782,6 +782,27 @@ or id (so "block only mopa5m with the social blocklist" works),
   rounds; each round may contain several tool calls (run in order) and their
   results go back to the model, so chains like list devices -> list blocklists
   -> start session all happen before the reply. only the final text is sent.
+
+### 7e. privacy: weather location, memory access, channel joining
+- **matthias's location is private.** `WEATHER_LOCATIONS` and
+  `WEATHER_DEFAULT_LOCATION` come only from `.env` (no defaults in code, docs
+  or prompts). the morning weather goes to his dm only. `get_weather` outside a
+  dm (`origin["is_dm"]` false) never gives the model or anyone the place name
+  for his own location: the forecast is labelled "current location" (this also
+  applies if the model passes one of his configured places by name). a place
+  someone else names is looked up normally. the system prompt also forbids
+  naming/guessing where he lives outside a dm.
+- **`search_memory` and `get_journal` are matthias-only**, checked in
+  `bot/tools.py` against the real sender id (memory holds his dms with noodle).
+  `github` and `freedom` already were.
+- **joining channels** (`bot/channels.py`, nothing is ever posted): at startup
+  `ensure_joined()` joins the configured channels it isn't in
+  (`MATTHIAS_DAY_CHANNEL_ID`, `WATCHED_CHANNEL_ID`, `LOGS_CHANNEL_ID`, explicit
+  `ALLOWED_CHANNELS` ids; not `*`). also, `fetch_slack_message` and
+  `summarize_thread` auto-join a public channel they can't read yet and retry,
+  but only when matthias asked. needs the `channels:join` scope; private
+  channels still need an invite (logged as a warning). slack itself shows a
+  standard "noodle joined" line.
 
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
@@ -845,7 +866,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `DAILY_WRAPUP_DM` | `HH:MM`, end-of-day wrap-up dm (default `21:30`) |
 | `WEEKLY_JOURNAL` / `WEEKLY_DIGEST` | `<mon..sun> HH:MM`, weekly journal recap (`sun 18:00`) / busiest-channels digest (`mon 09:00`) |
 | `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`), max per day (default 10) |
-| `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | morning dm places (set in `.env`, no default) / get_weather default place |
+| `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | PRIVATE, no defaults in code: morning dm places (comma separated) / get_weather default place |
 | `LASTFM_API_KEY` / `LASTFM_USER` | last.fm key + username; optional, enables `now_playing` |
 | `GITHUB_TOKEN` / `GITHUB_USER` / `GITHUB_POLL_SECONDS` | classic token (`repo`, `notifications`); optional, enables the github tool + watcher |
 | `WATCHED_CHANNEL_ID` | channel watched for joins/leaves; empty disables it |

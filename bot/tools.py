@@ -8,6 +8,7 @@ from bot import reminders, state
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
 from bot import github as github_api
+from bot.channels import with_join
 from bot import lastfm
 from bot.exa import web_answer
 from bot import freedom_tool
@@ -145,7 +146,7 @@ TOOLS = [
         "function": {
             "name": "search_memory",
             "description": (
-                "semantically search noodle's own persisted memory - past dms, "
+                "(matthias only, checked on the server) semantically search noodle's own persisted memory - past dms, "
                 "threads, and direct pings (not ambient channel chatter noodle "
                 "wasn't addressed in) - for anything related to a topic, even "
                 "from weeks ago. use this when asked to recall something from a "
@@ -394,8 +395,9 @@ TOOLS = [
             "name": "get_weather",
             "description": (
                 "get the weather forecast (right now + the next few days) for a "
-                "place, via open-meteo. leave location empty for matthias's own location. use only when weather is actually "
-                "asked about."
+                "place, via open-meteo. leave location empty for matthias's own location (outside dms it is only ever "
+                "reported as 'current location' - never name or guess the place). use only when "
+                "weather is actually asked about."
             ),
             "parameters": {
                 "type": "object",
@@ -452,7 +454,7 @@ TOOLS = [
         "function": {
             "name": "get_journal",
             "description": (
-                "read matthias's own @matthias-day daily recaps for a date range, "
+                "(matthias only) read matthias's own @matthias-day daily recaps for a date range, "
                 "in order, with links to the originals. use for 'what did i do "
                 "in march' / 'what was last week like' style questions where a "
                 "date range matters (search_memory is for topic lookups)."
@@ -562,7 +564,7 @@ def _search_slack_messages(query: str, user_prompt: str = "") -> str:
         return f"slack search failed: {exc}"
 
 
-def _fetch_slack_message(ref: str) -> str:
+def _fetch_slack_message(ref: str, user_id: str | None = None) -> str:
     cid, ts = _parse_slack_ref(ref)
     if not cid:
         log_tool("fetch_slack_message", ref, "bad ref")
@@ -575,12 +577,13 @@ def _fetch_slack_message(ref: str) -> str:
         )
     logger.info("fetch %s %s", cid, ts)
     try:
-        resp = state.app.client.conversations_history(
+        join_ok = _is_matthias(user_id)  # only his requests may make noodle join a channel
+        resp = with_join(cid, join_ok, lambda: state.app.client.conversations_history(
             channel=cid, latest=ts, inclusive=True, limit=1
-        )
+        ))
         msgs = (resp.get("messages") or []) if resp.get("ok") else []
         if not msgs:
-            resp2 = state.app.client.conversations_replies(channel=cid, ts=ts, limit=1)
+            resp2 = with_join(cid, join_ok, lambda: state.app.client.conversations_replies(channel=cid, ts=ts, limit=1))
             msgs = (resp2.get("messages") or []) if resp2.get("ok") else []
         if not msgs:
             log_tool("fetch_slack_message", ref, "not found")
@@ -597,7 +600,13 @@ def _fetch_slack_message(ref: str) -> str:
         return f"fetch failed: {exc}"
 
 
-def _search_memory(query: str) -> str:
+def _search_memory(query: str, user_id: str | None) -> str:
+    # memory holds matthias's dms with noodle, his threads and his journal -
+    # anyone else (e.g. in a public channel) must never be able to read it,
+    # so this is checked here on the real sender id, not left to the model.
+    if not _is_matthias(user_id):
+        log_tool("search_memory", "", "unauthorized")
+        return "only matthias can search noodle's memory - it holds his private dms."
     query = (query or "").strip()
     if not query:
         return "no search query given"
@@ -642,10 +651,21 @@ def _web_search(query: str) -> str:
     return answer
 
 
-def _get_weather(location: str | None, days) -> str:
-    places = [location.strip()] if location and location.strip() else [config.WEATHER_DEFAULT_LOCATION]
-    log_tool("get_weather", ", ".join(places), "success")
-    return "\n".join(forecast_text(p, days or 1) for p in places)
+_CURRENT_LOCATION = "current location"
+
+
+def _get_weather(location: str | None, days, origin: dict | None) -> str:
+    """matthias's home/usual places are private: outside a dm they are never
+    named (to the model or anyone else) - the forecast is labelled "current
+    location" instead. a place someone else names is just looked up normally."""
+    asked = (location or "").strip() or config.WEATHER_DEFAULT_LOCATION
+    if not asked:
+        return "no default location is configured, so i need a place name."
+    private = {p.lower() for p in [*config.WEATHER_LOCATIONS, config.WEATHER_DEFAULT_LOCATION] if p}
+    in_dm = bool(origin and origin.get("is_dm"))
+    hide = not in_dm and asked.lower() in private
+    log_tool("get_weather", _CURRENT_LOCATION if hide else asked, "success")
+    return forecast_text(asked, days or 1, label=_CURRENT_LOCATION if hide else None)
 
 
 def _now_playing() -> str:
@@ -663,7 +683,10 @@ def _github(args: dict, user_id: str | None) -> str:
     return result
 
 
-def _get_journal(start_date, end_date) -> str:
+def _get_journal(start_date, end_date, user_id: str | None) -> str:
+    if not _is_matthias(user_id):
+        log_tool("get_journal", "", "unauthorized")
+        return "only matthias can read his journal."
     try:
         start = datetime.date.fromisoformat((start_date or "").strip())
         end = datetime.date.fromisoformat((end_date or start_date).strip())
@@ -683,7 +706,8 @@ def _get_journal(start_date, end_date) -> str:
 _THREAD_MAX_CHARS = 14000
 
 
-def _summarize_thread(ref: str, origin: dict | None) -> str:
+def _summarize_thread(ref: str, origin: dict | None, user_id: str | None = None) -> str:
+    join_ok = _is_matthias(user_id)
     ref = (ref or "").strip()
     if ref:
         cid, ts = _parse_slack_ref(ref)
@@ -695,7 +719,10 @@ def _summarize_thread(ref: str, origin: dict | None) -> str:
         log_tool("summarize_thread", ref, "bad ref")
         return "could not parse a slack channel/timestamp from that reference"
     try:
-        resp = state.app.client.conversations_replies(channel=cid, ts=ts, limit=200)
+        resp = with_join(
+            cid, join_ok,
+            lambda: state.app.client.conversations_replies(channel=cid, ts=ts, limit=200),
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("summarize_thread failed for %s %s", cid, ts)
         log_tool("summarize_thread", ref or ts, "failed")
@@ -1028,7 +1055,7 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
     if name == "search_slack_messages":
         return _search_slack_messages(args.get("query", ""), user_prompt=user_prompt)
     if name == "fetch_slack_message":
-        return _fetch_slack_message(args.get("ref", ""))
+        return _fetch_slack_message(args.get("ref", ""), user_id)
     if name == "flaron":
         return flaron_query(
             args.get("action", ""),
@@ -1037,7 +1064,7 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
             query=args.get("query"),
         )
     if name == "search_memory":
-        return _search_memory(args.get("query", ""))
+        return _search_memory(args.get("query", ""), user_id)
     if name == "web_search":
         return _web_search(args.get("query", ""))
     if name == "start_freedom_session":
@@ -1053,13 +1080,13 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
     if name == "cancel_scheduled":
         return _cancel_scheduled(args.get("id"), user_id)
     if name == "get_weather":
-        return _get_weather(args.get("location"), args.get("days"))
+        return _get_weather(args.get("location"), args.get("days"), origin)
     if name == "now_playing":
         return _now_playing()
     if name == "github":
         return _github(args, user_id)
     if name == "get_journal":
-        return _get_journal(args.get("start_date"), args.get("end_date"))
+        return _get_journal(args.get("start_date"), args.get("end_date"), user_id)
     if name == "summarize_thread":
-        return _summarize_thread(args.get("ref", ""), origin)
+        return _summarize_thread(args.get("ref", ""), origin, user_id)
     return f"unknown tool: {name}"
