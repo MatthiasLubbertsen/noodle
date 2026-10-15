@@ -1,7 +1,8 @@
 # noodle
 
-a tiny, cute slack agent that lives in your workspace and chats through a
-slack user account (not a bot app) using the slack bolt framework in socket
+a tiny, cute slack agent that lives in your workspace and chats through its
+own dedicated slack account (a user-type account, not a bot app, and not
+anyone's personal login) using the slack bolt framework in socket
 mode. it is powered by an openai compatible api (openrouter or any proxy) and
 speaks in a warm, casual, lowercase style, like a good friend texting.
 
@@ -149,7 +150,7 @@ logs go to the console either way; the code also tries to write
 
 | var | meaning |
 | --- | --- |
-| `SLACK_USER_TOKEN` | user token (xoxp-...) the app acts as |
+| `SLACK_USER_TOKEN` | token (xoxp-...) of noodle's own dedicated slack account |
 | `SLACK_APP_TOKEN` | socket mode app token (xapp-...) |
 | `USER_ID` | only slack user allowed to DM noodle |
 | `OPENAI_API_KEY` | openai compatible api key (sk-or-...) |

@@ -1,7 +1,22 @@
 # AGENTS.md — noodle project guide
 
-noodle is a slack agent that runs on a **slack user account** (not a bot app)
-using the **slack bolt** framework in **socket mode**. it is powered by an
+noodle is a slack agent that runs on its **own, dedicated slack account** (a
+user-type account, not a bot app) using the **slack bolt** framework in
+**socket mode**.
+
+> **important, easy to get wrong: noodle is NOT matthias's account.** noodle
+> has its own slack account with its own identity (`state.AUTH_USER_ID`), and
+> `SLACK_USER_TOKEN` is that account's token. matthias is a *different*
+> person/account, identified only by `USER_ID`. "user token" / "user account"
+> in this repo means the *type* of slack token (xoxp, as opposed to a bot
+> token), never "matthias's login". consequences: anything noodle posts comes
+> from noodle, not from matthias; noodle's search, history and channel access
+> are limited to what the noodle account itself can see and has joined;
+> matthias is just whoever messages it (the only authorized dm partner). don't
+> write code, docs or replies that treat noodle's messages as sent by
+> matthias, or that assume noodle can see everything matthias can.
+
+it is powered by an it is powered by an
 openai-compatible api (configured to **openrouter**) using a configurable
 model (defaults described in `.env`).
 
@@ -171,9 +186,10 @@ no nested `noodle/noodle` folder.
   web api, exposed to the model as an openai-style **function/tool call**
   (`search_slack_messages`). the model decides when to call it; results are fed
   back as context and are **never** posted raw to slack.
-- search runs **as the token's user** (logged as `searching_as=...`). it can
-  only find messages that user is allowed to see, so the `SLACK_USER_TOKEN`
-  must belong to the same user that can see the messages you want searched.
+- search runs **as noodle's own account** (logged as `searching_as=...`),
+  not as matthias. it can only find messages that account is allowed to see
+  (channels it has joined, its own dms), so the `SLACK_USER_TOKEN` account
+  has to be in the channels you want searched.
 - requires the slack user token to have the `search:read` scope.
 - tool-calling needs a model that supports function calls; if the configured
   `MODEL` does not, the search tool simply will not trigger.
@@ -722,7 +738,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 
 | var | meaning |
 | --- | --- |
-| `SLACK_USER_TOKEN` | user token (xoxp-...) the app acts as |
+| `SLACK_USER_TOKEN` | token (xoxp-...) of noodle's own dedicated slack account (not matthias's) |
 | `SLACK_APP_TOKEN` | socket mode app token (xapp-...) |
 | `USER_ID` | only slack user allowed to DM noodle |
 | `OPENAI_API_KEY` | openrouter api key (sk-or-...) |
