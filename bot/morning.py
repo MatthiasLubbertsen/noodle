@@ -45,15 +45,22 @@ def build_greeting_message() -> str:
 
 
 def build_news_message() -> str | None:
-    """a separate message listing new hack club news articles, or None if none."""
+    """a separate persona-written message about new hack club news articles
+    (links kept verbatim), or None if there are none."""
     articles = unread_articles()
     if not articles:
         return None
-    count = len(articles)
-    plural = "article" if count == 1 else "articles"
-    lines = [f"oh and {count} new hack club news {plural} dropped:"]
-    lines += [f"- {a['title']}: {a['link']}" for a in articles[:5]]
-    return "\n".join(lines)
+    facts = "\n".join(f"- {a['title']}: {a['link']}" for a in articles[:5])
+    remember_facts("hack club news", facts)
+    text = complete(
+        f"{len(articles)} new hack club news article(s) dropped. tell matthias in your "
+        "own voice, short and casual: what each is about (from the title) with its "
+        "link exactly as given. use ONLY these facts.\n\nfacts:\n" + facts,
+        max_tokens=300,
+    )
+    if text and all(a["link"] in text for a in articles[:5]):
+        return text
+    return "new hack club news:\n" + facts
 
 
 def build_weather_message() -> str | None:

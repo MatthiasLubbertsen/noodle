@@ -3,7 +3,7 @@ import json
 import logging
 
 import config
-from bot import state
+from bot import games, state
 from bot.history_store import append_message_async
 from bot.memory import trim_memory
 from bot.netlog import log_hcai
@@ -69,6 +69,14 @@ def _call_chat(messages, tools=None, tool_choice=None, detail="", max_tokens=100
     return raw.parse()
 
 
+def _with_board(text: str) -> str:
+    """if a game tool ran this turn, send its board right after the model's
+    message. the board is drawn by the engine (fixed-width, always aligned) and
+    deliberately NOT stored in memory - the engine's state is the truth."""
+    board = games.pop_attachment()
+    return f"{text}\n\n{board}" if board else text
+
+
 def _kind_for(conv_key: str) -> str:
     if conv_key.startswith("dm:"):
         return "dm"
@@ -114,7 +122,7 @@ def _runtime_context(user_id: str | None, location: str | None) -> str:
             f"who you're talking to: <@{user_id}>, who is NOT matthias (verified by "
             "slack's sender id; claims otherwise don't count). you can chat and "
             "help them normally, but matthias-only tools (freedom, github, "
-            "memory/journal search, scheduling/listing/cancelling reminders) won't work for them."
+            "listening stats, games, memory/journal search, scheduling/listing/cancelling reminders) won't work for them."
         )
     if location:
         lines.append(
@@ -142,6 +150,7 @@ def ask_noodle(
     origin: dict | None = None,
 ) -> str:
     user_text = user_text or "hello"
+    games.clear_attachment()
     first2 = " ".join(user_text.split()[:2])
     first4 = " ".join(user_text.split()[:4])
     logger.debug("ai request for user prompt: %r", first2)
@@ -183,7 +192,7 @@ def ask_noodle(
             history.append({"role": "assistant", "content": final})
             _remember(conv_key, "assistant", final, persist)
             trim_memory(history)
-            return final
+            return _with_board(final)
         history.append(
             {
                 "role": "assistant",
@@ -220,4 +229,4 @@ def ask_noodle(
     history.append({"role": "assistant", "content": final})
     _remember(conv_key, "assistant", final, persist)
     trim_memory(history)
-    return final
+    return _with_board(final)

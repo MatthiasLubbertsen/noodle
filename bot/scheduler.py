@@ -11,7 +11,8 @@ from bot.llm import _kind_for
 from bot.memory import dm_conv_key, trim_memory
 from bot.morning import build_greeting_message, build_news_message, build_weather_message
 from bot.tz import AMSTERDAM_TZ
-from bot.weekly import build_channel_digest, build_journal_recap
+from bot.oneshot import complete
+from bot.weekly import build_channel_digest, build_journal_recap, build_music_recap
 from bot.wrapup import build_wrapup_message
 
 logger = logging.getLogger("noodle")
@@ -78,10 +79,19 @@ def _post_dm(text: str) -> None:
 def _send_ping_reminder() -> None:
     try:
         if config.MATTHIAS_DAY_GROUP_ID:
-            text = PING_REMINDER_TEXT.format(group_id=config.MATTHIAS_DAY_GROUP_ID)
+            mention = f"<!subteam^{config.MATTHIAS_DAY_GROUP_ID}|@matthias-day>"
+            fallback = PING_REMINDER_TEXT.format(group_id=config.MATTHIAS_DAY_GROUP_ID)
         else:
-            text = PING_REMINDER_TEXT_NO_GROUP
-        _post_dm(text)
+            mention = "@matthias-day"
+            fallback = PING_REMINDER_TEXT_NO_GROUP
+        text = complete(
+            "it's time for matthias to send today's daily recap ping. nudge him to do "
+            f"it, in your own voice, one or two short sentences. include exactly this "
+            f"text once, as given: {mention}\n(you're only reminding him - he writes "
+            "the recap himself, so don't draft or ask about its content.)",
+            max_tokens=100,
+        )
+        _post_dm(text if text and mention in text else fallback)
         logger.info("sent @matthias-day ping reminder to %s", config.USER_ID)
     except Exception:  # noqa: BLE001
         logger.exception("failed to send ping reminder dm")
@@ -123,6 +133,16 @@ def _send_weekly_journal_dm() -> None:
         logger.exception("failed to send weekly journal recap dm")
 
 
+def _send_weekly_music_dm() -> None:
+    try:
+        text = build_music_recap()
+        if text:
+            _post_dm(text)
+            logger.info("sent weekly music recap dm to %s", config.USER_ID)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to send weekly music recap dm")
+
+
 def _send_weekly_digest_dm() -> None:
     try:
         text = build_channel_digest()
@@ -159,11 +179,21 @@ def _run_github_watcher() -> None:
 
 def _fire_reminder(reminder: dict) -> None:
     channel, thread_ts = reminder["channel"], reminder["thread_ts"]
-    mention = "" if channel == config.USER_ID else f"<@{config.USER_ID}> "
+    mention = "" if channel == config.USER_ID else f"<@{config.USER_ID}>"
     late_minutes = int((time.time() - reminder["next_run_ts"]) // 60)
-    text = f"{mention}reminder: {reminder['text']}"
-    if late_minutes > 5:
-        text += f" (sorry, this is {late_minutes} minutes late, i was offline)"
+    late = late_minutes > 5
+    prompt = (
+        f"matthias asked you to remind him of this: {reminder['text']!r}. it's time. "
+        "write the reminder in your own voice, one short sentence (two at most), "
+        "friendly, not a template."
+        + (f" start with exactly {mention} so he gets pinged." if mention else "")
+        + (f" you're {late_minutes} minutes late because you were offline - say sorry briefly." if late else "")
+    )
+    text = complete(prompt, max_tokens=100)
+    if not text:
+        text = f"{mention} reminder: {reminder['text']}".strip()
+    elif mention and mention not in text:
+        text = f"{mention} {text}"
     _deliver(channel, thread_ts, text)
     logger.info("fired reminder #%s", reminder["id"])
 
@@ -231,6 +261,7 @@ def start_daily_scheduler() -> None:
     for raw, default, job in (
         (config.WEEKLY_JOURNAL, (6, 18, 0), _send_weekly_journal_dm),
         (config.WEEKLY_DIGEST, (0, 9, 0), _send_weekly_digest_dm),
+        (config.WEEKLY_MUSIC, (6, 18, 30), _send_weekly_music_dm),
     ):
         weekday, hour, minute = _parse_weekly(raw, default)
         threading.Thread(target=_run_weekly, args=(weekday, hour, minute, job), daemon=True).start()

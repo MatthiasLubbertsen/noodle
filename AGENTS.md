@@ -65,6 +65,7 @@ noodle/
     proactive.py          # quiet hours + daily cap for unprompted pings
     oneshot.py            # one-off persona completion for scheduled messages
     wrapup.py             # end-of-day wrap-up dm
+    games.py              # dm games (tictactoe, connect4, hangman, wordle, mastermind)
     weekly.py             # weekly journal recap + busiest-channel digest
     log.py                # logging setup
     netlog.py             # concise "called hcai .../called tool ..." log lines
@@ -206,7 +207,9 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `search_memory` | semantic (vector) search of noodle's persisted memory: dms, threads, pings, journal, daily facts | matthias only |
 | `web_search` | short cited answer from the live web (exa via hack club ai) | anyone |
 | `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
-| `now_playing` | what matthias is listening to, via last.fm scrobbles | anyone |
+| `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
+| `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
+| `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
 | `github` | repo, commits, issues, pulls, search, notifications, commits today | matthias only |
 | `get_journal` | his `@matthias-day` recaps for a date range (plain date filter, not vector search) | matthias only |
 | `summarize_thread` | reads a whole thread (link or current thread) so the model can tl;dr it; same auto-join rule as `fetch_slack_message` | anyone |
@@ -836,6 +839,40 @@ or id (so "block only mopa5m with the social blocklist" works),
   channels still need an invite (logged as a warning). slack itself shows a
   standard "noodle joined" line.
 
+### 7f. no computer messages, music insights, games, matthias's own token
+- **every message noodle writes to matthias (or a channel) goes through the
+  model** - the daily message count (`stats.build_daily_summary`, also the
+  channel reply to the `@matthias-day` ping), the ping reminder dm, the news
+  message, fired reminders (`scheduler._fire_reminder`), the weather, wrap-up,
+  weekly dms and github notifications. a plain-text fallback exists only for
+  when the model call itself fails or drops something that must be verbatim (a
+  link, a mention). NOT converted on purpose: the two error fallbacks in
+  `handlers.py` (the model is the thing that's down), the machine-log lines in
+  `LOGS_CHANNEL_ID`, and the `JOIN_EPHEMERAL_MESSAGE` template (matthias's own
+  words, from `.env`).
+- **`MATTHIAS_USER_TOKEN`** is matthias's own xoxp token (`search:read`). it is
+  used for ONE thing only: `stats._counting_client()` counts today's messages
+  with it so private channels and dms are included, and only the total
+  (`count=1`, `messages.total`) is ever read. it is not stored in `state`, not
+  passed to any tool, never used to read or post anything. unset = the count
+  falls back to noodle's own narrower search. **do not use it anywhere else.**
+- **music insights** (`lastfm.top()`, `lastfm.scrobbles_between()`): the
+  `music_stats` tool (top artists/tracks/albums for 7day..overall) and a weekly
+  model-written recap (`weekly.build_music_recap()`, `WEEKLY_MUSIC`, default
+  `sun 18:30`: this week vs last week plays, top artists/tracks; facts also
+  saved to memory). `now_playing` and `music_stats` are matthias-only.
+- **games** (`bot/games.py`, `play_game` tool): tictactoe, connect4, hangman,
+  wordle, mastermind. matthias-only AND dm-only, enforced in code, and noodle
+  never starts one itself (the prompt forbids suggesting one too). the engine
+  owns rules, state (`data/games.json`, survives restarts, plus a win/loss
+  record) and noodle's moves (tictactoe: minimax with easy/normal/hard;
+  connect4: alpha-beta search at depth 1/3/5); the model only talks. the board
+  is drawn by the engine in a fixed-width code block (ascii only, so columns
+  always line up; wordle uses emoji rows) and attached to the reply by
+  `llm._with_board()` instead of trusting the model to reproduce it - it is not
+  stored in memory. wordle accepts any 5 letters (no dictionary check) and
+  hangman/wordle words come from built-in lists in `games.py`.
+
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
   (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore
@@ -896,7 +933,8 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `FREEDOM_API_KEY` | bearer key for that api; optional - unset just disables `start_freedom_session` |
 | `FREEDOM_DEVICE_NAMES` | comma separated device names (as shown in freedom's dashboard) allowed to be blocked - the account is shared, so this is never "all devices" (defaults to `Matthias Windows,mopa5m`) |
 | `DAILY_WRAPUP_DM` | `HH:MM`, end-of-day wrap-up dm (default `21:30`) |
-| `WEEKLY_JOURNAL` / `WEEKLY_DIGEST` | `<mon..sun> HH:MM`, weekly journal recap (`sun 18:00`) / busiest-channels digest (`mon 09:00`) |
+| `WEEKLY_JOURNAL` / `WEEKLY_DIGEST` / `WEEKLY_MUSIC` | `<mon..sun> HH:MM`, weekly journal recap (`sun 18:00`) / busiest-channels digest (`mon 09:00`) / music recap (`sun 18:30`) |
+| `MATTHIAS_USER_TOKEN` | matthias's OWN xoxp token (`search:read`), used only to count today's messages incl. private channels - nothing else |
 | `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`), max per day (default 10) |
 | `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | PRIVATE, no defaults in code: morning dm places (comma separated) / get_weather default place |
 | `LASTFM_API_KEY` / `LASTFM_USER` | last.fm key + username; optional, enables `now_playing` |

@@ -7,6 +7,7 @@ import config
 from bot import reminders, state
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
+from bot import games
 from bot import github as github_api
 from bot.channels import with_join
 from bot import lastfm
@@ -413,11 +414,59 @@ TOOLS = [
         "function": {
             "name": "now_playing",
             "description": (
-                "what matthias is listening to right now (plus the last few "
+                "what matthias is listening to right now (matthias only; plus the last few "
                 "tracks), from his last.fm scrobbles. use when asked what's "
                 "playing / what he's listening to."
             ),
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "play_game",
+            "description": (
+                "play a small game with matthias in a dm: tictactoe, connect4, "
+                "hangman, wordle, mastermind. ONLY when HE asks to play - never "
+                "start or suggest a game yourself. matthias + dms only (enforced). "
+                "actions: list, rules, start (game, optional difficulty "
+                "easy/normal/hard for tictactoe/connect4), move (his move: a "
+                "square 1-9 for tictactoe, a column 1-7 for connect4, a letter or "
+                "word for hangman, a 5-letter word for wordle, 4 letters like RGBY "
+                "for mastermind), show (re-send the board), quit. the engine keeps "
+                "the state and plays noodle's moves; the board is attached to your "
+                "reply automatically, so never draw or retype it - just talk about "
+                "what happened."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": games.ACTIONS},
+                    "game": {"type": "string", "enum": list(games.GAMES), "description": "for start / rules"},
+                    "move": {"type": "string", "description": "his move, for action=move"},
+                    "difficulty": {"type": "string", "enum": ["easy", "normal", "hard"], "description": "for start, default normal"},
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "music_stats",
+            "description": (
+                "matthias's listening stats from last.fm (matthias only): his top "
+                "artists, tracks or albums over a period. use for 'what have i been "
+                "listening to this month', 'top artists this year' and the like."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["artists", "tracks", "albums"], "description": "default artists"},
+                    "period": {"type": "string", "enum": ["7day", "1month", "3month", "6month", "12month", "overall"], "description": "default 7day"},
+                    "limit": {"type": "integer", "description": "how many, default 10"},
+                },
+            },
         },
     },
     {
@@ -668,10 +717,30 @@ def _get_weather(location: str | None, days, origin: dict | None) -> str:
     return forecast_text(asked, days or 1, label=_CURRENT_LOCATION if hide else None)
 
 
-def _now_playing() -> str:
+def _now_playing(user_id: str | None) -> str:
+    if not _is_matthias(user_id):
+        log_tool("now_playing", "", "unauthorized")
+        return "only matthias can see what he's listening to."
     result = lastfm.now_playing()
     log_tool("now_playing", "", "success" if not result.startswith("last.fm") else "failed")
     return result
+
+
+def _music_stats(args: dict, user_id: str | None) -> str:
+    if not _is_matthias(user_id):
+        log_tool("music_stats", "", "unauthorized")
+        return "only matthias can see his listening stats."
+    if not lastfm.configured():
+        return "last.fm isn't configured (LASTFM_API_KEY / LASTFM_USER missing)"
+    kind = args.get("kind") or "artists"
+    period = args.get("period") or "7day"
+    if kind not in ("artists", "tracks", "albums") or period not in lastfm.PERIODS:
+        return f"kind must be artists/tracks/albums and period one of {', '.join(lastfm.PERIODS)}"
+    lines = lastfm.top(kind, period, int(args.get("limit") or 10))
+    log_tool("music_stats", f"{kind} {period}", "failed" if lines is None else "success")
+    if lines is None:
+        return "last.fm lookup failed, check logs"
+    return f"top {kind} ({period}):\n" + "\n".join(f"{i}. {l}" for i, l in enumerate(lines, 1))
 
 
 def _github(args: dict, user_id: str | None) -> str:
@@ -1082,7 +1151,12 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
     if name == "get_weather":
         return _get_weather(args.get("location"), args.get("days"), origin)
     if name == "now_playing":
-        return _now_playing()
+        return _now_playing(user_id)
+    if name == "play_game":
+        log_tool("play_game", args.get("action", ""), "run")
+        return games.play(args, user_id, origin)
+    if name == "music_stats":
+        return _music_stats(args, user_id)
     if name == "github":
         return _github(args, user_id)
     if name == "get_journal":

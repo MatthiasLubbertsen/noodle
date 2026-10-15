@@ -3,7 +3,7 @@ import logging
 import time
 
 import config
-from bot import state
+from bot import lastfm, state
 from bot.history_store import load_kind_between
 from bot.oneshot import complete, remember_facts
 from bot.tz import AMSTERDAM_TZ
@@ -102,3 +102,36 @@ def build_channel_digest() -> str | None:
     if text and all(f"<#{cid}>" in text for cid, _, _ in top):
         return text
     return "busiest channels this week:\n" + facts
+
+
+def build_music_recap() -> str | None:
+    """a weekly listening recap from last.fm (this week vs last week, top
+    artists and tracks), or None if last.fm isn't set up / has nothing."""
+    if not lastfm.configured():
+        return None
+    now = int(time.time())
+    this_week = lastfm.scrobbles_between(now - 7 * 86400, now)
+    last_week = lastfm.scrobbles_between(now - 14 * 86400, now - 7 * 86400)
+    artists = lastfm.top("artists", "7day", 5)
+    tracks = lastfm.top("tracks", "7day", 5)
+    facts = []
+    if this_week is not None:
+        facts.append(f"tracks played in the last 7 days: {this_week}")
+    if last_week is not None:
+        facts.append(f"tracks played the 7 days before that: {last_week}")
+    if artists:
+        facts.append("top artists this week: " + "; ".join(artists))
+    if tracks:
+        facts.append("top tracks this week: " + "; ".join(tracks))
+    if not facts or not this_week:
+        return None
+    facts_text = "\n".join(facts)
+    remember_facts("weekly music stats", facts_text)
+    return complete(
+        "it's the weekly music recap. tell matthias about his listening this week in "
+        "your own voice: 3-4 sentences or a few short lines. mention the totals "
+        "(and whether it's up or down vs the week before), his top artists and a "
+        "standout track, and anything fun you notice. use ONLY these facts.\n\n"
+        "facts:\n" + facts_text,
+        max_tokens=350,
+    )
