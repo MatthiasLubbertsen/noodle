@@ -46,12 +46,12 @@ def _strip_leaked_tool_names(text: str) -> str:
     return "\n\n".join(kept)
 
 
-def _call_chat(messages, tools=None, tool_choice=None, detail=""):
+def _call_chat(messages, tools=None, tool_choice=None, detail="", max_tokens=1000):
     kwargs = {
         "model": config.MODEL,
         "messages": messages,
         "temperature": 0.9,
-        "max_tokens": 1000,
+        "max_tokens": max_tokens,
     }
     if tools is not None:
         kwargs["tools"] = tools

@@ -32,6 +32,12 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
   named day (like watermelon day). if there are any new hack club news
   articles (news.hackclub.com) since the last check, that's sent as a
   second, separate message right after.
+- add the weather (open-meteo) for your places to the morning dm, DM an
+  end-of-day wrap-up, a weekly recap of your `@matthias-day` journal and a
+  weekly digest of the busiest channels, and DM you new github notifications
+  (quiet hours + a daily cap keep it polite).
+- answer weather, last.fm now-playing, github and "what did i do in march"
+  (journal) questions with tools, and tl;dr a slack thread from a link.
 - ignore any message that starts with `# ` (a hash and a space), always,
   no matter what.
 - watch one channel (`WATCHED_CHANNEL_ID`) for people joining/leaving: on

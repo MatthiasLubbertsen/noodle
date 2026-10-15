@@ -60,6 +60,42 @@ DAILY_PING_REMINDER = os.getenv("DAILY_PING_REMINDER", "19:00")
 # "HH:MM" time noodle DMs USER_ID the wakey-wakey / special-day / news digest
 DAILY_MORNING_DM = os.getenv("DAILY_MORNING_DM", "08:00")
 
+# "HH:MM" time noodle DMs a short end-of-day wrap-up (slack messages, commits,
+# tracks played). it never drafts the @matthias-day recap - matthias writes that.
+DAILY_WRAPUP_DM = os.getenv("DAILY_WRAPUP_DM", "21:30")
+# weekly jobs, "<mon|tue|wed|thu|fri|sat|sun> HH:MM" (amsterdam time):
+# a recap of the week's @matthias-day journal entries...
+WEEKLY_JOURNAL = os.getenv("WEEKLY_JOURNAL", "sun 18:00")
+# ...and a digest of the busiest channels noodle is in
+WEEKLY_DIGEST = os.getenv("WEEKLY_DIGEST", "mon 09:00")
+
+# --- proactivity guardrails ---
+# unprompted pings (the github watcher) are held during quiet hours
+# ("HH:MM-HH:MM", may wrap past midnight) and capped per day. fixed-time dms
+# (morning, wrap-up, weekly) are exempt.
+QUIET_HOURS = os.getenv("QUIET_HOURS", "23:00-07:30")
+PROACTIVE_DAILY_CAP = int(os.getenv("PROACTIVE_DAILY_CAP", "10"))
+
+# --- weather (open-meteo, no key needed) ---
+# places for the morning dm and the default for the get_weather tool
+WEATHER_LOCATIONS = [
+    n.strip() for n in os.getenv("WEATHER_LOCATIONS", "").split(",") if n.strip()
+]
+
+# --- last.fm (now playing; spotify can scrobble to it, no oauth app needed) ---
+# both optional - unset just disables the now_playing tool / wrap-up line
+LASTFM_API_KEY = os.getenv("LASTFM_API_KEY", "")
+LASTFM_USER = os.getenv("LASTFM_USER", "")
+
+# --- github (tool + notification watcher) ---
+# a CLASSIC personal access token (scopes: repo, notifications) - the
+# notifications api doesn't work with fine-grained tokens. optional: unset
+# disables the tool, the watcher and the wrap-up commit count.
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+GITHUB_USER = os.getenv("GITHUB_USER", "MatthiasLubbertsen")
+# how often the watcher checks for new notifications
+GITHUB_POLL_SECONDS = int(os.getenv("GITHUB_POLL_SECONDS", "300"))
+
 # the "@matthias-day" usergroup: pinging it triggers a "messages sent today" recap.
 # matched by id (<!subteam^ID>); the label "matthias-day" is always matched
 # too as a fallback (catches a plain, unexpanded "@matthias-day" typed as
@@ -111,4 +147,6 @@ NEWS_SEEN_PATH = DATA_DIR / "hackclub_news_seen.json"
 # persistent, embedded conversation history (dms, threads, direct pings) -
 # sqlite, see bot/history_store.py.
 MEMORY_DB_PATH = DATA_DIR / "noodle_memory.db"
+GITHUB_SEEN_PATH = DATA_DIR / "github_seen.json"
+PROACTIVE_STATE_PATH = DATA_DIR / "proactive_state.json"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
