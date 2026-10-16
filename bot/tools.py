@@ -1,3 +1,4 @@
+import base64
 import datetime
 import logging
 import re
@@ -7,7 +8,7 @@ import config
 from bot import reminders, state
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
-from bot import games
+from bot import games, sandbox
 from bot import github as github_api
 from bot.channels import with_join
 from bot import lastfm
@@ -424,6 +425,37 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "run_code",
+            "description": (
+                "run a python or javascript snippet in an isolated sandbox and get "
+                "the output back (matthias only, dms only, enforced). use it for "
+                "real calculations, data crunching, simulations, plots and file "
+                "conversions - not for arithmetic you can do in your head. python "
+                "3.13 with numpy, pandas, matplotlib, scipy and sympy plus the "
+                "standard library; matplotlib figures are sent to the dm as png "
+                "automatically, and any file the code writes to /out/ (csv, txt, "
+                "json, png...; max 5) is sent too. javascript is plain ES2020 "
+                "(QuickJS): console.log for output, the value of the last "
+                "expression is returned, no require/import/fetch/timers. NO "
+                "network, no pip install, no shell or subprocesses, no state kept "
+                "between runs, 20s limit by default (max 60s). print results you "
+                "want back (the last expression's value is also returned). if it "
+                "errors, read the traceback, fix the code and run again."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "language": {"type": "string", "enum": ["python", "javascript"]},
+                    "code": {"type": "string", "description": "the full program to run"},
+                    "timeout_seconds": {"type": "integer", "description": "1-60, default 20"},
+                },
+                "required": ["language", "code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "play_game",
             "description": (
                 "play a small game with matthias in a dm: tictactoe, connect4, "
@@ -808,6 +840,66 @@ def _summarize_thread(ref: str, origin: dict | None, user_id: str | None = None)
     return f"thread in {_channel_link(cid)} ({len(msgs)} messages):\n{text}"
 
 
+_CODE_OUTPUT_CAP = 6000
+
+
+def _run_code(args: dict, user_id: str | None, origin: dict | None) -> str:
+    """run a python/javascript snippet in the wasm sandbox (matthias, dms only).
+    text goes back to the model as tool context; files (plots, csvs) are
+    uploaded straight into the dm."""
+    if not _is_matthias(user_id):
+        log_tool("run_code", "", "unauthorized")
+        return "only matthias can run code."
+    if not (origin and origin.get("is_dm")):
+        log_tool("run_code", "", "not a dm")
+        return "code only runs in dms with matthias, not here."
+    if not sandbox.configured():
+        return "the code sandbox isn't set up (SANDBOX_URL / SANDBOX_TOKEN missing)."
+    language = (args.get("language") or "").lower()
+    code = args.get("code") or ""
+    if language not in ("python", "javascript"):
+        return "language must be python or javascript."
+    if not code.strip():
+        return "no code given."
+    try:
+        timeout_s = max(1, min(int(args.get("timeout_seconds") or 20), 60))
+    except (TypeError, ValueError):
+        timeout_s = 20
+
+    result = sandbox.run(language, code, timeout_s)
+    if isinstance(result, str):
+        log_tool("run_code", f"{language} {len(code)} chars", "failed")
+        return result
+
+    sent, failed = [], []
+    for f in result.get("files") or []:
+        try:
+            state.app.client.files_upload_v2(
+                channel=origin["channel"],
+                file=base64.b64decode(f["data"]),
+                filename=f["name"],
+                title=f["name"],
+            )
+            sent.append(f["name"])
+        except Exception:  # noqa: BLE001
+            logger.exception("uploading sandbox file %s failed", f.get("name"))
+            failed.append(f["name"])
+
+    parts = []
+    for label, key in (("stdout", "stdout"), ("stderr", "stderr"), ("result (value of the last expression)", "result"), ("error", "error")):
+        if result.get(key):
+            parts.append(f"{label}:\n{result[key]}")
+    if result.get("truncated"):
+        parts.append("(output was cut off, it was too long)")
+    if sent:
+        parts.append(f"sent to the dm as files: {', '.join(sent)} - he can see them, don't describe them as attached to your text.")
+    if failed:
+        parts.append(f"couldn't upload: {', '.join(failed)}")
+    parts.append(f"ran in {result.get('duration_ms', '?')} ms")
+    log_tool("run_code", f"{language} {len(code)} chars", "ok" if result.get("ok") else "error")
+    return "\n\n".join(parts)[:_CODE_OUTPUT_CAP]
+
+
 def _is_matthias(user_id: str | None) -> bool:
     return user_id == config.USER_ID
 
@@ -1152,6 +1244,8 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return _get_weather(args.get("location"), args.get("days"), origin)
     if name == "now_playing":
         return _now_playing(user_id)
+    if name == "run_code":
+        return _run_code(args, user_id, origin)
     if name == "play_game":
         log_tool("play_game", args.get("action", ""), "run")
         return games.play(args, user_id, origin)

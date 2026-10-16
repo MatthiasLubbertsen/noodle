@@ -1,0 +1,12 @@
+{
+  "name": "noodle-sandbox",
+  "version": "1.0.0",
+  "private": true,
+  "description": "wasm code runner for noodle: python (pyodide) + javascript (quickjs), no network, no filesystem",
+  "type": "commonjs",
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "pyodide": "0.29.5",
+    "quickjs-emscripten": "0.31.0"
+  }
+}

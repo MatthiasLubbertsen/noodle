@@ -139,6 +139,12 @@ FREEDOM_DEVICE_NAMES = [
 # for any tool). unset = the count falls back to noodle's own, narrower search.
 MATTHIAS_USER_TOKEN = os.getenv("MATTHIAS_USER_TOKEN", "")
 
+# --- code sandbox (python + javascript in wasm, separate container) ---
+# base url of the sandbox service (docker-compose sets http://sandbox:8080) and its
+# shared secret. empty url = the run_code tool just reports it isn't configured.
+SANDBOX_URL = os.getenv("SANDBOX_URL", "").rstrip("/")
+SANDBOX_TOKEN = os.getenv("SANDBOX_TOKEN", "")
+
 # --- channel join/leave analytics ---
 # the one channel noodle watches for member_joined_channel/member_left_channel.
 # leave empty to disable this feature entirely.
