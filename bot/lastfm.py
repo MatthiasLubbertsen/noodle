@@ -69,3 +69,60 @@ def scrobbles_today() -> int | None:
     except Exception:  # noqa: BLE001
         logger.exception("last.fm scrobble count failed")
         return None
+
+
+PERIODS = ("7day", "1month", "3month", "6month", "12month", "overall")
+_TOP_METHODS = {"artists": "user.gettopartists", "tracks": "user.gettoptracks", "albums": "user.gettopalbums"}
+
+
+def top(kind: str, period: str = "7day", limit: int = 10) -> list[str] | None:
+    """top artists/tracks/albums for a period as 'name (N plays)' lines, or
+    None if last.fm isn't configured / the call failed."""
+    if not configured() or kind not in _TOP_METHODS or period not in PERIODS:
+        return None
+    try:
+        data = get_json(
+            API_URL,
+            {
+                "method": _TOP_METHODS[kind],
+                "user": config.LASTFM_USER,
+                "api_key": config.LASTFM_API_KEY,
+                "format": "json",
+                "period": period,
+                "limit": limit,
+            },
+        )
+        items = data[f"top{kind}"][kind[:-1]]
+    except Exception:  # noqa: BLE001
+        logger.exception("last.fm top %s failed", kind)
+        return None
+    lines = []
+    for i in items:
+        name = i.get("name", "?")
+        if kind != "artists":
+            name += f" by {(i.get('artist') or {}).get('name', '?')}"
+        lines.append(f"{name} ({i.get('playcount', '?')} plays)")
+    return lines
+
+
+def scrobbles_between(start_ts: int, end_ts: int) -> int | None:
+    """tracks played in [start_ts, end_ts) (unix seconds), or None."""
+    if not configured():
+        return None
+    try:
+        data = get_json(
+            API_URL,
+            {
+                "method": "user.getrecenttracks",
+                "user": config.LASTFM_USER,
+                "api_key": config.LASTFM_API_KEY,
+                "format": "json",
+                "limit": 1,
+                "from": start_ts,
+                "to": end_ts,
+            },
+        )
+        return int(data["recenttracks"]["@attr"]["total"])
+    except Exception:  # noqa: BLE001
+        logger.exception("last.fm scrobble range failed")
+        return None

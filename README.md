@@ -82,7 +82,9 @@ real slack sender id, so it is safe in public channels too.
 | `search_memory` | semantic (vector) search of noodle's persisted memory: dms, threads, pings, journal, daily facts | matthias only |
 | `web_search` | short cited answer from the live web (exa via hack club ai) | anyone |
 | `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
-| `now_playing` | what matthias is listening to, via last.fm scrobbles | anyone |
+| `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
+| `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
+| `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
 | `github` | repo, commits, issues, pulls, search, notifications, commits today | matthias only |
 | `get_journal` | his `@matthias-day` recaps for a date range (plain date filter, not vector search) | matthias only |
 | `summarize_thread` | reads a whole thread (link or current thread) so the model can tl;dr it; same auto-join rule as `fetch_slack_message` | anyone |
@@ -145,6 +147,7 @@ noodle/
     proactive.py       # quiet hours + daily cap for unprompted pings
     oneshot.py         # one-off persona completion + daily-facts memory rows
     wrapup.py          # end-of-day wrap-up dm
+    games.py           # dm games (tictactoe, connect4, hangman, wordle, mastermind)
     weekly.py          # weekly journal recap + busiest-channel digest
     channels.py        # silently join configured channels
     log.py             # logging setup
@@ -207,8 +210,9 @@ logs go to the console either way; the code also tries to write
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in a channel |
 | `DAILY_PING_REMINDER` | `HH:MM` time for the `@matthias-day` reminder dm (Europe/Amsterdam) |
 | `DAILY_MORNING_DM` | `HH:MM` time for the morning wakeup dm (Europe/Amsterdam) |
+| `MATTHIAS_USER_TOKEN` | matthias's OWN xoxp token (`search:read`), used only to count today's messages including private channels - nothing else; optional |
 | `DAILY_WRAPUP_DM` | `HH:MM` end-of-day wrap-up dm (default `21:30`) |
-| `WEEKLY_JOURNAL` / `WEEKLY_DIGEST` | `<mon..sun> HH:MM` weekly journal recap (`sun 18:00`) / busiest-channels digest (`mon 09:00`) |
+| `WEEKLY_JOURNAL` / `WEEKLY_DIGEST` / `WEEKLY_MUSIC` | `<mon..sun> HH:MM` weekly journal recap (`sun 18:00`) / busiest-channels digest (`mon 09:00`) / music recap (`sun 18:30`) |
 | `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`) / max per day (default 10) |
 | `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | private, set in `.env` only: morning dm places (comma separated) / default place for `get_weather` |
 | `LASTFM_API_KEY` / `LASTFM_USER` | optional, enables `now_playing` |

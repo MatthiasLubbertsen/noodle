@@ -68,6 +68,8 @@ DAILY_WRAPUP_DM = os.getenv("DAILY_WRAPUP_DM", "21:30")
 WEEKLY_JOURNAL = os.getenv("WEEKLY_JOURNAL", "sun 18:00")
 # ...and a digest of the busiest channels noodle is in
 WEEKLY_DIGEST = os.getenv("WEEKLY_DIGEST", "mon 09:00")
+# ...and a music insights recap from last.fm (needs LASTFM_*)
+WEEKLY_MUSIC = os.getenv("WEEKLY_MUSIC", "sun 18:30")
 
 # --- proactivity guardrails ---
 # unprompted pings (the github watcher) are held during quiet hours
@@ -129,6 +131,14 @@ FREEDOM_DEVICE_NAMES = [
     n.strip() for n in os.getenv("FREEDOM_DEVICE_NAMES", "Matthias Windows,mopa5m").split(",") if n.strip()
 ]
 
+# --- matthias's OWN slack user token (xoxp-..., scope search:read) ---
+# used for exactly ONE thing: counting how many messages matthias sent today
+# (bot/stats.py), so private channels and dms are counted too - noodle's own
+# token can only see what noodle has joined. only the total count is ever read.
+# NEVER use this anywhere else (not for reading messages, not for posting, not
+# for any tool). unset = the count falls back to noodle's own, narrower search.
+MATTHIAS_USER_TOKEN = os.getenv("MATTHIAS_USER_TOKEN", "")
+
 # --- channel join/leave analytics ---
 # the one channel noodle watches for member_joined_channel/member_left_channel.
 # leave empty to disable this feature entirely.
@@ -152,4 +162,5 @@ NEWS_SEEN_PATH = DATA_DIR / "hackclub_news_seen.json"
 MEMORY_DB_PATH = DATA_DIR / "noodle_memory.db"
 GITHUB_SEEN_PATH = DATA_DIR / "github_seen.json"
 PROACTIVE_STATE_PATH = DATA_DIR / "proactive_state.json"
+GAMES_STATE_PATH = DATA_DIR / "games.json"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
