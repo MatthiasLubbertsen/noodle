@@ -923,6 +923,18 @@ dm with `files_upload_v2` (needs the `files:write` scope on noodle's token).
   actually enforced - if cgroup limits aren't delegated, the in-process
   watchdog and node's heap limit are what's left. not yet built or run in a
   real container: the runner itself is tested locally, the image is not.
+- **what it can and can't do** (kept in sync in three places: the `run_code`
+  tool description, the "using tools" section of the system prompt, and the
+  failure hints from `tools._code_hints()` - change all three together). CAN:
+  python + stdlib + numpy/pandas/matplotlib/scipy/sympy (and their deps),
+  javascript ES2020, plots and `/out/` files sent to the dm. CANNOT: any network
+  (requests, downloads, apis, git, pip/npm), other packages (sklearn, torch,
+  requests, opencv...), shell/subprocess/threads, read any file or data of
+  noodle's or slack's (input has to be inside the code - passing files in is a
+  possible later feature), state between runs, stdin, interactive/gui plots,
+  js `require`/`import`/`fetch`/timers/dom, more than 60s, ~900MB memory, 20k
+  chars of output, 5 output files of 8MB each. a failed run adds hints for
+  missing modules, no network, js-only gaps, missing files, timeouts and memory.
 - **later (not built):** a real shell tier (git, tests, conversions) would be a
   second container behind a forward proxy with a domain allowlist (squid on the
   internal network); this tier needs no network at all.
