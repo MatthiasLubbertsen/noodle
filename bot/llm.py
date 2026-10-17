@@ -182,6 +182,10 @@ def ask_noodle(
     )
     # a clear game start/move in his dm is applied by the engine itself, the model just reacts
     game_note = games.auto(user_text, user_id, origin)
+    # the engine already did this move/start. if the model could still call play_game it
+    # sometimes repeats the move, gets "square already taken" / "no game running" back and
+    # tells him that instead (it did, twice) - so on those turns it simply has no game tool.
+    active_tools = [t for t in TOOLS if t["function"]["name"] != "play_game"] if game_note else TOOLS
     if game_note:
         system_content += "\n\n" + game_note
 
@@ -193,15 +197,15 @@ def ask_noodle(
         if force_tool:
             try:
                 response = _call_chat(
-                    messages, tools=TOOLS, detail=first4,
+                    messages, tools=active_tools, detail=first4,
                     tool_choice={"type": "function", "function": {"name": force_tool}},
                 )
             except Exception:  # noqa: BLE001 - a provider that rejects forced tool_choice
                 logger.exception("forced tool_choice failed, retrying with auto")
-                response = _call_chat(messages, tools=TOOLS, tool_choice="auto", detail=first4)
+                response = _call_chat(messages, tools=active_tools, tool_choice="auto", detail=first4)
             force_tool = None
         else:
-            response = _call_chat(messages, tools=TOOLS, tool_choice="auto", detail=first4)
+            response = _call_chat(messages, tools=active_tools, tool_choice="auto", detail=first4)
         message = response.choices[0].message
         if not message.tool_calls:
             raw_content = message.content or ""

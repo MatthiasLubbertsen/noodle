@@ -126,6 +126,17 @@ def _ttt_new(args: dict) -> dict:
     return {"game": "tictactoe", "board": [" "] * 9, "difficulty": args.get("difficulty") or "normal"}
 
 
+_TTT_NAMES = ["top left", "top middle", "top right", "middle left", "center", "middle right",
+              "bottom left", "bottom middle", "bottom right"]
+
+
+def _ttt_state(b: list[str]) -> str:
+    """the board in words, so the model never has to map square numbers to places itself."""
+    def squares(piece: str) -> str:
+        return ", ".join(f"{i + 1} ({_TTT_NAMES[i]})" for i, c in enumerate(b) if c == piece) or "none"
+    return f"board now - X (his): {squares('X')}; O (noodle's): {squares('O')}; free squares: {squares(' ')}."
+
+
 def _ttt_move(g: dict, move: str) -> tuple[str, str | None]:
     try:
         i = int(str(move).strip()) - 1
@@ -134,19 +145,21 @@ def _ttt_move(g: dict, move: str) -> tuple[str, str | None]:
         return "that isn't a square - he needs to pick a number from 1 to 9.", None
     b = g["board"]
     if b[i] != " ":
-        return f"square {i + 1} is already taken - he has to pick a free one.", None
+        return f"square {i + 1} ({_TTT_NAMES[i]}) is already taken - he has to pick a free one. {_ttt_state(b)}", None
     b[i] = "X"
+    his = f"he placed X at square {i + 1} ({_TTT_NAMES[i]})"
     if _ttt_winner(b) == "X":
-        return f"he placed X at {i + 1} and completed three in a row - he WON.", "win"
+        return f"{his} and completed three in a row - he WON. {_ttt_state(b)}", "win"
     if " " not in b:
-        return f"he placed X at {i + 1}. the board is full - it's a DRAW.", "draw"
+        return f"{his}. the board is full - it's a DRAW. {_ttt_state(b)}", "draw"
     j = _ttt_ai_move(b, g["difficulty"])
     b[j] = "O"
+    mine = f"then noodle placed O at square {j + 1} ({_TTT_NAMES[j]})"
     if _ttt_winner(b) == "O":
-        return f"he placed X at {i + 1}, then noodle placed O at {j + 1} and completed three in a row - noodle WON.", "loss"
+        return f"{his}, {mine} and completed three in a row - noodle WON. {_ttt_state(b)}", "loss"
     if " " not in b:
-        return f"he placed X at {i + 1}, then noodle placed O at {j + 1}. the board is full - it's a DRAW.", "draw"
-    return f"he placed X at {i + 1}, then noodle placed O at {j + 1}. game continues, his turn.", None
+        return f"{his}, {mine}. the board is full - it's a DRAW. {_ttt_state(b)}", "draw"
+    return f"{his}, {mine}. game continues, his turn. {_ttt_state(b)}", None
 
 
 # ---------------------------------------------------------------------------
@@ -563,10 +576,23 @@ _MOVE_FILLER = {
     "square", "column", "col", "number", "no", "in", "at", "on", "the", "my", "move", "is", "then", "please",
     "pls", "ok", "okay", "alright", "so", "and", "it", "that", "here", "uh", "um", "hmm", "its", "it's", "put", "drop", "place",
 }
+# a number right next to one of these is chat, not a move ("see you at 9", "i have 2")
+_NOT_A_MOVE_BEFORE = {"at", "around", "by", "until", "till", "about", "past", "after", "before", "than",
+                      "have", "has", "got", "im", "i'm", "am", "was", "were", "are", "only", "just"}
 AUTO_NOTE = (
-    "game engine update - the engine already handled this for you, so do NOT call play_game "
-    "for it again. react to it in your own voice (the board is attached automatically): "
+    "game engine update - the engine already handled this and the result below is the truth, so "
+    "never contradict it (a move it says was placed WAS placed). you have no game tool this turn, "
+    "don't try to make or repeat a move. react in your own voice; the board is attached "
+    "automatically. engine result: "
 )
+
+
+def _with_his_words(note: str, text: str) -> str:
+    return (
+        f'{note}\nhis full message was: "{text}". if it says anything besides the move (a joke, a '
+        "comment, a feeling), answer THAT like a person first, then react to the game. describe "
+        "squares with the names the engine used, never by guessing which number is where."
+    )
 
 
 def _auto_move(game: str, text: str) -> str | None:
@@ -574,13 +600,20 @@ def _auto_move(game: str, text: str) -> str | None:
     t = text.strip()
     if game in ("tictactoe", "connect4"):
         top = 9 if game == "tictactoe" else 7
-        # the message must be essentially just the move ("6", "let's do 6", "square 6 please"),
-        # so "i'm 3 days late" in the middle of a game is not read as square 3
+        # a clear move is either essentially just the move ("6", "let's do 6", "square 6 please"),
+        # or a chatty message that starts or ends with it ("this will end in a draw lol. 7").
+        # a number in the middle of a sentence ("i'm 3 days late") or after a word like "at"
+        # ("see you at 9") is not a move.
         tokens = re.findall(r"[a-z0-9']+", t.lower())
-        digits = [w for w in tokens if re.fullmatch(r"[1-9]", w)]
-        rest = [w for w in tokens if w not in digits]
-        if len(digits) == 1 and int(digits[0]) <= top and all(w in _MOVE_FILLER for w in rest):
-            return digits[0]
+        idx = [i for i, w in enumerate(tokens) if re.fullmatch(r"[1-9]", w)]
+        if len(idx) == 1 and int(tokens[idx[0]]) <= top:
+            i = idx[0]
+            rest = tokens[:i] + tokens[i + 1:]
+            if all(w in _MOVE_FILLER for w in rest):
+                return tokens[i]
+            near = tokens[i - 1] if i == len(tokens) - 1 else tokens[i + 1] if i == 0 else None
+            if len(t) <= 80 and (i == 0 or i == len(tokens) - 1) and near not in _NOT_A_MOVE_BEFORE:
+                return tokens[i]
     elif game == "hangman":
         m = re.fullmatch(r"(?:(?:letter|guess)\s+)?([a-z])", t, re.I) or re.fullmatch(r"(?:guess\s+)([a-z]{2,})", t, re.I)
         if m:
@@ -610,7 +643,7 @@ def auto(text: str, user_id: str | None, origin: dict | None) -> str | None:
     if current:
         move = _auto_move(current["game"], text)
         if move is not None:
-            return AUTO_NOTE + play({"action": "move", "move": move}, user_id, origin)
+            return _with_his_words(AUTO_NOTE + play({"action": "move", "move": move}, user_id, origin), text)
     # start: needs a game name (or "again" after a game) AND a clear wish to play, no refusal
     if len(text) > 120 or _REFUSAL.search(text) or not _WANTS_TO_PLAY.search(text):
         return None
@@ -623,7 +656,7 @@ def auto(text: str, user_id: str | None, origin: dict | None) -> str | None:
     args = {"action": "start", "game": name}
     if difficulty:
         args["difficulty"] = difficulty.lower()
-    return AUTO_NOTE + "he asked to play, so the engine started it. " + play(args, user_id, origin)
+    return _with_his_words(AUTO_NOTE + "he asked to play, so the engine started it. " + play(args, user_id, origin), text)
 
 
 # ---------------------------------------------------------------------------
@@ -650,5 +683,10 @@ def looks_like_fake_turn(reply: str, user_text: str, user_id: str | None, origin
         return False
     if getattr(_local, "block", None):  # a board was attached this turn: the engine did run
         return False
-    gamey = bool(_load().get("current")) or bool(_GAMEY.search(user_text or ""))
-    return gamey and bool(_FAKE_TURN.search(reply or ""))
+    if _load().get("current"):
+        # a game is running: "your move" in a reply to plain chat is fine. only suspicious if he
+        # sent something that looks like a move (a number) and nothing was applied.
+        plausible = bool(re.search(r"\b[1-9]\b", user_text or ""))
+    else:
+        plausible = bool(_GAMEY.search(user_text or ""))
+    return plausible and bool(_FAKE_TURN.search(reply or ""))

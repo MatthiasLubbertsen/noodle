@@ -351,6 +351,14 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   makes it possible to tell from the logs alone whether noodle stayed quiet
   because the gate said no, vs. some other reason entirely.
 
+### 4c-i. never write em dashes
+- the persona prompt forbids em/en dashes, and `slack_text._clean_reply()` (applied to
+  every model-written message: replies, scheduled dms, the morning greeting) enforces it
+  with `_no_dashes()`: a dash between numbers becomes a hyphen ("9-15"), a dash at the
+  start or end of a line disappears, any other becomes a comma. line breaks are never
+  touched, since they separate slack messages. the prompt rule alone wasn't enough,
+  the model kept using them.
+
 ### 4c. never send reasoning to slack
 - noodle only ever forwards the model's final `content` to slack. any
   chain-of-thought / `<think:6124c78e>...</think:6124c78e>` blocks are stripped before chunking,
@@ -902,7 +910,16 @@ or id (so "block only mopa5m with the social blocklist" works),
   essentially only the move, so "i'm 3 days late" isn't square 3; one letter for
   hangman, 5 letters for wordle, `rgby` for mastermind) is applied by the engine,
   the board is attached, and the model gets a "game engine update" note in its
-  system context to react to. anything else still goes through the model + tool.
+  system context to react to. a chatty message counts too when the move is at its
+  start or end ("this will end in a draw lol. 7"), but not a number in the middle
+  of a sentence or after "at"/"have" ("i'm 3 days late", "see you at 9"). on those
+  turns the model is given NO `play_game` tool (real incident: it repeated the move
+  the engine had just made, got "square 2 is already taken" / "no game is running"
+  back and told him that), the note carries his full message so it answers what he
+  said as a person first, and tictactoe results spell out the squares in words ("top
+  right", "center") plus the full board state, because the model mapped square
+  numbers to places wrongly ("i blocked the top right").
+  anything else still goes through the model + tool.
   game names are matched tolerantly (`games.find_game()`: regex variants plus a
   fuzzy compare for the long names, so "tick tack to", "tik tak toe", "conect
   four" work; wordle/hangman stay regex-only so "world" isn't read as "wordle").
