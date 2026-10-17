@@ -758,6 +758,12 @@ skips that piece, never breaks startup or a dm).
   `WEATHER_LOCATIONS`, set in `.env` only), then news if any.
   `get_weather` with no place uses `WEATHER_DEFAULT_LOCATION` (also `.env`). calendar is NOT included: matthias can't create the google
   oauth app it needs.
+  the weather and news messages are separate model calls that follow the
+  greeting, so their prompts say not to greet, they must be a single paragraph
+  (blank lines would split one reply into several slack messages), and
+  `morning._without_greeting()` strips a leading "good morning (matthias)" if the
+  model adds one anyway (a reply that is only a greeting falls back to the plain
+  facts) - this fixed a double "good morning" in the morning dm.
 - **tools** (`bot/tools.py`): `get_weather` (any place; none = `WEATHER_DEFAULT_LOCATION`), `now_playing` (last.fm, since
   matthias can't create more spotify apps - spotify scrobbling to last.fm
   needs no oauth), `github` (repo/commits/issues/pulls/search/notifications/
@@ -867,8 +873,11 @@ or id (so "block only mopa5m with the social blocklist" works),
   owns rules, state (`data/games.json`, survives restarts, plus a win/loss
   record) and noodle's moves (tictactoe: minimax with easy/normal/hard;
   connect4: alpha-beta search at depth 1/3/5); the model only talks. the board
-  is drawn by the engine in a fixed-width code block (ascii only, so columns
-  always line up; wordle uses emoji rows) and attached to the reply by
+  is drawn by the engine out of emoji (the same width in every client and font:
+  ascii grids in a code block drifted out of alignment because slack's code
+  blocks aren't always monospace; tictactoe uses keycap digits + ❌/⭕, connect4
+  🔴🟡⚪, mastermind coloured pegs, wordle 🟩🟨⬛, hangman hearts + the word in
+  inline code) and attached to the reply by
   `llm._with_board()` instead of trusting the model to reproduce it - it is not
   stored in memory. wordle accepts any 5 letters (no dictionary check) and
   hangman/wordle words come from built-in lists in `games.py`.

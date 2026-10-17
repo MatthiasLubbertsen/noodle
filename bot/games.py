@@ -4,9 +4,10 @@ starts a game on its own, and the tool refuses anyone else / any channel).
 the engine owns the rules, the state and noodle's moves (an llm is bad at
 those); the model owns the talking. every call returns plain facts to the model
 ("you placed X at 5, noodle placed O at 1, ongoing") and the board is attached
-to the reply automatically by llm.ask_noodle() - drawn here, in a monospace
-code block with fixed-width cells, so the alignment is always right and the
-model can't mangle it. one game at a time, persisted to data/games.json so a
+to the reply automatically by llm.ask_noodle() - drawn here out of emoji, which
+are the same width in every client and font (slack's code blocks are not always
+monospace, so ascii grids drifted out of alignment), so the board always lines up
+and the model can't mangle it. one game at a time, persisted to data/games.json so a
 restart doesn't lose it.
 """
 import json
@@ -34,8 +35,8 @@ def pop_attachment() -> str | None:
     return block
 
 
-def _attach(text: str, fenced: bool = True) -> None:
-    _local.block = f"```\n{text}\n```" if fenced else text
+def _attach(text: str) -> None:
+    _local.block = text
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +64,10 @@ def _record(data: dict, game: str, result: str) -> str:
 # ---------------------------------------------------------------------------
 # tic-tac-toe (matthias = X, moves first; noodle = O)
 # ---------------------------------------------------------------------------
+def _keycap(n: int) -> str:
+    return f"{n}\ufe0f\u20e3"  # 1️⃣ .. 9️⃣ (a keycap emoji, same width as the other pieces)
+
+
 _TTT_LINES = [(0, 1, 2), (3, 4, 5), (6, 7, 8), (0, 3, 6), (1, 4, 7), (2, 5, 8), (0, 4, 8), (2, 4, 6)]
 
 
@@ -106,10 +111,13 @@ def _ttt_ai_move(b: list[str], difficulty: str) -> int:
     return random.choice(best)
 
 
+_TTT_PIECE = {"X": "\u274c", "O": "\u2b55"}  # ❌ ⭕ ; free squares show their number
+
+
 def _ttt_render(g: dict) -> str:
-    c = [x if x != " " else str(i + 1) for i, x in enumerate(g["board"])]
-    rows = [f" {c[r]} | {c[r + 1]} | {c[r + 2]}" for r in (0, 3, 6)]
-    return ("\n---+---+---\n").join(rows)
+    c = [_TTT_PIECE.get(x) or _keycap(i + 1) for i, x in enumerate(g["board"])]
+    rows = ["".join(c[r:r + 3]) for r in (0, 3, 6)]
+    return "tic-tac-toe\n" + "\n".join(rows)
 
 
 def _ttt_new(args: dict) -> dict:
@@ -232,9 +240,12 @@ def _c4_ai_move(b: list[list[str]], difficulty: str) -> int:
     return random.choice([c for s, c in scored if s == top])
 
 
+_C4_PIECE = {"X": "\U0001f534", "O": "\U0001f7e1", ".": "\u26aa"}  # 🔴 him, 🟡 noodle, ⚪ empty
+
+
 def _c4_render(g: dict) -> str:
-    lines = [" " + " ".join(str(c + 1) for c in range(_C))]
-    lines += [" " + " ".join(row) for row in g["board"]]
+    lines = ["connect four", "".join(_keycap(c + 1) for c in range(_C))]
+    lines += ["".join(_C4_PIECE[x] for x in row) for row in g["board"]]
     return "\n".join(lines)
 
 
@@ -256,16 +267,16 @@ def _c4_move(g: dict, move: str) -> tuple[str, str | None]:
     if _c4_drop(b, col, "X") is None:
         return f"column {col + 1} is full - he has to pick another one.", None
     if _c4_winner(b) == "X":
-        return f"he dropped X in column {col + 1} and connected four - he WON.", "win"
+        return f"he dropped his red piece in column {col + 1} and connected four - he WON.", "win"
     if all(b[0][c] != "." for c in range(_C)):
-        return f"he dropped X in column {col + 1}. the board is full - it's a DRAW.", "draw"
+        return f"he dropped his red piece in column {col + 1}. the board is full - it's a DRAW.", "draw"
     j = _c4_ai_move(b, g["difficulty"])
     _c4_drop(b, j, "O")
     if _c4_winner(b) == "O":
-        return f"he dropped X in column {col + 1}, then noodle dropped O in column {j + 1} and connected four - noodle WON.", "loss"
+        return f"he dropped his red piece in column {col + 1}, then noodle dropped its yellow piece in column {j + 1} and connected four - noodle WON.", "loss"
     if all(b[0][c] != "." for c in range(_C)):
-        return f"he dropped X in column {col + 1}, then noodle dropped O in column {j + 1}. board full - DRAW.", "draw"
-    return f"he dropped X in column {col + 1}, then noodle dropped O in column {j + 1}. game continues, his turn.", None
+        return f"he dropped his red piece in column {col + 1}, then noodle dropped its yellow piece in column {j + 1}. board full - DRAW.", "draw"
+    return f"he dropped his red piece in column {col + 1}, then noodle dropped its yellow piece in column {j + 1}. game continues, his turn.", None
 
 
 # ---------------------------------------------------------------------------
@@ -284,31 +295,15 @@ tunnel turtle umbrella unicorn vampire velvet volcano walrus whistle window wiza
 _HANG_LIVES = 6
 
 
-def _hang_frame(wrong: int) -> list[str]:
-    head = "O" if wrong >= 1 else " "
-    body = "|" if wrong >= 2 else " "
-    la = "/" if wrong >= 3 else " "
-    ra = "\\" if wrong >= 4 else " "
-    ll = "/" if wrong >= 5 else " "
-    rl = "\\" if wrong >= 6 else " "
-    return [
-        " +---+ ",
-        " |   | ",
-        f" |   {head} ",
-        f" |  {la}{body}{ra}",
-        f" |  {ll} {rl}",
-        " |     ",
-        "=======",
-    ]
-
-
 def _hang_render(g: dict) -> str:
     wrong = [c for c in g["guessed"] if c not in g["word"]]
     word = " ".join(c if c in g["guessed"] else "_" for c in g["word"])
-    lines = _hang_frame(len(wrong))
-    lines.append(f"word:  {word}")
-    lines.append(f"wrong: {' '.join(wrong) or '-'}  ({len(wrong)}/{_HANG_LIVES})")
-    return "\n".join(lines)
+    lives = "\u2764\ufe0f" * (_HANG_LIVES - len(wrong)) + "\U0001f5a4" * len(wrong)  # ❤️ left, 🖤 lost
+    return (
+        f"hangman  {lives}\n"
+        f"`{word}`\n"  # inline code so slack never treats the underscores as italics
+        f"wrong: {' '.join(wrong) or '-'}  ({len(wrong)}/{_HANG_LIVES})"
+    )
 
 
 def _hang_new(args: dict) -> dict:
@@ -408,12 +403,18 @@ def _mm_feedback(guess: str, secret: str) -> tuple[int, int]:
     return exact, common - exact
 
 
+_MM_PEG = {"R": "\U0001f534", "G": "\U0001f7e2", "B": "\U0001f535", "Y": "\U0001f7e1", "P": "\U0001f7e3", "O": "\U0001f7e0"}
+
+
 def _mm_render(g: dict) -> str:
-    lines = [" #  guess    exact close"]
-    for n, guess in enumerate(g["guesses"], 1):
+    lines = ["mastermind"]
+    for guess in g["guesses"]:
         e, c = _mm_feedback(guess, g["secret"])
-        lines.append(f"{n:>2}  {' '.join(guess):<7}  {e:>5} {c:>5}")
-    lines.append(f"colours: {' '.join(_COLORS)}   guesses left: {10 - len(g['guesses'])}")
+        # always 4 feedback slots (\u26ab right spot, \u26aa right colour wrong spot, \u25ab\ufe0f nothing) so rows line up
+        slots = "\u26ab" * e + "\u26aa" * c + "\u25ab\ufe0f" * (4 - e - c)
+        lines.append("".join(_MM_PEG[ch] for ch in guess) + "  \u279c  " + slots)
+    lines.append(f"{' '.join(ch + _MM_PEG[ch] for ch in _COLORS)}  |  \u26ab right spot, \u26aa right colour wrong spot")
+    lines.append(f"{10 - len(g['guesses'])} guesses left")
     return "\n".join(lines)
 
 
@@ -439,23 +440,23 @@ def _mm_move(g: dict, move: str) -> tuple[str, str | None]:
 # ---------------------------------------------------------------------------
 GAMES = {
     "tictactoe": {
-        "new": _ttt_new, "move": _ttt_move, "render": _ttt_render, "fenced": True,
-        "rules": "he is X and moves first, noodle is O. he picks a square 1-9. three in a row wins. difficulty: easy / normal / hard (hard never loses).",
+        "new": _ttt_new, "move": _ttt_move, "render": _ttt_render,
+        "rules": "he is ❌ (X) and moves first, noodle is ⭕ (O). he picks a free square by its number 1-9. three in a row wins. difficulty: easy / normal / hard (hard never loses).",
     },
     "connect4": {
-        "new": _c4_new, "move": _c4_move, "render": _c4_render, "fenced": True,
-        "rules": "7 columns x 6 rows, he is X and moves first, noodle is O. he picks a column 1-7 and the piece falls to the bottom. four in a row (any direction) wins. difficulty: easy / normal / hard.",
+        "new": _c4_new, "move": _c4_move, "render": _c4_render,
+        "rules": "7 columns x 6 rows, he is red 🔴 and moves first, noodle is yellow 🟡. he picks a column 1-7 and the piece falls to the bottom. four in a row (any direction) wins. difficulty: easy / normal / hard.",
     },
     "hangman": {
-        "new": _hang_new, "move": _hang_move, "render": _hang_render, "fenced": True,
+        "new": _hang_new, "move": _hang_move, "render": _hang_render,
         "rules": "noodle picked a secret word. he guesses one letter at a time (or the whole word, wrong word costs a life). 6 wrong guesses and he's out.",
     },
     "wordle": {
-        "new": _wordle_new, "move": _wordle_move, "render": _wordle_render, "fenced": False,
+        "new": _wordle_new, "move": _wordle_move, "render": _wordle_render,
         "rules": "noodle picked a secret 5-letter word. he has 6 guesses (any 5 letters). green = right letter right spot, yellow = in the word but elsewhere, black = not in it.",
     },
     "mastermind": {
-        "new": _mm_new, "move": _mm_move, "render": _mm_render, "fenced": True,
+        "new": _mm_new, "move": _mm_move, "render": _mm_render,
         "rules": "noodle hid a code of 4 colours from R G B Y P O (repeats allowed). he guesses 4 letters (e.g. RGBY) and gets 'exact' (right colour right spot) and 'close' (right colour wrong spot). 10 guesses.",
     },
 }
@@ -464,8 +465,7 @@ ENGINE_NOTE = " the board is attached to your reply automatically - do NOT draw 
 
 
 def _show(g: dict) -> None:
-    spec = GAMES[g["game"]]
-    _attach(spec["render"](g), fenced=spec["fenced"])
+    _attach(GAMES[g["game"]]["render"](g))
 
 
 def play(args: dict, user_id: str | None, origin: dict | None) -> str:

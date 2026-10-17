@@ -71,7 +71,7 @@ def _call_chat(messages, tools=None, tool_choice=None, detail="", max_tokens=100
 
 def _with_board(text: str) -> str:
     """if a game tool ran this turn, send its board right after the model's
-    message. the board is drawn by the engine (fixed-width, always aligned) and
+    message. the board is drawn by the engine (emoji, always aligned) and
     deliberately NOT stored in memory - the engine's state is the truth."""
     board = games.pop_attachment()
     return f"{text}\n\n{board}" if board else text
