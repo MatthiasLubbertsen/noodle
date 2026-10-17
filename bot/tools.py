@@ -1,3 +1,4 @@
+import base64
 import datetime
 import logging
 import re
@@ -7,7 +8,7 @@ import config
 from bot import reminders, state
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
-from bot import games
+from bot import features, games, sandbox
 from bot import github as github_api
 from bot.channels import with_join
 from bot import lastfm
@@ -424,6 +425,43 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "run_code",
+            "description": (
+                "run a python or javascript snippet in an isolated sandbox and get "
+                "the output back (matthias only, dms only, enforced). use it for real "
+                "calculations, data crunching, simulations, plots and file conversions "
+                "- not for arithmetic you can do in your head. "
+                "CAN: python 3.13 with the standard library plus numpy, pandas, "
+                "matplotlib, scipy and sympy (and their deps: pillow, dateutil, pytz, "
+                "mpmath); matplotlib figures are sent to the dm as png automatically, "
+                "and files the code writes to /out/ (csv, txt, json, png...; max 5, "
+                "8MB each) are sent too; javascript is plain ES2020 (QuickJS) with "
+                "console.log, and the last expression's value is returned. "
+                "CANNOT: no internet at all (no http requests, downloads, apis, git, "
+                "pip/npm install); no other packages (no sklearn, torch, requests, "
+                "opencv...); no shell, subprocesses or threads; no access to files, "
+                "slack data, memory or anything noodle has - everything the code needs "
+                "must be written into the code itself; nothing persists between runs; "
+                "no input()/stdin, no interactive or gui plots; javascript has no "
+                "require/import/fetch/timers/dom. limits: 20s by default (60s max), "
+                "about 900MB memory, 20k characters of output, so heavy training or "
+                "huge datasets won't fit. print what you want back. if it errors, "
+                "read the traceback, fix the code and run again."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "language": {"type": "string", "enum": ["python", "javascript"]},
+                    "code": {"type": "string", "description": "the full program to run"},
+                    "timeout_seconds": {"type": "integer", "description": "1-60, default 20"},
+                },
+                "required": ["language", "code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "play_game",
             "description": (
                 "play a small game with matthias in a dm: tictactoe, connect4, "
@@ -535,6 +573,12 @@ TOOLS = [
         },
     },
 ]
+
+
+def available_tools() -> list[dict]:
+    """TOOLS minus the ones whose credentials aren't set (bot/features.py), so the model is
+    never offered, and never claims it can use, something that isn't there."""
+    return [t for t in TOOLS if features.tool_enabled(t["function"]["name"])]
 
 
 def _resolve_from_handle(query: str):
@@ -806,6 +850,91 @@ def _summarize_thread(ref: str, origin: dict | None, user_id: str | None = None)
         text = text[:_THREAD_MAX_CHARS] + "\n[...thread truncated]"
     log_tool("summarize_thread", ref or ts, f"{len(msgs)} messages")
     return f"thread in {_channel_link(cid)} ({len(msgs)} messages):\n{text}"
+
+
+_CODE_OUTPUT_CAP = 6000
+
+
+def _code_hints(result: dict, language: str) -> list[str]:
+    """short nudges appended to a failed run, so the model explains the real
+    limit instead of guessing - the same limits the tool description lists."""
+    text = f"{result.get('error') or ''}\n{result.get('stderr') or ''}"
+    hints = []
+    if "ModuleNotFoundError" in text or "No module named" in text:
+        hints.append(
+            "hint: that module isn't in the sandbox. it only has the standard library plus numpy, "
+            "pandas, matplotlib, scipy and sympy, and nothing can be installed. rewrite it without "
+            "that module, or tell matthias plainly it can't be done here."
+        )
+    if re.search(r"urlopen|ConnectionError|socket|fetch|NetworkError|Name or service|URLError", text, re.I):
+        hints.append("hint: the sandbox has no internet at all, so anything that needs the network can't work. ask him to paste the data instead.")
+    if re.search(r"(require|import|fetch|setTimeout|setInterval|process|window|document) is not defined|ReferenceError", text) and language == "javascript":
+        hints.append("hint: javascript here is bare ES2020 - no require/import/fetch/timers/dom/node apis.")
+    if re.search(r"FileNotFoundError|No such file", text):
+        hints.append("hint: the sandbox can't see any files of his or noodle's - the data has to be inside the code. only /out/ is for writing results.")
+    if result.get("timed_out"):
+        hints.append("hint: it hit the time limit. try smaller sizes or a smarter method, or say it's too heavy for the sandbox.")
+    if result.get("out_of_memory"):
+        hints.append("hint: it ran out of memory (about 900MB). use smaller data, or say it's too big for the sandbox.")
+    return hints
+
+
+def _run_code(args: dict, user_id: str | None, origin: dict | None) -> str:
+    """run a python/javascript snippet in the wasm sandbox (matthias, dms only).
+    text goes back to the model as tool context; files (plots, csvs) are
+    uploaded straight into the dm."""
+    if not _is_matthias(user_id):
+        log_tool("run_code", "", "unauthorized")
+        return "only matthias can run code."
+    if not (origin and origin.get("is_dm")):
+        log_tool("run_code", "", "not a dm")
+        return "code only runs in dms with matthias, not here."
+    if not sandbox.configured():
+        return "the code sandbox is switched off."
+    language = (args.get("language") or "").lower()
+    code = args.get("code") or ""
+    if language not in ("python", "javascript"):
+        return "language must be python or javascript."
+    if not code.strip():
+        return "no code given."
+    try:
+        timeout_s = max(1, min(int(args.get("timeout_seconds") or 20), 60))
+    except (TypeError, ValueError):
+        timeout_s = 20
+
+    result = sandbox.run(language, code, timeout_s)
+    if isinstance(result, str):
+        log_tool("run_code", f"{language} {len(code)} chars", "failed")
+        return result
+
+    sent, failed = [], []
+    for f in result.get("files") or []:
+        try:
+            state.app.client.files_upload_v2(
+                channel=origin["channel"],
+                file=base64.b64decode(f["data"]),
+                filename=f["name"],
+                title=f["name"],
+            )
+            sent.append(f["name"])
+        except Exception:  # noqa: BLE001
+            logger.exception("uploading sandbox file %s failed", f.get("name"))
+            failed.append(f["name"])
+
+    parts = []
+    for label, key in (("stdout", "stdout"), ("stderr", "stderr"), ("result (value of the last expression)", "result"), ("error", "error")):
+        if result.get(key):
+            parts.append(f"{label}:\n{result[key]}")
+    if result.get("truncated"):
+        parts.append("(output was cut off, it was too long)")
+    parts.extend(_code_hints(result, language))
+    if sent:
+        parts.append(f"sent to the dm as files: {', '.join(sent)} - he can see them, don't describe them as attached to your text.")
+    if failed:
+        parts.append(f"couldn't upload: {', '.join(failed)}")
+    parts.append(f"ran in {result.get('duration_ms', '?')} ms")
+    log_tool("run_code", f"{language} {len(code)} chars", "ok" if result.get("ok") else "error")
+    return "\n\n".join(parts)[:_CODE_OUTPUT_CAP]
 
 
 def _is_matthias(user_id: str | None) -> bool:
@@ -1152,6 +1281,8 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return _get_weather(args.get("location"), args.get("days"), origin)
     if name == "now_playing":
         return _now_playing(user_id)
+    if name == "run_code":
+        return _run_code(args, user_id, origin)
     if name == "play_game":
         log_tool("play_game", args.get("action", ""), "run")
         return games.play(args, user_id, origin)

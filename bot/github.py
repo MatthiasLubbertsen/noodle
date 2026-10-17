@@ -5,6 +5,7 @@ import urllib.parse
 import urllib.request
 
 import config
+from bot import features
 from bot.httpjson import USER_AGENT
 from bot.tz import AMSTERDAM_TZ
 
@@ -14,7 +15,7 @@ API = "https://api.github.com"
 
 
 def configured() -> bool:
-    return bool(config.GITHUB_TOKEN)
+    return features.enabled("github")
 
 
 def _get(path: str, params: dict | None = None):

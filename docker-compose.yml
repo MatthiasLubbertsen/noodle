@@ -6,6 +6,10 @@ services:
     # secrets come from the gitignored .env on the host (not baked into the image)
     env_file:
       - .env
+    environment:
+      # where the code sandbox lives on the internal network (see below). whether run_code is
+      # offered at all depends only on SANDBOX_TOKEN being set in .env
+      SANDBOX_URL: http://sandbox:8080
     # bind-mount so persisted state (noodle_memory.db, news "seen" state,
     # logs) survives `docker compose up -d --build`, not just a plain
     # restart - without this the container's writable layer (and everything
@@ -13,3 +17,43 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+    # default = internet (slack, the model api...); sandbox = the private link
+    # to the code sandbox
+    networks:
+      - default
+      - sandbox
+
+  # python + javascript code runner (wasm, see sandbox/ and AGENTS.md). it is
+  # deliberately a separate container: it gets NONE of noodle's secrets, no
+  # volumes and no internet - its only network is the internal one below, shared
+  # with noodle alone, and nothing is published to the host.
+  sandbox:
+    build: ./sandbox
+    container_name: noodle-sandbox
+    restart: unless-stopped
+    environment:
+      # the ONLY variable it gets (compose substitutes it from .env, the sandbox never sees the
+      # rest of .env). SANDBOX_TOKEN empty/unset = the sandbox is OFF: this container then just
+      # idles (no python loaded, almost no memory) and noodle doesn't offer run_code at all.
+      # to turn it on, put 16+ random characters in .env: SANDBOX_TOKEN=...
+      SANDBOX_TOKEN: ${SANDBOX_TOKEN:-}
+    networks:
+      - sandbox
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    cpus: 1.5
+
+networks:
+  sandbox:
+    # internal = no route to the internet or the host's network, only between
+    # the containers attached to it
+    internal: true

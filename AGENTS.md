@@ -66,11 +66,19 @@ noodle/
     oneshot.py            # one-off persona completion for scheduled messages
     wrapup.py             # end-of-day wrap-up dm
     games.py              # dm games (tictactoe, connect4, hangman, wordle, mastermind)
+    sandbox.py            # client for the code sandbox service (run_code tool)
+    features.py           # which optional features are on: decided only by whether their credentials are set
+    prompt.py             # loads the system prompt minus the sections of features that are off
     weekly.py             # weekly journal recap + busiest-channel digest
     log.py                # logging setup
     netlog.py             # concise "called hcai .../called tool ..." log lines
   scripts/
     backfill_matthias_day.py  # one-time: backfill historical pings into memory
+  sandbox/                # the code sandbox: its OWN container (node + wasm), see 7g
+    server.js             # http runner: pool, timeouts, memory watchdog, auth
+    child.js              # one-shot job executor (pyodide python / quickjs javascript)
+    fetch-packages.js     # build-time download of pyodide's package wheels
+    Dockerfile
   requirements.txt        # python dependencies
   Dockerfile              # non-root `appuser`, see the data/logs volume note below
   docker-compose.yml      # bind-mounts ./data and ./logs - see "running it with docker"
@@ -209,6 +217,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
+| `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
 | `github` | repo, commits, issues, pulls, search, notifications, commits today | matthias only |
 | `get_journal` | his `@matthias-day` recaps for a date range (plain date filter, not vector search) | matthias only |
@@ -219,6 +228,20 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `schedule_reminder` | remind him later (one-off or repeating) in a dm, channel or thread | matthias only |
 | `list_scheduled` | list scheduled reminders and freedom sessions | matthias only |
 | `cancel_scheduled` | cancel one reminder or freedom session by id | matthias only |
+
+**no credential, no tool.** seven of these need a credential, and without it they are
+not just broken but absent: `bot/features.py` decides from the env alone, `tools.available_tools()`
+drops them from the list the model is sent, `prompt.load_prompt()` removes their sections of the
+system prompt (wrapped in `<!-- if:NAME -->...<!-- endif:NAME -->` in `prompts/system_prompt.md`)
+and fills the "never write a tool's name" list with only the tools that exist, and the background
+jobs that need them don't start. so the model never offers or promises something that isn't there.
+- `GITHUB_TOKEN` -> `github` (and the notification watcher)
+- `LASTFM_API_KEY` + `LASTFM_USER` -> `now_playing`, `music_stats`
+- `FREEDOM_API_KEY` -> `freedom`, `start_freedom_session`, `schedule_freedom_session`
+- `SANDBOX_TOKEN` (16+ chars) -> `run_code`
+everything else (search, flaron, memory, weather, journal, threads, reminders, games, web search)
+needs nothing extra. **adding a tool that needs a credential?** add it to `features.py`
+(`TOOL_FEATURE` + `enabled()`) and wrap its prompt section in an `if:` marker.
 
 **adding or changing a tool?** update all of these together: the `TOOLS` entry
 and `run_tool()` dispatch in `bot/tools.py`, the "using tools" section and the
@@ -930,6 +953,68 @@ or id (so "block only mopa5m with the social blocklist" works),
   saying nothing actually happened - real incident: "hey noods let's play tick
   tack to" matched nothing and the model invented a game start.
 
+### 7g. the code sandbox (`run_code`)
+python 3.13 (pyodide: numpy, pandas, matplotlib, scipy, sympy) and javascript
+(quickjs, ES2020) run as WebAssembly in a separate container. matthias-only and
+dm-only, enforced in `tools._run_code()`; text output goes back to the model as
+tool context, files (matplotlib figures are collected automatically as png, plus
+anything the code writes to `/out/`, max 5 files) are uploaded straight into the
+dm with `files_upload_v2` (needs the `files:write` scope on noodle's token).
+- **layers, innermost first.** (1) wasm: no syscalls of its own. (2) every job
+  runs in its own node process started with `node --permission`: no file
+  writes, no reads outside `/app`, no child processes, no workers (verified:
+  even with pyodide's `js` bridge to the node host fully open, `execSync`,
+  `writeFileSync`, reading `/etc/passwd` and spawning workers are all denied;
+  the one gap is raw sockets, which node's permission model doesn't cover - the
+  container closes it). the job process gets an empty env, and `child.js` blanks
+  `process.binding` after pyodide's one use of it. (3) one process per job, killed
+  right after it: a fresh pristine interpreter every time, nothing leaks between
+  runs. (4) the container: non-root (uid 1000), read-only root fs, a 64m tmpfs,
+  all capabilities dropped, `no-new-privileges`, pids/memory/cpu limits, NO
+  secrets (its only env var is `SANDBOX_TOKEN`; the rest of `.env` is never
+  passed) and NO internet - its only network is the compose `sandbox` network
+  (`internal: true`) shared with noodle alone, nothing published to the host,
+  no traefik in front. (5) a watchdog in `server.js`: wall-clock kill
+  (default 20s, max 60s), RSS limit (900MB, polled every 200ms), 20k/10k char
+  stdout/stderr caps, 200kb code limit, one python job at a time (2 may wait,
+  more get a 429).
+- **limits worth knowing.** pyodide is not an airtight boundary by itself (its
+  python<->js bridge reaches the node host), which is exactly why layers 2-4
+  exist; `child.js` also blocks `import js` best-effort, but that is a
+  speed bump, not the wall. a python job costs a ~7s (up to ~15s on a slow
+  host) warm-up for the NEXT job because a fresh interpreter loads in the
+  background after every run, so two python runs in a row wait. scipy is
+  loaded on demand when imported (it's on disk, no network); anything not
+  bundled raises a normal `ModuleNotFoundError`. wasm32 caps a python process
+  at ~2GB. javascript has no `require`/`fetch`/timers. installing packages
+  is impossible by design.
+- **turning it on and off: only `SANDBOX_TOKEN`.** set 16+ random characters in `.env`
+  (`openssl rand -hex 24`) and noodle offers `run_code` and the container runs jobs; remove it
+  and `run_code` disappears from what the model sees (see `features.py`) and the container
+  idles: `sandbox/server.js` with no token just answers `/health` (`disabled: true`), refuses
+  `/run` with a 503 and never loads python, so it uses almost no memory and doesn't crash-loop.
+  compose hands the token to both containers and sets `SANDBOX_URL=http://sandbox:8080` for noodle.
+  the first `docker compose up -d --build` downloads pyodide's wheels (~50MB) at build time;
+  the running containers never need the internet. on an unprivileged LXC (nest) check that
+  `docker stats` shows the memory limit is actually enforced - if cgroup limits aren't
+  delegated, the in-process watchdog and node's heap limit are what's left. not yet built or
+  run in a real container: the runner itself is tested locally, the image is not.
+- **what it can and can't do** (kept in sync in three places: the `run_code`
+  tool description, the "using tools" section of the system prompt, and the
+  failure hints from `tools._code_hints()` - change all three together). CAN:
+  python + stdlib + numpy/pandas/matplotlib/scipy/sympy (and their deps),
+  javascript ES2020, plots and `/out/` files sent to the dm. CANNOT: any network
+  (requests, downloads, apis, git, pip/npm), other packages (sklearn, torch,
+  requests, opencv...), shell/subprocess/threads, read any file or data of
+  noodle's or slack's (input has to be inside the code - passing files in is a
+  possible later feature), state between runs, stdin, interactive/gui plots,
+  js `require`/`import`/`fetch`/timers/dom, more than 60s, ~900MB memory, 20k
+  chars of output, 5 output files of 8MB each. a failed run adds hints for
+  missing modules, no network, js-only gaps, missing files, timeouts and memory.
+- **later (not built):** a real shell tier (git, tests, conversions) would be a
+  second container behind a forward proxy with a domain allowlist (squid on the
+  internal network); this tier needs no network at all.
+
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
   (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore
@@ -991,6 +1076,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `FREEDOM_DEVICE_NAMES` | comma separated device names (as shown in freedom's dashboard) allowed to be blocked - the account is shared, so this is never "all devices" (defaults to `Matthias Windows,mopa5m`) |
 | `DAILY_WRAPUP_DM` | `HH:MM`, end-of-day wrap-up dm (default `21:30`) |
 | `WEEKLY_JOURNAL` / `WEEKLY_DIGEST` / `WEEKLY_MUSIC` | `<mon..sun> HH:MM`, weekly journal recap (`sun 18:00`) / busiest-channels digest (`mon 09:00`) / music recap (`sun 18:30`) |
+| `SANDBOX_TOKEN` | shared secret between noodle and the code sandbox (16+ random chars); compose sets `SANDBOX_URL` itself. **unset = sandbox off**: `run_code` is not offered to the model and the container idles |
 | `MATTHIAS_USER_TOKEN` | matthias's OWN xoxp token (`search:read`), used only to count today's messages incl. private channels - nothing else |
 | `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`), max per day (default 10) |
 | `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | PRIVATE, no defaults in code: morning dm places (comma separated) / get_weather default place |

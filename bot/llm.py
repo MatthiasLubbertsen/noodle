@@ -9,7 +9,7 @@ from bot.history_store import append_message_async
 from bot.memory import trim_memory
 from bot.netlog import log_hcai
 from bot.slack_text import _clean_reply
-from bot.tools import TOOLS, run_tool
+from bot.tools import TOOLS, available_tools, run_tool
 from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
@@ -185,7 +185,7 @@ def ask_noodle(
     # the engine already did this move/start. if the model could still call play_game it
     # sometimes repeats the move, gets "square already taken" / "no game running" back and
     # tells him that instead (it did, twice) - so on those turns it simply has no game tool.
-    active_tools = [t for t in TOOLS if t["function"]["name"] != "play_game"] if game_note else TOOLS
+    active_tools = [t for t in available_tools() if t["function"]["name"] != "play_game" or not game_note]
     if game_note:
         system_content += "\n\n" + game_note
 

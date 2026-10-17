@@ -11,6 +11,7 @@ from bot.channels import ensure_joined
 from bot.handlers import handle_message
 from bot.history_store import init_db, load_history
 from bot.log import setup_logging
+from bot.prompt import load_prompt
 from bot.memory import dm_conv_key, trim_memory
 from bot.scheduler import start_daily_scheduler
 from bot.reminders import init_table as init_reminders_table
@@ -32,7 +33,7 @@ def build_app() -> App:
     state.MENTION_IDS = {mid for mid in (state.AUTH_USER_ID, state.BOT_ID) if mid}
     state.app = application
     state.client = client
-    state.SYSTEM_PROMPT = config.SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
+    state.SYSTEM_PROMPT = load_prompt()
 
     # restore persisted dm history (dms only, for now) so conversations
     # survive a restart
