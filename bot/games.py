@@ -10,6 +10,7 @@ monospace, so ascii grids drifted out of alignment), so the board always lines u
 and the model can't mangle it. one game at a time, persisted to data/games.json so a
 restart doesn't lose it.
 """
+import difflib
 import json
 import logging
 import random
@@ -125,6 +126,17 @@ def _ttt_new(args: dict) -> dict:
     return {"game": "tictactoe", "board": [" "] * 9, "difficulty": args.get("difficulty") or "normal"}
 
 
+_TTT_NAMES = ["top left", "top middle", "top right", "middle left", "center", "middle right",
+              "bottom left", "bottom middle", "bottom right"]
+
+
+def _ttt_state(b: list[str]) -> str:
+    """the board in words, so the model never has to map square numbers to places itself."""
+    def squares(piece: str) -> str:
+        return ", ".join(f"{i + 1} ({_TTT_NAMES[i]})" for i, c in enumerate(b) if c == piece) or "none"
+    return f"board now - X (his): {squares('X')}; O (noodle's): {squares('O')}; free squares: {squares(' ')}."
+
+
 def _ttt_move(g: dict, move: str) -> tuple[str, str | None]:
     try:
         i = int(str(move).strip()) - 1
@@ -133,19 +145,21 @@ def _ttt_move(g: dict, move: str) -> tuple[str, str | None]:
         return "that isn't a square - he needs to pick a number from 1 to 9.", None
     b = g["board"]
     if b[i] != " ":
-        return f"square {i + 1} is already taken - he has to pick a free one.", None
+        return f"square {i + 1} ({_TTT_NAMES[i]}) is already taken - he has to pick a free one. {_ttt_state(b)}", None
     b[i] = "X"
+    his = f"he placed X at square {i + 1} ({_TTT_NAMES[i]})"
     if _ttt_winner(b) == "X":
-        return f"he placed X at {i + 1} and completed three in a row - he WON.", "win"
+        return f"{his} and completed three in a row - he WON. {_ttt_state(b)}", "win"
     if " " not in b:
-        return f"he placed X at {i + 1}. the board is full - it's a DRAW.", "draw"
+        return f"{his}. the board is full - it's a DRAW. {_ttt_state(b)}", "draw"
     j = _ttt_ai_move(b, g["difficulty"])
     b[j] = "O"
+    mine = f"then noodle placed O at square {j + 1} ({_TTT_NAMES[j]})"
     if _ttt_winner(b) == "O":
-        return f"he placed X at {i + 1}, then noodle placed O at {j + 1} and completed three in a row - noodle WON.", "loss"
+        return f"{his}, {mine} and completed three in a row - noodle WON. {_ttt_state(b)}", "loss"
     if " " not in b:
-        return f"he placed X at {i + 1}, then noodle placed O at {j + 1}. the board is full - it's a DRAW.", "draw"
-    return f"he placed X at {i + 1}, then noodle placed O at {j + 1}. game continues, his turn.", None
+        return f"{his}, {mine}. the board is full - it's a DRAW. {_ttt_state(b)}", "draw"
+    return f"{his}, {mine}. game continues, his turn. {_ttt_state(b)}", None
 
 
 # ---------------------------------------------------------------------------
@@ -528,12 +542,32 @@ def play(args: dict, user_id: str | None, origin: dict | None) -> str:
 # gets the result to react to. anything that isn't clearly one of those still goes
 # through the model + tool as before.
 _NAME_PATTERNS = {
-    "tictactoe": r"tic[\s-]*tac[\s-]*toe|\bttt\b|noughts?\s*(?:and|&)\s*crosses",
-    "connect4": r"connect[\s-]*(?:4|four)",
-    "hangman": r"hang[\s-]*man",
-    "wordle": r"wordle",
-    "mastermind": r"master[\s-]*mind",
+    "tictactoe": r"tic[\s-]*tac[\s-]*toe|\bttt\b|noughts?\s*(?:and|&)\s*crosses|\bx\s*(?:and|&|n)\s*o\b",
+    "connect4": r"connect[\s-]*(?:4|four)|(?:4|four)\s*in\s*a\s*row",
+    "hangman": r"hang[\s-]*m[ae]n",
+    "wordle": r"\bword(?:le|el|l)\b",
+    "mastermind": r"master[\s-]*mind|code[\s-]*breaker",
 }
+# typos in the long names ("tick tack to", "tik tak toe", "conect four"): compare every run of
+# 1-3 words, squashed together, with the name. short names (wordle, hangman) stay regex-only,
+# because fuzzy matching would read "world" as "wordle".
+_FUZZY_NAMES = (("tictactoe", "tictactoe", 0.75), ("mastermind", "mastermind", 0.8), ("connect4", "connectfour", 0.8))
+
+
+def find_game(text: str) -> str | None:
+    """which game a message is talking about, tolerant of typos."""
+    for game, pattern in _NAME_PATTERNS.items():
+        if re.search(pattern, text, re.I):
+            return game
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    windows = {"".join(words[i:i + n]) for n in (1, 2, 3) for i in range(len(words) - n + 1)}
+    windows = {w for w in windows if 7 <= len(w) <= 14}
+    for game, target, threshold in _FUZZY_NAMES:
+        if any(difflib.SequenceMatcher(None, w, target).ratio() >= threshold for w in windows):
+            return game
+    return None
+
+
 _WANTS_TO_PLAY = re.compile(r"\b(play|start|begin|another|again|rematch|new game|let'?s do|wanna|want to|can we|could we|shall we|up for)\b", re.I)
 _REFUSAL = re.compile(r"\b(don'?t|dont|do not|not|never|no|stop|quit|cancel|rather not|hate|why)\b", re.I)
 _AGAIN = re.compile(r"\b(again|rematch|another one|one more|new game)\b", re.I)
@@ -542,10 +576,23 @@ _MOVE_FILLER = {
     "square", "column", "col", "number", "no", "in", "at", "on", "the", "my", "move", "is", "then", "please",
     "pls", "ok", "okay", "alright", "so", "and", "it", "that", "here", "uh", "um", "hmm", "its", "it's", "put", "drop", "place",
 }
+# a number right next to one of these is chat, not a move ("see you at 9", "i have 2")
+_NOT_A_MOVE_BEFORE = {"at", "around", "by", "until", "till", "about", "past", "after", "before", "than",
+                      "have", "has", "got", "im", "i'm", "am", "was", "were", "are", "only", "just"}
 AUTO_NOTE = (
-    "game engine update - the engine already handled this for you, so do NOT call play_game "
-    "for it again. react to it in your own voice (the board is attached automatically): "
+    "game engine update - the engine already handled this and the result below is the truth, so "
+    "never contradict it (a move it says was placed WAS placed). you have no game tool this turn, "
+    "don't try to make or repeat a move. react in your own voice; the board is attached "
+    "automatically. engine result: "
 )
+
+
+def _with_his_words(note: str, text: str) -> str:
+    return (
+        f'{note}\nhis full message was: "{text}". if it says anything besides the move (a joke, a '
+        "comment, a feeling), answer THAT like a person first, then react to the game. describe "
+        "squares with the names the engine used, never by guessing which number is where."
+    )
 
 
 def _auto_move(game: str, text: str) -> str | None:
@@ -553,13 +600,20 @@ def _auto_move(game: str, text: str) -> str | None:
     t = text.strip()
     if game in ("tictactoe", "connect4"):
         top = 9 if game == "tictactoe" else 7
-        # the message must be essentially just the move ("6", "let's do 6", "square 6 please"),
-        # so "i'm 3 days late" in the middle of a game is not read as square 3
+        # a clear move is either essentially just the move ("6", "let's do 6", "square 6 please"),
+        # or a chatty message that starts or ends with it ("this will end in a draw lol. 7").
+        # a number in the middle of a sentence ("i'm 3 days late") or after a word like "at"
+        # ("see you at 9") is not a move.
         tokens = re.findall(r"[a-z0-9']+", t.lower())
-        digits = [w for w in tokens if re.fullmatch(r"[1-9]", w)]
-        rest = [w for w in tokens if w not in digits]
-        if len(digits) == 1 and int(digits[0]) <= top and all(w in _MOVE_FILLER for w in rest):
-            return digits[0]
+        idx = [i for i, w in enumerate(tokens) if re.fullmatch(r"[1-9]", w)]
+        if len(idx) == 1 and int(tokens[idx[0]]) <= top:
+            i = idx[0]
+            rest = tokens[:i] + tokens[i + 1:]
+            if all(w in _MOVE_FILLER for w in rest):
+                return tokens[i]
+            near = tokens[i - 1] if i == len(tokens) - 1 else tokens[i + 1] if i == 0 else None
+            if len(t) <= 80 and (i == 0 or i == len(tokens) - 1) and near not in _NOT_A_MOVE_BEFORE:
+                return tokens[i]
     elif game == "hangman":
         m = re.fullmatch(r"(?:(?:letter|guess)\s+)?([a-z])", t, re.I) or re.fullmatch(r"(?:guess\s+)([a-z]{2,})", t, re.I)
         if m:
@@ -589,11 +643,11 @@ def auto(text: str, user_id: str | None, origin: dict | None) -> str | None:
     if current:
         move = _auto_move(current["game"], text)
         if move is not None:
-            return AUTO_NOTE + play({"action": "move", "move": move}, user_id, origin)
+            return _with_his_words(AUTO_NOTE + play({"action": "move", "move": move}, user_id, origin), text)
     # start: needs a game name (or "again" after a game) AND a clear wish to play, no refusal
     if len(text) > 120 or _REFUSAL.search(text) or not _WANTS_TO_PLAY.search(text):
         return None
-    name = next((g for g, pat in _NAME_PATTERNS.items() if re.search(pat, text, re.I)), None)
+    name = find_game(text)
     if name is None and _AGAIN.search(text):
         name = data.get("last_game")
     if name not in GAMES:
@@ -602,4 +656,37 @@ def auto(text: str, user_id: str | None, origin: dict | None) -> str | None:
     args = {"action": "start", "game": name}
     if difficulty:
         args["difficulty"] = difficulty.lower()
-    return AUTO_NOTE + "he asked to play, so the engine started it. " + play(args, user_id, origin)
+    return _with_his_words(AUTO_NOTE + "he asked to play, so the engine started it. " + play(args, user_id, origin), text)
+
+
+# ---------------------------------------------------------------------------
+# safety net: the model describing a game turn that never happened
+# ---------------------------------------------------------------------------
+_FAKE_TURN = re.compile(
+    r"you'?re \u274c|you are \u274c|i'?m \u2b55|pick (?:a |another )?(?:free )?(?:square|column)|"
+    r"your (?:move|turn)\b|you (?:start|go) first|guess a letter|make your guess|your guess\b",
+    re.I,
+)
+_GAMEY = re.compile(r"play|game|move|turn|square|column|guess|tic|tac|toe|connect|hang|wordle|mastermind", re.I)
+FAKE_TURN_NOTE = (
+    "your last draft described a game turn (a board, a move, whose turn it is) but no game tool "
+    "ran, so nothing actually happened. call play_game now: action=start with the game he asked "
+    "for, or action=move with his move, or action=list if he didn't actually ask about a game. "
+    "write your reply only after the tool has run."
+)
+
+
+def looks_like_fake_turn(reply: str, user_text: str, user_id: str | None, origin: dict | None) -> bool:
+    """true if, in matthias's dm, the reply narrates a game turn but no game tool put a
+    board on this turn - a cheap model sometimes just says it started / moved."""
+    if user_id != config.USER_ID or not (origin and origin.get("is_dm")):
+        return False
+    if getattr(_local, "block", None):  # a board was attached this turn: the engine did run
+        return False
+    if _load().get("current"):
+        # a game is running: "your move" in a reply to plain chat is fine. only suspicious if he
+        # sent something that looks like a move (a number) and nothing was applied.
+        plausible = bool(re.search(r"\b[1-9]\b", user_text or ""))
+    else:
+        plausible = bool(_GAMEY.search(user_text or ""))
+    return plausible and bool(_FAKE_TURN.search(reply or ""))

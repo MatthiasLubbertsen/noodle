@@ -59,7 +59,19 @@ def _clean_reply(text: str) -> str:
         return ""
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<reasoning>.*?</reasoning>", "", text, flags=re.DOTALL | re.IGNORECASE)
-    return text.strip()
+    return _no_dashes(text.strip())
+
+
+def _no_dashes(text: str) -> str:
+    """noodle never writes em dashes (or en dashes): the persona prompt says so, and this
+    is the backstop for when the model does anyway. a dash between numbers is a range
+    ("9\u201315" -> "9-15"), a dash at the end or start of a line just goes away, anything
+    else reads as a comma. line breaks are never touched (they separate slack messages)."""
+    dash = "[\u2013\u2014\u2015]"
+    text = re.sub(rf"(?<=\d)[ \t]*{dash}[ \t]*(?=\d)", "-", text)
+    text = re.sub(rf"[ \t]*{dash}[ \t]*(?=\n|$)", "", text)
+    text = re.sub(rf"(?m)^[ \t]*{dash}[ \t]*", "", text)
+    return re.sub(rf"[ \t]*{dash}[ \t]*", ", ", text)
 
 
 def _parse_slack_ref(ref: str):
