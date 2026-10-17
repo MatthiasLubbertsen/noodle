@@ -28,3 +28,7 @@ LAST_UNPROMPTED_REPLY: dict = {}
 # out jumbled/delayed. see handlers._get_conv_lock().
 CONV_LOCKS: dict = {}
 CONV_LOCKS_GUARD = threading.Lock()
+
+# the last thing noodle said in each conversation: conv_key -> (unix ts, text). gives the
+# model a clear anchor for short replies ("sad", "lol") - they're about THIS message.
+LAST_REPLY: dict = {}

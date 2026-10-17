@@ -13,6 +13,7 @@ restart doesn't lose it.
 import json
 import logging
 import random
+import re
 import threading
 
 import config
@@ -490,6 +491,7 @@ def play(args: dict, user_id: str | None, origin: dict | None) -> str:
         if (args.get("difficulty") or "normal") not in ("easy", "normal", "hard"):
             return "difficulty must be easy, normal or hard."
         data["current"] = GAMES[name]["new"](args)
+        data["last_game"] = name
         _save(data)
         _show(data["current"])
         replaced = f" (this replaced his unfinished {current['game']} game)" if current else ""
@@ -515,3 +517,89 @@ def play(args: dict, user_id: str | None, origin: dict | None) -> str:
         _save(data)
         return msg + ENGINE_NOTE + (" the game is over." if result else "")
     return f"unknown game action: {action}"
+
+
+# ---------------------------------------------------------------------------
+# the engine drives the game, the model only narrates
+# ---------------------------------------------------------------------------
+# a cheap model doesn't reliably call play_game: it would say "you took the middle
+# right, i went center" without calling it, and nothing changed. so before the model
+# even runs, a clear start request or a clear move is applied here, and the model just
+# gets the result to react to. anything that isn't clearly one of those still goes
+# through the model + tool as before.
+_NAME_PATTERNS = {
+    "tictactoe": r"tic[\s-]*tac[\s-]*toe|\bttt\b|noughts?\s*(?:and|&)\s*crosses",
+    "connect4": r"connect[\s-]*(?:4|four)",
+    "hangman": r"hang[\s-]*man",
+    "wordle": r"wordle",
+    "mastermind": r"master[\s-]*mind",
+}
+_WANTS_TO_PLAY = re.compile(r"\b(play|start|begin|another|again|rematch|new game|let'?s do|wanna|want to|can we|could we|shall we|up for)\b", re.I)
+_REFUSAL = re.compile(r"\b(don'?t|dont|do not|not|never|no|stop|quit|cancel|rather not|hate|why)\b", re.I)
+_AGAIN = re.compile(r"\b(again|rematch|another one|one more|new game)\b", re.I)
+_MOVE_FILLER = {
+    "lets", "let's", "let", "us", "do", "go", "play", "ill", "i'll", "i", "will", "take", "pick", "choose",
+    "square", "column", "col", "number", "no", "in", "at", "on", "the", "my", "move", "is", "then", "please",
+    "pls", "ok", "okay", "alright", "so", "and", "it", "that", "here", "uh", "um", "hmm", "its", "it's", "put", "drop", "place",
+}
+AUTO_NOTE = (
+    "game engine update - the engine already handled this for you, so do NOT call play_game "
+    "for it again. react to it in your own voice (the board is attached automatically): "
+)
+
+
+def _auto_move(game: str, text: str) -> str | None:
+    """the move in a short message, if it clearly is one for this game."""
+    t = text.strip()
+    if game in ("tictactoe", "connect4"):
+        top = 9 if game == "tictactoe" else 7
+        # the message must be essentially just the move ("6", "let's do 6", "square 6 please"),
+        # so "i'm 3 days late" in the middle of a game is not read as square 3
+        tokens = re.findall(r"[a-z0-9']+", t.lower())
+        digits = [w for w in tokens if re.fullmatch(r"[1-9]", w)]
+        rest = [w for w in tokens if w not in digits]
+        if len(digits) == 1 and int(digits[0]) <= top and all(w in _MOVE_FILLER for w in rest):
+            return digits[0]
+    elif game == "hangman":
+        m = re.fullmatch(r"(?:(?:letter|guess)\s+)?([a-z])", t, re.I) or re.fullmatch(r"(?:guess\s+)([a-z]{2,})", t, re.I)
+        if m:
+            return m.group(1)
+    elif game == "wordle":
+        m = re.fullmatch(r"(?:guess\s+)?([a-z]{5})", t, re.I)
+        if m:
+            return m.group(1)
+    elif game == "mastermind":
+        code = re.sub(r"[\s,.-]+", "", t)
+        if re.fullmatch(r"[rgbypo]{4}", code, re.I):
+            return code
+    return None
+
+
+def auto(text: str, user_id: str | None, origin: dict | None) -> str | None:
+    """apply a clear game start / move from matthias's dm message right away.
+    returns a note for the model, or None if the message isn't clearly either."""
+    if user_id != config.USER_ID or not (origin and origin.get("is_dm")):
+        return None
+    text = (text or "").strip()
+    if not text:
+        return None
+    data = _load()
+    current = data.get("current")
+
+    if current:
+        move = _auto_move(current["game"], text)
+        if move is not None:
+            return AUTO_NOTE + play({"action": "move", "move": move}, user_id, origin)
+    # start: needs a game name (or "again" after a game) AND a clear wish to play, no refusal
+    if len(text) > 120 or _REFUSAL.search(text) or not _WANTS_TO_PLAY.search(text):
+        return None
+    name = next((g for g, pat in _NAME_PATTERNS.items() if re.search(pat, text, re.I)), None)
+    if name is None and _AGAIN.search(text):
+        name = data.get("last_game")
+    if name not in GAMES:
+        return None
+    difficulty = (re.search(r"\b(easy|normal|hard)\b", text, re.I) or [None, None])[1]
+    args = {"action": "start", "game": name}
+    if difficulty:
+        args["difficulty"] = difficulty.lower()
+    return AUTO_NOTE + "he asked to play, so the engine started it. " + play(args, user_id, origin)
