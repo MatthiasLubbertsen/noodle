@@ -2,6 +2,7 @@ import datetime
 import logging
 
 import config
+from bot import features
 from bot.httpjson import get_json
 from bot.tz import AMSTERDAM_TZ
 
@@ -11,7 +12,7 @@ API_URL = "https://ws.audioscrobbler.com/2.0/"
 
 
 def configured() -> bool:
-    return bool(config.LASTFM_API_KEY and config.LASTFM_USER)
+    return features.enabled("lastfm")
 
 
 def _recent(limit: int, from_ts: int | None = None) -> dict:

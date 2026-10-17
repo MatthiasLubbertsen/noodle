@@ -9,7 +9,7 @@ from bot.history_store import append_message_async
 from bot.memory import trim_memory
 from bot.netlog import log_hcai
 from bot.slack_text import _clean_reply
-from bot.tools import TOOLS, run_tool
+from bot.tools import TOOLS, available_tools, run_tool
 from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
@@ -188,7 +188,7 @@ def ask_noodle(
     # and it gets no other tools either: a bare "5" gives it nothing to look up, and a cheap model
     # filled those turns with invented calls (a flaron lookup, a web search, a "test reminder"
     # scheduled from a stale offer in its history)
-    active_tools = None if game_note else TOOLS
+    active_tools = None if game_note else available_tools()
     if game_note:
         system_content += "\n\n" + game_note
 

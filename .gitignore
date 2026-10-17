@@ -4,3 +4,4 @@ logs/
 data/
 __pycache__/
 *.pyc
+sandbox/node_modules/

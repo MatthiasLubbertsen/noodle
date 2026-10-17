@@ -84,6 +84,7 @@ real slack sender id, so it is safe in public channels too.
 | `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
+| `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
 | `github` | repo, commits, issues, pulls, search, notifications, commits today | matthias only |
 | `get_journal` | his `@matthias-day` recaps for a date range (plain date filter, not vector search) | matthias only |
@@ -148,10 +149,12 @@ noodle/
     oneshot.py         # one-off persona completion + daily-facts memory rows
     wrapup.py          # end-of-day wrap-up dm
     games.py           # dm games (tictactoe, connect4, hangman, wordle, mastermind)
+    sandbox.py         # client for the code sandbox (run_code tool)
     weekly.py          # weekly journal recap + busiest-channel digest
     channels.py        # silently join configured channels
     log.py             # logging setup
     netlog.py          # concise "called hcai .../called tool ..." log lines
+  sandbox/             # the code sandbox: a separate container (node + wasm, no network)
   prompts/
     system_prompt.md   # noodle's persona + reply style + tool instructions
   logs/                # created at runtime (noodle.log)
@@ -191,6 +194,17 @@ host owned by root, which the container user can't write into. skip this
 step if those directories already exist with permissions the container can
 write to.
 
+`docker compose up` also starts a second container, `sandbox`, that runs the
+`run_code` tool's python/javascript. it is on only if `SANDBOX_TOKEN` is set in
+`.env`: without it noodle doesn't offer `run_code` at all and the container just
+idles. it gets none of noodle's other secrets and has no internet: it only shares
+a private internal network with noodle. the first build downloads about 50MB of
+python packages; after that it never needs the network.
+
+the same rule holds for every tool that needs a credential (github, last.fm,
+freedom, the sandbox): no key in `.env`, no tool, and noodle doesn't know it
+exists.
+
 logs go to the console either way; the code also tries to write
 `logs/noodle.log` and falls back to console only if that's not writable.
 
@@ -210,6 +224,7 @@ logs go to the console either way; the code also tries to write
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in a channel |
 | `DAILY_PING_REMINDER` | `HH:MM` time for the `@matthias-day` reminder dm (Europe/Amsterdam) |
 | `DAILY_MORNING_DM` | `HH:MM` time for the morning wakeup dm (Europe/Amsterdam) |
+| `SANDBOX_TOKEN` | shared secret between noodle and the code sandbox container (16+ random chars, e.g. `openssl rand -hex 24`). leave unset to switch the sandbox off |
 | `MATTHIAS_USER_TOKEN` | matthias's OWN xoxp token (`search:read`), used only to count today's messages including private channels - nothing else; optional |
 | `DAILY_WRAPUP_DM` | `HH:MM` end-of-day wrap-up dm (default `21:30`) |
 | `WEEKLY_JOURNAL` / `WEEKLY_DIGEST` / `WEEKLY_MUSIC` | `<mon..sun> HH:MM` weekly journal recap (`sun 18:00`) / busiest-channels digest (`mon 09:00`) / music recap (`sun 18:30`) |
