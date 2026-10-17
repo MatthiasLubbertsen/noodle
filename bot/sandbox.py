@@ -4,12 +4,13 @@ import urllib.error
 import urllib.request
 
 import config
+from bot import features
 
 logger = logging.getLogger("noodle")
 
 
 def configured() -> bool:
-    return bool(config.SANDBOX_URL and config.SANDBOX_TOKEN)
+    return features.enabled("sandbox")
 
 
 def run(language: str, code: str, timeout_s: int) -> dict | str:

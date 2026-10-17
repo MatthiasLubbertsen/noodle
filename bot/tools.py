@@ -8,7 +8,7 @@ import config
 from bot import reminders, state
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
-from bot import games, sandbox
+from bot import features, games, sandbox
 from bot import github as github_api
 from bot.channels import with_join
 from bot import lastfm
@@ -575,6 +575,12 @@ TOOLS = [
 ]
 
 
+def available_tools() -> list[dict]:
+    """TOOLS minus the ones whose credentials aren't set (bot/features.py), so the model is
+    never offered, and never claims it can use, something that isn't there."""
+    return [t for t in TOOLS if features.tool_enabled(t["function"]["name"])]
+
+
 def _resolve_from_handle(query: str):
     # slack search 'from:' often matches on the @handle rather than the U-id,
     # so rewrite from:Uxxxx -> from:@handle when we can resolve it
@@ -884,7 +890,7 @@ def _run_code(args: dict, user_id: str | None, origin: dict | None) -> str:
         log_tool("run_code", "", "not a dm")
         return "code only runs in dms with matthias, not here."
     if not sandbox.configured():
-        return "the code sandbox isn't set up (SANDBOX_URL / SANDBOX_TOKEN missing)."
+        return "the code sandbox is switched off."
     language = (args.get("language") or "").lower()
     code = args.get("code") or ""
     if language not in ("python", "javascript"):

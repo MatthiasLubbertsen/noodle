@@ -24,10 +24,11 @@ const MAX_RSS_MB = parseInt(process.env.SANDBOX_MAX_RSS_MB || "900", 10);
 const READY_TIMEOUT_MS = 120000;
 const CHILD = path.join(__dirname, "child.js");
 
-if (TOKEN.length < 16) {
-  console.error("SANDBOX_TOKEN must be set (16+ chars)");
-  process.exit(1);
-}
+// no token (or one shorter than 16 chars) = the sandbox is switched off: the service still
+// answers /health but never runs anything and never loads python, so it idles at almost no
+// memory instead of crash-looping. noodle doesn't offer run_code without the same token.
+const DISABLED = TOKEN.length < 16;
+if (DISABLED) console.log("SANDBOX_TOKEN not set (needs 16+ characters): sandbox is disabled, idling");
 
 function spawnChild(language) {
   const proc = fork(CHILD, [language], {
@@ -202,9 +203,11 @@ function readBody(req) {
 const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/health") {
+      if (DISABLED) return send(res, 200, { ok: true, disabled: true });
       return send(res, 200, { ok: true, python_ready: !!warmPython && !!warmPython.isReady && !warmPython.exited });
     }
     if (req.method !== "POST" || req.url !== "/run") return send(res, 404, { error: "not found" });
+    if (DISABLED) return send(res, 503, { error: "the sandbox is disabled (no SANDBOX_TOKEN set)" });
     if (!authorized(req)) return send(res, 401, { error: "unauthorized" });
 
     let body;
@@ -229,7 +232,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => console.log(`sandbox listening on :${PORT}`));
-warmUp();
+if (!DISABLED) warmUp();
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, () => {
     kill(warmPython);

@@ -67,6 +67,8 @@ noodle/
     wrapup.py             # end-of-day wrap-up dm
     games.py              # dm games (tictactoe, connect4, hangman, wordle, mastermind)
     sandbox.py            # client for the code sandbox service (run_code tool)
+    features.py           # which optional features are on: decided only by whether their credentials are set
+    prompt.py             # loads the system prompt minus the sections of features that are off
     weekly.py             # weekly journal recap + busiest-channel digest
     log.py                # logging setup
     netlog.py             # concise "called hcai .../called tool ..." log lines
@@ -226,6 +228,20 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `schedule_reminder` | remind him later (one-off or repeating) in a dm, channel or thread | matthias only |
 | `list_scheduled` | list scheduled reminders and freedom sessions | matthias only |
 | `cancel_scheduled` | cancel one reminder or freedom session by id | matthias only |
+
+**no credential, no tool.** seven of these need a credential, and without it they are
+not just broken but absent: `bot/features.py` decides from the env alone, `tools.available_tools()`
+drops them from the list the model is sent, `prompt.load_prompt()` removes their sections of the
+system prompt (wrapped in `<!-- if:NAME -->...<!-- endif:NAME -->` in `prompts/system_prompt.md`)
+and fills the "never write a tool's name" list with only the tools that exist, and the background
+jobs that need them don't start. so the model never offers or promises something that isn't there.
+- `GITHUB_TOKEN` -> `github` (and the notification watcher)
+- `LASTFM_API_KEY` + `LASTFM_USER` -> `now_playing`, `music_stats`
+- `FREEDOM_API_KEY` -> `freedom`, `start_freedom_session`, `schedule_freedom_session`
+- `SANDBOX_TOKEN` (16+ chars) -> `run_code`
+everything else (search, flaron, memory, weather, journal, threads, reminders, games, web search)
+needs nothing extra. **adding a tool that needs a credential?** add it to `features.py`
+(`TOOL_FEATURE` + `enabled()`) and wrap its prompt section in an `if:` marker.
 
 **adding or changing a tool?** update all of these together: the `TOOLS` entry
 and `run_tool()` dispatch in `bot/tools.py`, the "using tools" section and the
@@ -972,14 +988,17 @@ dm with `files_upload_v2` (needs the `files:write` scope on noodle's token).
   bundled raises a normal `ModuleNotFoundError`. wasm32 caps a python process
   at ~2GB. javascript has no `require`/`fetch`/timers. installing packages
   is impossible by design.
-- **deploying.** put a random `SANDBOX_TOKEN` (16+ chars) in `.env`; compose
-  hands it to both containers and sets `SANDBOX_URL=http://sandbox:8080` for
-  noodle. the first `docker compose up -d --build` downloads pyodide's wheels
-  (~50MB) at build time; the running containers never need the internet. on an
-  unprivileged LXC (nest) check that `docker stats` shows the memory limit is
-  actually enforced - if cgroup limits aren't delegated, the in-process
-  watchdog and node's heap limit are what's left. not yet built or run in a
-  real container: the runner itself is tested locally, the image is not.
+- **turning it on and off: only `SANDBOX_TOKEN`.** set 16+ random characters in `.env`
+  (`openssl rand -hex 24`) and noodle offers `run_code` and the container runs jobs; remove it
+  and `run_code` disappears from what the model sees (see `features.py`) and the container
+  idles: `sandbox/server.js` with no token just answers `/health` (`disabled: true`), refuses
+  `/run` with a 503 and never loads python, so it uses almost no memory and doesn't crash-loop.
+  compose hands the token to both containers and sets `SANDBOX_URL=http://sandbox:8080` for noodle.
+  the first `docker compose up -d --build` downloads pyodide's wheels (~50MB) at build time;
+  the running containers never need the internet. on an unprivileged LXC (nest) check that
+  `docker stats` shows the memory limit is actually enforced - if cgroup limits aren't
+  delegated, the in-process watchdog and node's heap limit are what's left. not yet built or
+  run in a real container: the runner itself is tested locally, the image is not.
 - **what it can and can't do** (kept in sync in three places: the `run_code`
   tool description, the "using tools" section of the system prompt, and the
   failure hints from `tools._code_hints()` - change all three together). CAN:
@@ -1057,7 +1076,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `FREEDOM_DEVICE_NAMES` | comma separated device names (as shown in freedom's dashboard) allowed to be blocked - the account is shared, so this is never "all devices" (defaults to `Matthias Windows,mopa5m`) |
 | `DAILY_WRAPUP_DM` | `HH:MM`, end-of-day wrap-up dm (default `21:30`) |
 | `WEEKLY_JOURNAL` / `WEEKLY_DIGEST` / `WEEKLY_MUSIC` | `<mon..sun> HH:MM`, weekly journal recap (`sun 18:00`) / busiest-channels digest (`mon 09:00`) / music recap (`sun 18:30`) |
-| `SANDBOX_TOKEN` | shared secret between noodle and the code sandbox (16+ random chars); compose sets `SANDBOX_URL` itself. unset url = `run_code` reports it isn't configured |
+| `SANDBOX_TOKEN` | shared secret between noodle and the code sandbox (16+ random chars); compose sets `SANDBOX_URL` itself. **unset = sandbox off**: `run_code` is not offered to the model and the container idles |
 | `MATTHIAS_USER_TOKEN` | matthias's OWN xoxp token (`search:read`), used only to count today's messages incl. private channels - nothing else |
 | `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`), max per day (default 10) |
 | `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | PRIVATE, no defaults in code: morning dm places (comma separated) / get_weather default place |

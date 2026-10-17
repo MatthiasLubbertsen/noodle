@@ -194,12 +194,16 @@ host owned by root, which the container user can't write into. skip this
 step if those directories already exist with permissions the container can
 write to.
 
-`docker compose up` starts a second container, `sandbox`, that runs the
-`run_code` tool's python/javascript. it needs `SANDBOX_TOKEN` in `.env` (compose
-refuses to start without it), gets none of noodle's other secrets, and has no
-internet: it only shares a private internal network with noodle. the first
-build downloads about 50MB of python packages; after that it never needs the
-network.
+`docker compose up` also starts a second container, `sandbox`, that runs the
+`run_code` tool's python/javascript. it is on only if `SANDBOX_TOKEN` is set in
+`.env`: without it noodle doesn't offer `run_code` at all and the container just
+idles. it gets none of noodle's other secrets and has no internet: it only shares
+a private internal network with noodle. the first build downloads about 50MB of
+python packages; after that it never needs the network.
+
+the same rule holds for every tool that needs a credential (github, last.fm,
+freedom, the sandbox): no key in `.env`, no tool, and noodle doesn't know it
+exists.
 
 logs go to the console either way; the code also tries to write
 `logs/noodle.log` and falls back to console only if that's not writable.
@@ -220,7 +224,7 @@ logs go to the console either way; the code also tries to write
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in a channel |
 | `DAILY_PING_REMINDER` | `HH:MM` time for the `@matthias-day` reminder dm (Europe/Amsterdam) |
 | `DAILY_MORNING_DM` | `HH:MM` time for the morning wakeup dm (Europe/Amsterdam) |
-| `SANDBOX_TOKEN` | shared secret between noodle and the code sandbox container (16+ random chars, e.g. `openssl rand -hex 24`) |
+| `SANDBOX_TOKEN` | shared secret between noodle and the code sandbox container (16+ random chars, e.g. `openssl rand -hex 24`). leave unset to switch the sandbox off |
 | `MATTHIAS_USER_TOKEN` | matthias's OWN xoxp token (`search:read`), used only to count today's messages including private channels - nothing else; optional |
 | `DAILY_WRAPUP_DM` | `HH:MM` end-of-day wrap-up dm (default `21:30`) |
 | `WEEKLY_JOURNAL` / `WEEKLY_DIGEST` / `WEEKLY_MUSIC` | `<mon..sun> HH:MM` weekly journal recap (`sun 18:00`) / busiest-channels digest (`mon 09:00`) / music recap (`sun 18:30`) |

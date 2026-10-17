@@ -7,7 +7,8 @@ services:
     env_file:
       - .env
     environment:
-      # where the code sandbox lives on the internal network (see below)
+      # where the code sandbox lives on the internal network (see below). whether run_code is
+      # offered at all depends only on SANDBOX_TOKEN being set in .env
       SANDBOX_URL: http://sandbox:8080
     # bind-mount so persisted state (noodle_memory.db, news "seen" state,
     # logs) survives `docker compose up -d --build`, not just a plain
@@ -31,9 +32,11 @@ services:
     container_name: noodle-sandbox
     restart: unless-stopped
     environment:
-      # the ONLY variable it gets (set SANDBOX_TOKEN in .env, 16+ random chars;
-      # compose substitutes it here, the sandbox never sees the rest of .env)
-      SANDBOX_TOKEN: ${SANDBOX_TOKEN:?set SANDBOX_TOKEN in .env (16+ random characters)}
+      # the ONLY variable it gets (compose substitutes it from .env, the sandbox never sees the
+      # rest of .env). SANDBOX_TOKEN empty/unset = the sandbox is OFF: this container then just
+      # idles (no python loaded, almost no memory) and noodle doesn't offer run_code at all.
+      # to turn it on, put 16+ random characters in .env: SANDBOX_TOKEN=...
+      SANDBOX_TOKEN: ${SANDBOX_TOKEN:-}
     networks:
       - sandbox
     user: "1000:1000"
