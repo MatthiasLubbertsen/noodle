@@ -930,6 +930,18 @@ or id (so "block only mopa5m with the social blocklist" works),
   saying nothing actually happened - real incident: "hey noods let's play tick
   tack to" matched nothing and the model invented a game start.
 
+### 7g. no invented tool calls on game moves, reminders must be asked for
+- real incident: while matthias only sent tic-tac-toe moves ("5", "8"), the model called
+  `flaron` (with the example id from the prompt, which is matthias's own id), `web_search`
+  and `schedule_reminder` ("test reminder for matthias", picked up from an old offer in its
+  history), and the reminder was later dm'd to him. nobody else was involved.
+- on engine-handled game turns `llm.ask_noodle()` now passes NO tools at all (not just no
+  `play_game`): the model only narrates.
+- `tools._schedule_reminder()` refuses unless the sender's message itself matches
+  `_REMINDER_ASK` (remind, ping me, every day, in 10 min...), enforced in code.
+- `handlers` logs `incoming from=<user> channel=<id> ts=<ts>` for every message noodle acts
+  on, so "who sent this" can be answered from the logs.
+
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
   (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore

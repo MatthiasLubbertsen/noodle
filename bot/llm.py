@@ -185,7 +185,10 @@ def ask_noodle(
     # the engine already did this move/start. if the model could still call play_game it
     # sometimes repeats the move, gets "square already taken" / "no game running" back and
     # tells him that instead (it did, twice) - so on those turns it simply has no game tool.
-    active_tools = [t for t in TOOLS if t["function"]["name"] != "play_game"] if game_note else TOOLS
+    # and it gets no other tools either: a bare "5" gives it nothing to look up, and a cheap model
+    # filled those turns with invented calls (a flaron lookup, a web search, a "test reminder"
+    # scheduled from a stale offer in its history)
+    active_tools = None if game_note else TOOLS
     if game_note:
         system_content += "\n\n" + game_note
 

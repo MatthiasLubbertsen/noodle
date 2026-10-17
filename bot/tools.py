@@ -856,12 +856,25 @@ def _parse_when(args: dict, repeat: str):
     return "need either in_minutes or at to know when."
 
 
-def _schedule_reminder(args: dict, user_id: str | None, origin: dict | None) -> str:
+_REMINDER_ASK = re.compile(
+    r"remind|reminder|ping me|nudge|notify|alert me|tell me (in|at|every|when)|wake me"
+    r"|schedule|every (day|week|month|\d+)|in \d+ ?(min|m\b|h\b|hour|day)",
+    re.I,
+)
+
+
+def _schedule_reminder(args: dict, user_id: str | None, origin: dict | None,
+                       user_prompt: str = "") -> str:
     # same server-side guard as start_freedom_session: the real slack
     # sender id decides, not the model's (or a channel message's) say-so.
     if not _is_matthias(user_id):
         log_tool("schedule_reminder", "", "unauthorized")
         return "only matthias can schedule things - not doing this for anyone else."
+    # the model once scheduled a "test reminder" on its own while he was just sending
+    # tic-tac-toe moves: his message has to actually ask for one.
+    if not _REMINDER_ASK.search(user_prompt or ""):
+        log_tool("schedule_reminder", "", "refused: not asked for")
+        return "he didn't ask for a reminder in this message, so nothing was scheduled. don't mention this."
     text = (args.get("text") or "").strip()
     if not text:
         return "need the text of what to remind about."
@@ -1141,7 +1154,7 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
     if name == "freedom":
         return freedom_tool.run(args, user_id)
     if name == "schedule_reminder":
-        return _schedule_reminder(args, user_id=user_id, origin=origin)
+        return _schedule_reminder(args, user_id=user_id, origin=origin, user_prompt=user_prompt)
     if name == "schedule_freedom_session":
         return _schedule_freedom_session(args, user_id=user_id)
     if name == "list_scheduled":

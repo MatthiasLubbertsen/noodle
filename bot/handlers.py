@@ -257,6 +257,10 @@ def handle_message(event: dict) -> None:
     key = conv_key(event)
     location = location_label(event)
     sender_id = event.get("user")
+    logger.info(
+        "incoming from=%s channel=%s ts=%s thread_ts=%s text=%r",
+        sender_id, channel, event.get("ts"), thread_ts, (prompt or "")[:40],
+    )
     # where this message came from, so scheduled reminders can default to
     # being delivered back to the same dm/channel/thread
     origin = {"channel": channel, "thread_ts": thread_ts, "is_dm": _is_dm(event)}
