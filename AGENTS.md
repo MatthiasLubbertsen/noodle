@@ -903,6 +903,15 @@ or id (so "block only mopa5m with the social blocklist" works),
   hangman, 5 letters for wordle, `rgby` for mastermind) is applied by the engine,
   the board is attached, and the model gets a "game engine update" note in its
   system context to react to. anything else still goes through the model + tool.
+  game names are matched tolerantly (`games.find_game()`: regex variants plus a
+  fuzzy compare for the long names, so "tick tack to", "tik tak toe", "conect
+  four" work; wordle/hangman stay regex-only so "world" isn't read as "wordle").
+  **safety net:** if, in his dm, a reply narrates a game turn ("you're ❌, i'm
+  ⭕", "pick a square", "your move") but no game tool put a board on the turn,
+  `llm.ask_noodle()` throws that draft away and forces ONE `play_game` call
+  (`tool_choice`, falling back to auto if the provider rejects it) with a note
+  saying nothing actually happened - real incident: "hey noods let's play tick
+  tack to" matched nothing and the model invented a game start.
 
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
