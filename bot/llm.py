@@ -1,6 +1,7 @@
 import datetime
 import json
 import logging
+import time
 
 import config
 from bot import games, state
@@ -71,7 +72,7 @@ def _call_chat(messages, tools=None, tool_choice=None, detail="", max_tokens=100
 
 def _with_board(text: str) -> str:
     """if a game tool ran this turn, send its board right after the model's
-    message. the board is drawn by the engine (fixed-width, always aligned) and
+    message. the board is drawn by the engine (emoji, always aligned) and
     deliberately NOT stored in memory - the engine's state is the truth."""
     board = games.pop_attachment()
     return f"{text}\n\n{board}" if board else text
@@ -104,7 +105,7 @@ def _hhmm(value: str) -> str:
         return value
 
 
-def _runtime_context(user_id: str | None, location: str | None) -> str:
+def _runtime_context(user_id: str | None, location: str | None, last_reply: tuple | None = None) -> str:
     """per-turn facts the model can't know on its own: the time, who is
     actually talking (from slack's own sender id, so it can be trusted),
     where, and what noodle does by itself on a schedule."""
@@ -128,6 +129,17 @@ def _runtime_context(user_id: str | None, location: str | None) -> str:
         lines.append(
             f"{location} keep this in mind but do not announce it unless it is "
             "relevant to the conversation."
+        )
+    if last_reply:
+        ts, text = last_reply
+        mins = int((time.time() - ts) // 60)
+        ago = "just now" if mins < 1 else f"{mins} minutes ago" if mins < 120 else f"{mins // 60} hours ago"
+        snippet = text if len(text) <= 400 else text[:400] + "..."
+        lines.append(
+            f"the last message you sent in this conversation ({ago}): \"{snippet}\"\n"
+            "a short reply from him (\"sad\", \"lol\", \"ok\", \"nice\") is almost certainly about THAT "
+            "message - react to it first, and don't dig up older topics (old games, old recaps) "
+            "unless he clearly brings them up."
         )
     lines.append(
         "things you do on your own, without being asked: every day at "
@@ -165,8 +177,13 @@ def ask_noodle(
     _remember(conv_key, "user", user_text, persist, user_id=user_id)
 
     system_content = (
-        f"{state.SYSTEM_PROMPT}\n\ncontext:\n{_runtime_context(user_id, location)}"
+        f"{state.SYSTEM_PROMPT}\n\ncontext:\n"
+        f"{_runtime_context(user_id, location, state.LAST_REPLY.get(conv_key))}"
     )
+    # a clear game start/move in his dm is applied by the engine itself, the model just reacts
+    game_note = games.auto(user_text, user_id, origin)
+    if game_note:
+        system_content += "\n\n" + game_note
 
     messages = [{"role": "system", "content": system_content}] + history
     leak_retried = False
@@ -191,6 +208,7 @@ def ask_noodle(
             final = _strip_leaked_tool_names(_clean_reply(raw_content))
             history.append({"role": "assistant", "content": final})
             _remember(conv_key, "assistant", final, persist)
+            state.LAST_REPLY[conv_key] = (time.time(), final)
             trim_memory(history)
             return _with_board(final)
         history.append(
@@ -228,5 +246,6 @@ def ask_noodle(
     final = _strip_leaked_tool_names(_clean_reply(final_resp.choices[0].message.content or ""))
     history.append({"role": "assistant", "content": final})
     _remember(conv_key, "assistant", final, persist)
+    state.LAST_REPLY[conv_key] = (time.time(), final)
     trim_memory(history)
     return _with_board(final)

@@ -134,10 +134,14 @@ def append_message_async(
     inline would add that round trip to every single reply's latency. this
     runs it off the critical path instead; nothing waits on it.
     """
+    # stamp the time NOW: the row is inserted only after the (variable-length) embedding
+    # call finishes, so stamping it there made rows land out of order - a reply could
+    # end up before the question it answered when history was reloaded after a restart.
+    sent_at = datetime.datetime.now(AMSTERDAM_TZ).isoformat()
     threading.Thread(
         target=append_message,
         args=(conv_key, kind, role, content),
-        kwargs={"user_id": user_id},
+        kwargs={"user_id": user_id, "created_at": sent_at},
         daemon=True,
     ).start()
 
@@ -149,7 +153,7 @@ def load_history(conv_key: str, limit: int = 48) -> list[dict]:
         try:
             rows = conn.execute(
                 "SELECT role, content FROM messages WHERE conv_key = ? "
-                "ORDER BY id DESC LIMIT ?",
+                "ORDER BY julianday(created_at) DESC, id DESC LIMIT ?",
                 (conv_key, limit),
             ).fetchall()
         finally:

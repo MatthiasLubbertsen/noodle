@@ -66,6 +66,7 @@ def _deliver(channel: str, thread_ts: str | None, text: str) -> None:
         key = f"thread:{thread_ts}"
     else:
         key = f"chan:{channel}"
+    state.LAST_REPLY[key] = (time.time(), text)
     history = state.MEMORY.setdefault(key, [])
     history.append({"role": "assistant", "content": text})
     trim_memory(history)

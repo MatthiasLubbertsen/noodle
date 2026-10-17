@@ -412,6 +412,12 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   daemon thread and returns immediately. nothing in the reply path waits on
   the write or the embedding call. this was a real bug: early on,
   persistence ran inline and visibly slowed down every reply.
+- **rows are stamped when the message is SENT, not when its embedding finishes.**
+  `append_message_async()` sets `created_at` before spawning the thread and
+  `load_history()` orders by it (`julianday(created_at)`, then id). before, the
+  stamp/insert happened after the variable-length embedding call, so a slow one
+  could land after a later message and history reloaded after a restart came
+  back out of order.
 - each row also carries `user_id`: the slack id of whoever actually sent a
   "user"-role message (matthias in a dm, or anyone else in a thread) -
   nothing else about them (no name, no profile data). `handlers.handle_message()`
@@ -741,6 +747,11 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   delete schedules whose devices are all matthias's own, and a running
   session can't be cancelled. all of these are matthias-only, checked
   server-side against the real sender id.
+- the last message noodle sent in each conversation (`state.LAST_REPLY`, set by
+  `ask_noodle()` and by `scheduler._deliver()`) is put in the context with how long
+  ago it was, plus a rule that a short reply ("sad", "lol") is about THAT message
+  (real incident: "sad" in reply to the weather was answered as if it were about
+  yesterday's game).
 - awareness: `llm._runtime_context()` appends the current amsterdam time, who
   is talking (matthias = verified, from slack's sender id; anyone else =
   explicitly not matthias), the location, and that noodle itself sends the
@@ -765,6 +776,12 @@ skips that piece, never breaks startup or a dm).
   `WEATHER_LOCATIONS`, set in `.env` only), then news if any.
   `get_weather` with no place uses `WEATHER_DEFAULT_LOCATION` (also `.env`). calendar is NOT included: matthias can't create the google
   oauth app it needs.
+  the weather and news messages are separate model calls that follow the
+  greeting, so their prompts say not to greet, they must be a single paragraph
+  (blank lines would split one reply into several slack messages), and
+  `morning._without_greeting()` strips a leading "good morning (matthias)" if the
+  model adds one anyway (a reply that is only a greeting falls back to the plain
+  facts) - this fixed a double "good morning" in the morning dm.
 - **tools** (`bot/tools.py`): `get_weather` (any place; none = `WEATHER_DEFAULT_LOCATION`), `now_playing` (last.fm, since
   matthias can't create more spotify apps - spotify scrobbling to last.fm
   needs no oauth), `github` (repo/commits/issues/pulls/search/notifications/
@@ -874,11 +891,25 @@ or id (so "block only mopa5m with the social blocklist" works),
   owns rules, state (`data/games.json`, survives restarts, plus a win/loss
   record) and noodle's moves (tictactoe: minimax with easy/normal/hard;
   connect4: alpha-beta search at depth 1/3/5); the model only talks. the board
-  is drawn by the engine in a fixed-width code block (ascii only, so columns
-  always line up; wordle uses emoji rows) and attached to the reply by
+  is drawn by the engine out of emoji (the same width in every client and font:
+  ascii grids in a code block drifted out of alignment because slack's code
+  blocks aren't always monospace; tictactoe uses keycap digits + ❌/⭕, connect4
+  🔴🟡⚪, mastermind coloured pegs, wordle 🟩🟨⬛, hangman hearts + the word in
+  inline code) and attached to the reply by
   `llm._with_board()` instead of trusting the model to reproduce it - it is not
   stored in memory. wordle accepts any 5 letters (no dictionary check) and
   hangman/wordle words come from built-in lists in `games.py`.
+- **the engine drives, the model narrates.** a cheap model doesn't reliably call
+  `play_game` (real incident: it said "you took the middle right, i went center"
+  with no tool call, so the board never changed). so `games.auto()` runs in
+  `llm.ask_noodle()` BEFORE the model: in matthias's dm, a clear start request
+  ("can we play tic tac toe", "play again", optional easy/hard; needs a game name
+  or "again", a wish to play and no refusal word) or a clear move while a game
+  is running (`6`, `let's do 6`, `square 6 please` - the message must be
+  essentially only the move, so "i'm 3 days late" isn't square 3; one letter for
+  hangman, 5 letters for wordle, `rgby` for mastermind) is applied by the engine,
+  the board is attached, and the model gets a "game engine update" note in its
+  system context to react to. anything else still goes through the model + tool.
 
 ### 7g. the code sandbox (`run_code`)
 python 3.13 (pyodide: numpy, pandas, matplotlib, scipy, sympy) and javascript

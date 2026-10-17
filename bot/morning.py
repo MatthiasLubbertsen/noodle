@@ -1,4 +1,5 @@
 import logging
+import re
 
 import config
 from bot import state
@@ -9,6 +10,16 @@ from bot.slack_text import _clean_reply
 from bot.weather import morning_weather_facts
 
 logger = logging.getLogger("noodle")
+
+# the weather and news messages are separate model calls that go out right after the
+# greeting message. told to, they don't greet - but if one still opens with
+# "good morning (matthias)" anyway, cut it, so he is never greeted twice.
+_GREETING_PREFIX = re.compile(r"^\s*(?:good\s+morning|morning|gm)\b[\s,!.:;-]*(?:matthias\b[\s,!.:;-]*)?", re.IGNORECASE)
+
+
+def _without_greeting(text: str) -> str:
+    # may come back empty (the reply was only a greeting) - callers then use their plain fallback
+    return _GREETING_PREFIX.sub("", text, count=1).strip()
 
 
 def build_greeting_message() -> str:
@@ -55,9 +66,13 @@ def build_news_message() -> str | None:
     text = complete(
         f"{len(articles)} new hack club news article(s) dropped. tell matthias in your "
         "own voice, short and casual: what each is about (from the title) with its "
-        "link exactly as given. use ONLY these facts.\n\nfacts:\n" + facts,
+        "link exactly as given. this goes out right after your good-morning message, "
+        "so don't greet him or say good morning - start straight with the news. "
+        "use ONLY these facts.\n\nfacts:\n" + facts,
         max_tokens=300,
     )
+    if text:
+        text = _without_greeting(text)
     if text and all(a["link"] in text for a in articles[:5]):
         return text
     return "new hack club news:\n" + facts
@@ -72,10 +87,15 @@ def build_weather_message() -> str | None:
         return None
     remember_facts("weather forecast", facts)
     text = complete(
-        "it's morning. tell matthias today's weather in your own voice: 1-3 short "
-        "sentences covering the places below, with the actual temperatures and any "
+        "tell matthias today's weather in your own voice: 1-3 short sentences in ONE "
+        "paragraph covering the places below, with the actual temperatures and any "
         "rain. if the places are about the same, say so once instead of repeating "
-        "yourself. use ONLY these facts.\n\nfacts:\n" + facts,
+        "yourself. this goes out right after your separate good-morning message, so "
+        "do NOT greet him or say good morning - start straight with the weather. "
+        "use ONLY these facts.\n\nfacts:\n" + facts,
         max_tokens=200,
     )
+    if text:
+        # one paragraph = one slack message (blank lines would split it into several)
+        text = re.sub(r"\n\s*\n", " ", _without_greeting(text))
     return text or "weather today:\n" + facts
