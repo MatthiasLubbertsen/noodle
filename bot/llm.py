@@ -187,8 +187,21 @@ def ask_noodle(
 
     messages = [{"role": "system", "content": system_content}] + history
     leak_retried = False
+    game_guard_used = False
+    force_tool = None
     for _ in range(MAX_TOOL_ROUNDS):
-        response = _call_chat(messages, tools=TOOLS, tool_choice="auto", detail=first4)
+        if force_tool:
+            try:
+                response = _call_chat(
+                    messages, tools=TOOLS, detail=first4,
+                    tool_choice={"type": "function", "function": {"name": force_tool}},
+                )
+            except Exception:  # noqa: BLE001 - a provider that rejects forced tool_choice
+                logger.exception("forced tool_choice failed, retrying with auto")
+                response = _call_chat(messages, tools=TOOLS, tool_choice="auto", detail=first4)
+            force_tool = None
+        else:
+            response = _call_chat(messages, tools=TOOLS, tool_choice="auto", detail=first4)
         message = response.choices[0].message
         if not message.tool_calls:
             raw_content = message.content or ""
@@ -206,6 +219,13 @@ def ask_noodle(
                 )
                 continue
             final = _strip_leaked_tool_names(_clean_reply(raw_content))
+            if not game_guard_used and games.looks_like_fake_turn(final, user_text, user_id, origin):
+                # it narrated a game turn without running the game: make it call the tool once
+                game_guard_used = True
+                force_tool = "play_game"
+                logger.warning("reply described a game turn but no game tool ran - forcing play_game once")
+                messages = messages + [{"role": "system", "content": games.FAKE_TURN_NOTE}]
+                continue
             history.append({"role": "assistant", "content": final})
             _remember(conv_key, "assistant", final, persist)
             state.LAST_REPLY[conv_key] = (time.time(), final)

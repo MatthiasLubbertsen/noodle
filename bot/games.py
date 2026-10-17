@@ -10,6 +10,7 @@ monospace, so ascii grids drifted out of alignment), so the board always lines u
 and the model can't mangle it. one game at a time, persisted to data/games.json so a
 restart doesn't lose it.
 """
+import difflib
 import json
 import logging
 import random
@@ -528,12 +529,32 @@ def play(args: dict, user_id: str | None, origin: dict | None) -> str:
 # gets the result to react to. anything that isn't clearly one of those still goes
 # through the model + tool as before.
 _NAME_PATTERNS = {
-    "tictactoe": r"tic[\s-]*tac[\s-]*toe|\bttt\b|noughts?\s*(?:and|&)\s*crosses",
-    "connect4": r"connect[\s-]*(?:4|four)",
-    "hangman": r"hang[\s-]*man",
-    "wordle": r"wordle",
-    "mastermind": r"master[\s-]*mind",
+    "tictactoe": r"tic[\s-]*tac[\s-]*toe|\bttt\b|noughts?\s*(?:and|&)\s*crosses|\bx\s*(?:and|&|n)\s*o\b",
+    "connect4": r"connect[\s-]*(?:4|four)|(?:4|four)\s*in\s*a\s*row",
+    "hangman": r"hang[\s-]*m[ae]n",
+    "wordle": r"\bword(?:le|el|l)\b",
+    "mastermind": r"master[\s-]*mind|code[\s-]*breaker",
 }
+# typos in the long names ("tick tack to", "tik tak toe", "conect four"): compare every run of
+# 1-3 words, squashed together, with the name. short names (wordle, hangman) stay regex-only,
+# because fuzzy matching would read "world" as "wordle".
+_FUZZY_NAMES = (("tictactoe", "tictactoe", 0.75), ("mastermind", "mastermind", 0.8), ("connect4", "connectfour", 0.8))
+
+
+def find_game(text: str) -> str | None:
+    """which game a message is talking about, tolerant of typos."""
+    for game, pattern in _NAME_PATTERNS.items():
+        if re.search(pattern, text, re.I):
+            return game
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    windows = {"".join(words[i:i + n]) for n in (1, 2, 3) for i in range(len(words) - n + 1)}
+    windows = {w for w in windows if 7 <= len(w) <= 14}
+    for game, target, threshold in _FUZZY_NAMES:
+        if any(difflib.SequenceMatcher(None, w, target).ratio() >= threshold for w in windows):
+            return game
+    return None
+
+
 _WANTS_TO_PLAY = re.compile(r"\b(play|start|begin|another|again|rematch|new game|let'?s do|wanna|want to|can we|could we|shall we|up for)\b", re.I)
 _REFUSAL = re.compile(r"\b(don'?t|dont|do not|not|never|no|stop|quit|cancel|rather not|hate|why)\b", re.I)
 _AGAIN = re.compile(r"\b(again|rematch|another one|one more|new game)\b", re.I)
@@ -593,7 +614,7 @@ def auto(text: str, user_id: str | None, origin: dict | None) -> str | None:
     # start: needs a game name (or "again" after a game) AND a clear wish to play, no refusal
     if len(text) > 120 or _REFUSAL.search(text) or not _WANTS_TO_PLAY.search(text):
         return None
-    name = next((g for g, pat in _NAME_PATTERNS.items() if re.search(pat, text, re.I)), None)
+    name = find_game(text)
     if name is None and _AGAIN.search(text):
         name = data.get("last_game")
     if name not in GAMES:
@@ -603,3 +624,31 @@ def auto(text: str, user_id: str | None, origin: dict | None) -> str | None:
     if difficulty:
         args["difficulty"] = difficulty.lower()
     return AUTO_NOTE + "he asked to play, so the engine started it. " + play(args, user_id, origin)
+
+
+# ---------------------------------------------------------------------------
+# safety net: the model describing a game turn that never happened
+# ---------------------------------------------------------------------------
+_FAKE_TURN = re.compile(
+    r"you'?re \u274c|you are \u274c|i'?m \u2b55|pick (?:a |another )?(?:free )?(?:square|column)|"
+    r"your (?:move|turn)\b|you (?:start|go) first|guess a letter|make your guess|your guess\b",
+    re.I,
+)
+_GAMEY = re.compile(r"play|game|move|turn|square|column|guess|tic|tac|toe|connect|hang|wordle|mastermind", re.I)
+FAKE_TURN_NOTE = (
+    "your last draft described a game turn (a board, a move, whose turn it is) but no game tool "
+    "ran, so nothing actually happened. call play_game now: action=start with the game he asked "
+    "for, or action=move with his move, or action=list if he didn't actually ask about a game. "
+    "write your reply only after the tool has run."
+)
+
+
+def looks_like_fake_turn(reply: str, user_text: str, user_id: str | None, origin: dict | None) -> bool:
+    """true if, in matthias's dm, the reply narrates a game turn but no game tool put a
+    board on this turn - a cheap model sometimes just says it started / moved."""
+    if user_id != config.USER_ID or not (origin and origin.get("is_dm")):
+        return False
+    if getattr(_local, "block", None):  # a board was attached this turn: the engine did run
+        return False
+    gamey = bool(_load().get("current")) or bool(_GAMEY.search(user_text or ""))
+    return gamey and bool(_FAKE_TURN.search(reply or ""))
