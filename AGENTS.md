@@ -61,6 +61,7 @@ noodle/
     weather.py            # open-meteo forecasts (morning dm + get_weather tool)
     lastfm.py             # last.fm now playing / tracks today (now_playing tool)
     github.py             # github rest calls (github tool, commit count)
+    links.py              # link shortener api calls (links tool)
     github_watch.py       # new-notification diffing + persisted "seen" state
     proactive.py          # quiet hours + daily cap for unprompted pings
     oneshot.py            # one-off persona completion for scheduled messages
@@ -220,6 +221,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
 | `github` | repo, commits, issues, pulls, search, notifications, commits today | matthias only |
+| `links` | create/list/get/update/delete his short links + click stats (go.matthiaz.dev api) | matthias only |
 | `get_journal` | his `@matthias-day` recaps for a date range (plain date filter, not vector search) | matthias only |
 | `summarize_thread` | reads a whole thread (link or current thread) so the model can tl;dr it; same auto-join rule as `fetch_slack_message` | anyone |
 | `freedom` | the full freedom.to toolbox: devices, blocklists, sessions, schedules, history (13 actions); only ever touches matthias's own devices | matthias only |
@@ -229,7 +231,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `list_scheduled` | list scheduled reminders and freedom sessions | matthias only |
 | `cancel_scheduled` | cancel one reminder or freedom session by id | matthias only |
 
-**no credential, no tool.** seven of these need a credential, and without it they are
+**no credential, no tool.** eight of these need a credential, and without it they are
 not just broken but absent: `bot/features.py` decides from the env alone, `tools.available_tools()`
 drops them from the list the model is sent, `prompt.load_prompt()` removes their sections of the
 system prompt (wrapped in `<!-- if:NAME -->...<!-- endif:NAME -->` in `prompts/system_prompt.md`)
@@ -238,6 +240,7 @@ jobs that need them don't start. so the model never offers or promises something
 - `GITHUB_TOKEN` -> `github` (and the notification watcher)
 - `LASTFM_API_KEY` + `LASTFM_USER` -> `now_playing`, `music_stats`
 - `FREEDOM_API_KEY` -> `freedom`, `start_freedom_session`, `schedule_freedom_session`
+- `LINKS_API_KEY` -> `links`
 - `SANDBOX_TOKEN` (16+ chars) -> `run_code`
 everything else (search, flaron, memory, weather, journal, threads, reminders, games, web search)
 needs nothing extra. **adding a tool that needs a credential?** add it to `features.py`
@@ -1088,6 +1091,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `FREEDOM_DEVICE_NAMES` | comma separated device names (as shown in freedom's dashboard) allowed to be blocked - the account is shared, so this is never "all devices" (defaults to `Matthias Windows,mopa5m`) |
 | `DAILY_WRAPUP_DM` | `HH:MM`, end-of-day wrap-up dm (default `21:30`) |
 | `WEEKLY_JOURNAL` / `WEEKLY_DIGEST` / `WEEKLY_MUSIC` | `<mon..sun> HH:MM`, weekly journal recap (`sun 18:00`) / busiest-channels digest (`mon 09:00`) / music recap (`sun 18:30`) |
+| `LINKS_API_BASE` / `LINKS_API_KEY` | link shortener api (default base `https://go.matthiaz.dev/api/v1`) + its `lnk_...` key; unset key = `links` tool off |
 | `SANDBOX_TOKEN` | shared secret between noodle and the code sandbox (16+ random chars); compose sets `SANDBOX_URL` itself. **unset = sandbox off**: `run_code` is not offered to the model and the container idles |
 | `MATTHIAS_USER_TOKEN` | matthias's OWN xoxp token (`search:read`), used only to count today's messages incl. private channels - nothing else |
 | `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`), max per day (default 10) |

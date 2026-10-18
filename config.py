@@ -115,6 +115,10 @@ MATTHIAS_DAY_GROUP_ID = os.getenv("MATTHIAS_DAY_GROUP_ID", "S0AK8LYJ8FR")
 MATTHIAS_DAY_CHANNEL_ID = os.getenv("MATTHIAS_DAY_CHANNEL_ID", "C0A9NJT2BCJ")
 
 # --- freedom.to focus sessions ---
+# matthias's self-hosted link shortener (go.matthiaz.dev) - see bot/links.py.
+# optional: no key means the links tool is not offered at all.
+LINKS_API_BASE = os.getenv("LINKS_API_BASE", "https://go.matthiaz.dev/api/v1")
+LINKS_API_KEY = os.getenv("LINKS_API_KEY", "")
 # matthias's self-hosted api for his freedom.to account
 # (github.com/MatthiasLubbertsen/freedom) - see bot/freedom.py. empty key
 # means the start_freedom_session tool just reports it's not configured,

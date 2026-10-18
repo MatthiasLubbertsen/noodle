@@ -10,6 +10,7 @@ from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
 from bot import features, games, sandbox
 from bot import github as github_api
+from bot import links as links_api
 from bot.channels import with_join
 from bot import lastfm
 from bot.exa import web_answer
@@ -539,6 +540,45 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "links",
+            "description": (
+                "manage matthias's short links on his own link shortener (matthias "
+                "only, checked on the server). actions: create (needs url; key = the "
+                "short path, random if omitted), list (optionally search = part of a "
+                "key or destination), get, update (only the fields you send change; "
+                "send clear_expiration / clear_password to remove those), delete "
+                "(permanent, with its click history: only when he clearly asked), "
+                "stats (one link's clicks, or account-wide totals + top links if no "
+                "link is given), domains. a link is picked with id, or key (+ domain "
+                "if he has several). always give him the full shortUrl."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "list", "get", "update", "delete", "stats", "domains"],
+                    },
+                    "id": {"type": "string", "description": "link id"},
+                    "key": {"type": "string", "description": "short path, e.g. 'docs'"},
+                    "domain": {"type": "string", "description": "only needed with more than one domain"},
+                    "url": {"type": "string", "description": "destination (http/https)"},
+                    "search": {"type": "string", "description": "for list"},
+                    "expiration_date": {"type": "string", "description": "ISO 8601 date-time"},
+                    "expiration_url": {"type": "string", "description": "where to go after expiry"},
+                    "password": {"type": "string"},
+                    "clear_expiration": {"type": "boolean"},
+                    "clear_password": {"type": "boolean"},
+                    "is_cloaked": {"type": "boolean"},
+                    "days": {"type": "integer", "description": "stats period, default 30"},
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_journal",
             "description": (
                 "(matthias only) read matthias's own @matthias-day daily recaps for a date range, "
@@ -794,6 +834,132 @@ def _github(args: dict, user_id: str | None) -> str:
     result = github_api.query(action, repo=args.get("repo"), q=args.get("q"), state=args.get("state") or "open")
     log_tool("github", f"{action} {args.get('repo') or args.get('q') or ''}".strip(), "done")
     return result
+
+
+def _fmt_link(link: dict) -> str:
+    bits = [f"{link.get('shortUrl')} -> {link.get('url')}", f"id {link.get('id')}", f"{link.get('clicks', 0)} clicks"]
+    if link.get("expirationDate"):
+        bits.append(f"expires {link['expirationDate']}")
+    if link.get("hasPassword"):
+        bits.append("password protected")
+    if link.get("isCloaked"):
+        bits.append("cloaked")
+    if link.get("archived"):
+        bits.append("archived")
+    return ", ".join(bits)
+
+
+def _resolve_link_id(args: dict):
+    """(id, None) or (None, error text) for the link the model means."""
+    if args.get("id"):
+        return str(args["id"]), None
+    key = (args.get("key") or "").strip().strip("/")
+    if not key:
+        return None, "need a link id or key"
+    found = links_api.list_links(search=key, domain=args.get("domain"), limit=200)
+    if found is None or "error" in found:
+        return None, "couldn't reach the link shortener, check logs."
+    matches = [l for l in found.get("data", []) if l.get("key") == key]
+    if not matches:
+        return None, f"no link with key '{key}'"
+    if len(matches) > 1:
+        return None, "several domains have that key, say which domain: " + ", ".join(m["domain"] for m in matches)
+    return matches[0]["id"], None
+
+
+def _links(args: dict, user_id: str | None) -> str:
+    if not _is_matthias(user_id):
+        return "only matthias can use the links tool"
+    action = args.get("action", "")
+    detail = args.get("key") or args.get("id") or args.get("url") or args.get("search") or ""
+    result = _links_action(action, args)
+    log_tool("links", f"{action} {detail}".strip(), "failed" if result.startswith("couldn't") else "done")
+    return result
+
+
+def _links_action(action: str, args: dict) -> str:
+    def failed(res) -> str | None:
+        if res is None:
+            return "couldn't reach the link shortener, check logs."
+        if "error" in res:
+            err = res["error"]
+            return f"couldn't do that: {err.get('message') or err.get('code')}"
+        return None
+
+    if action == "domains":
+        res = links_api.list_domains()
+        return failed(res) or "domains: " + ", ".join(d["domain"] for d in res.get("data", []))
+    if action == "list":
+        res = links_api.list_links(search=args.get("search"), domain=args.get("domain"))
+        if err := failed(res):
+            return err
+        rows = res.get("data", [])
+        if not rows:
+            return "no links found"
+        return f"{len(rows)} of {res.get('total')} links:\n" + "\n".join(_fmt_link(l) for l in rows)
+    if action == "stats":
+        days = int(args.get("days") or 30)
+        if args.get("id") or args.get("key"):
+            link_id, err = _resolve_link_id(args)
+            if err:
+                return err
+            res = links_api.link_stats(link_id, days)
+            if err := failed(res):
+                return err
+            return (
+                f"{_fmt_link(res['link'])}\n{res['clicksInPeriod']} clicks in the last {days} days "
+                f"({res['totalClicks']} total). daily: "
+                + ", ".join(f"{d['date']}: {d['clicks']}" for d in res.get("daily", []) if d["clicks"])
+            )
+        res = links_api.account_stats(days, 10)
+        if err := failed(res):
+            return err
+        return (
+            f"{res['totalLinks']} links, {res['totalClicks']} clicks total, {res['clicksInPeriod']} in the "
+            f"last {days} days. top links:\n" + "\n".join(_fmt_link(l) for l in res.get("topLinks", []))
+        )
+    if action == "create":
+        if not args.get("url"):
+            return "need a destination url to create a link"
+        res = links_api.create_link(_link_payload(args))
+        return failed(res) or "created: " + _fmt_link(res)
+    if action in ("get", "update", "delete"):
+        link_id, err = _resolve_link_id(args)
+        if err:
+            return err
+        if action == "get":
+            res = links_api.get_link(link_id)
+            return failed(res) or _fmt_link(res)
+        if action == "update":
+            payload = _link_payload(args)
+            if not payload:
+                return "nothing to change, say which fields to update"
+            res = links_api.update_link(link_id, payload)
+            return failed(res) or "updated: " + _fmt_link(res)
+        res = links_api.delete_link(link_id)
+        return failed(res) or f"deleted link {link_id}"
+    return f"unknown links action: {action}"
+
+
+def _link_payload(args: dict) -> dict:
+    payload = {}
+    for arg, field in (
+        ("url", "url"),
+        ("domain", "domain"),
+        ("key", "key"),
+        ("expiration_date", "expirationDate"),
+        ("expiration_url", "expirationUrl"),
+        ("password", "password"),
+        ("is_cloaked", "isCloaked"),
+    ):
+        if args.get(arg) is not None:
+            payload[field] = args[arg]
+    if args.get("clear_expiration"):
+        payload["expirationDate"] = None
+        payload["expirationUrl"] = None
+    if args.get("clear_password"):
+        payload["password"] = None
+    return payload
 
 
 def _get_journal(start_date, end_date, user_id: str | None) -> str:
@@ -1303,6 +1469,8 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return _music_stats(args, user_id)
     if name == "github":
         return _github(args, user_id)
+    if name == "links":
+        return _links(args, user_id)
     if name == "get_journal":
         return _get_journal(args.get("start_date"), args.get("end_date"), user_id)
     if name == "summarize_thread":
