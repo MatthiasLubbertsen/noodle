@@ -59,7 +59,37 @@ def _clean_reply(text: str) -> str:
         return ""
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<reasoning>.*?</reasoning>", "", text, flags=re.DOTALL | re.IGNORECASE)
-    return _no_dashes(text.strip())
+    return _tidy_links(_no_dashes(text.strip()))
+
+
+_URL = re.compile(r"<(https?://[^|>\s]+)(?:\|([^>]*))?>|(?<![<|/\w])(https?://[^\s<>|`]+)")
+
+
+def _tidy_links(text: str) -> str:
+    """every url goes out as slack's rich text link without the scheme in the visible part
+    (`<https://go.example.com/docs|go.example.com/docs>`), never as a bare url, and a stray
+    space before sentence punctuation after it ("link . it'll") is closed up. code spans are
+    left alone."""
+
+    def link(m: re.Match) -> str:
+        if m.group(1):  # already <url> or <url|label>
+            url, label = m.group(1), m.group(2)
+            return f"<{url}|{label}>" if label else f"<{url}|{_shown(url)}>"
+        url = m.group(3)
+        trail = ""
+        while url and url[-1] in ".,!?;:)":
+            trail = url[-1] + trail
+            url = url[:-1]
+        return f"<{url}|{_shown(url)}>{trail}"
+
+    parts = re.split(r"(`[^`]*`)", text)
+    parts = [p if p.startswith("`") else _URL.sub(link, p) for p in parts]
+    text = "".join(parts)
+    return re.sub(r"(?<=>)[ \t]+(?=[.,!?](?:\s|$))", "", text)
+
+
+def _shown(url: str) -> str:
+    return re.sub(r"^https?://", "", url).rstrip("/")
 
 
 def _no_dashes(text: str) -> str:

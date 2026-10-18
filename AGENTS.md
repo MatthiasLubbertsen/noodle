@@ -1030,6 +1030,18 @@ dm with `files_upload_v2` (needs the `files:write` scope on noodle's token).
 - `handlers` logs `incoming from=<user> channel=<id> ts=<ts>` for every message noodle acts
   on, so "who sent this" can be answered from the logs.
 
+### 7i. link formatting, and "again" is not a rematch
+- `slack_text._clean_reply()` (via `_tidy_links()`) puts every url a model writes into slack's
+  rich text form without the scheme in the visible part (`<https://go.example.com/x|go.example.com/x>`),
+  never a bare url, and closes a stray space between a link and the punctuation after it. code
+  spans are left alone.
+- real incident: "Try again, I forgot to build" in his dm matched `games.auto()` as "play again"
+  (`again` is both a wish-to-play word and the rematch word) and a tictactoe board was attached to
+  an unrelated reply. with no game named, "again" now only starts the last game together with a
+  real play word (`play`, `rematch`, `new game`...) or as the whole message ("again!").
+- an embeddings 502 in the logs is the ai endpoint failing upstream; `embeddings.py` retries once
+  and a row that still fails is stored without an embedding (chat is unaffected).
+
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
   (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore
