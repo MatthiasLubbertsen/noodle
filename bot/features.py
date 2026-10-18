@@ -11,6 +11,7 @@ import config
 TOOL_FEATURE = {
     "run_code": "sandbox",
     "github": "github",
+    "links": "links",
     "now_playing": "lastfm",
     "music_stats": "lastfm",
     "freedom": "freedom",
@@ -29,6 +30,8 @@ def enabled(feature: str) -> bool:
         return bool(config.LASTFM_API_KEY and config.LASTFM_USER)
     if feature == "freedom":
         return bool(config.FREEDOM_API_KEY)
+    if feature == "links":
+        return bool(config.LINKS_API_KEY and config.LINKS_API_BASE)
     raise KeyError(feature)
 
 
