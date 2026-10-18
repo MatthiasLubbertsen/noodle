@@ -570,6 +570,8 @@ def find_game(text: str) -> str | None:
 
 _WANTS_TO_PLAY = re.compile(r"\b(play|start|begin|another|again|rematch|new game|let'?s do|wanna|want to|can we|could we|shall we|up for)\b", re.I)
 _REFUSAL = re.compile(r"\b(don'?t|dont|do not|not|never|no|stop|quit|cancel|rather not|hate|why)\b", re.I)
+_PLAY_WORD = re.compile(r"\b(play|start|begin|rematch|new game|another one|one more)\b", re.I)
+_BARE_AGAIN = re.compile(r"\W*(again|rematch|one more|another one)\W*", re.I)
 _AGAIN = re.compile(r"\b(again|rematch|another one|one more|new game)\b", re.I)
 _MOVE_FILLER = {
     "lets", "let's", "let", "us", "do", "go", "play", "ill", "i'll", "i", "will", "take", "pick", "choose",
@@ -649,6 +651,10 @@ def auto(text: str, user_id: str | None, origin: dict | None) -> str | None:
         return None
     name = find_game(text)
     if name is None and _AGAIN.search(text):
+        # "try again, i forgot to build" is not "play again": with no game named, "again"
+        # only counts with a real play word, or as the whole message ("again!")
+        if not _PLAY_WORD.search(text) and not _BARE_AGAIN.fullmatch(text):
+            return None
         name = data.get("last_game")
     if name not in GAMES:
         return None
