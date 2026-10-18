@@ -176,6 +176,13 @@ python main.py
 you should see `starting noodle in socket mode...` and `noodle online as ...`
 in the console. then DM noodle from the `USER_ID` account to test the persona.
 
+## prebuilt images
+
+`.github/workflows/docker.yml` builds both images (`noodle` and `noodle-sandbox`)
+on every push and pull request. pull requests only build; pushes to `main` (and
+`v*` tags) also publish to `ghcr.io/<owner>/noodle` and
+`ghcr.io/<owner>/noodle-sandbox`, tagged `latest` / `sha-...` / the version tag.
+
 ## running it with docker
 
 ```bash
