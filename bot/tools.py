@@ -562,6 +562,7 @@ TOOLS = [
                     "id": {"type": "string", "description": "link id"},
                     "key": {"type": "string", "description": "short path, e.g. 'docs'"},
                     "domain": {"type": "string", "description": "only needed with more than one domain"},
+                    "new_key": {"type": "string", "description": "for update: rename the short path"},
                     "url": {"type": "string", "description": "destination (http/https)"},
                     "search": {"type": "string", "description": "for list"},
                     "expiration_date": {"type": "string", "description": "ISO 8601 date-time"},
@@ -932,6 +933,11 @@ def _links_action(action: str, args: dict) -> str:
             return failed(res) or _fmt_link(res)
         if action == "update":
             payload = _link_payload(args)
+            # key/domain pick the link here, so they only change it via new_key
+            payload.pop("key", None)
+            payload.pop("domain", None)
+            if args.get("new_key"):
+                payload["key"] = args["new_key"]
             if not payload:
                 return "nothing to change, say which fields to update"
             res = links_api.update_link(link_id, payload)
