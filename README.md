@@ -87,7 +87,7 @@ real slack sender id, so it is safe in public channels too.
 | `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
 | `github` | repo, commits, issues, pulls, search, notifications, commits today | matthias only |
-| `links` | create, list, edit, delete and see click stats of his short links (go.matthiaz.dev) | matthias only |
+| `links` | create, list, edit, delete and see click stats of his short links | matthias only |
 | `get_journal` | his `@matthias-day` recaps for a date range (plain date filter, not vector search) | matthias only |
 | `summarize_thread` | reads a whole thread (link or current thread) so the model can tl;dr it; same auto-join rule as `fetch_slack_message` | anyone |
 | `freedom` | the full freedom.to toolbox: devices, blocklists, sessions, schedules, history (13 actions); only ever touches matthias's own devices | matthias only |
@@ -234,7 +234,7 @@ logs go to the console either way; the code also tries to write
 | `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | private, set in `.env` only: morning dm places (comma separated) / default place for `get_weather` |
 | `LASTFM_API_KEY` / `LASTFM_USER` | optional, enables `now_playing` |
 | `GITHUB_TOKEN` / `GITHUB_USER` / `GITHUB_POLL_SECONDS` | optional classic token (`repo`, `notifications`): enables the `github` tool and the notification watcher |
-| `LINKS_API_BASE` / `LINKS_API_KEY` | matthias's link shortener api (`lnk_...` key from its /app/api page); key optional (unset disables the `links` tool) |
+| `LINKS_API_BASE` / `LINKS_API_KEY` | link shortener api base url (e.g. `https://go.example.com/api/v1`, no default) + its `lnk_...` key; both optional, but the `links` tool is only offered when both are set |
 | `FREEDOM_API_BASE` / `FREEDOM_API_KEY` / `FREEDOM_DEVICE_NAMES` | matthias's self-hosted freedom api; key optional (unset disables the freedom tools); device names are the only devices ever blocked |
 | `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
 | `MATTHIAS_DAY_CHANNEL_ID` | channel the daily recap pings are posted in |

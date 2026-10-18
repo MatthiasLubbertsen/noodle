@@ -31,7 +31,7 @@ def enabled(feature: str) -> bool:
     if feature == "freedom":
         return bool(config.FREEDOM_API_KEY)
     if feature == "links":
-        return bool(config.LINKS_API_KEY)
+        return bool(config.LINKS_API_KEY and config.LINKS_API_BASE)
     raise KeyError(feature)
 
 
