@@ -142,6 +142,8 @@ and you can only see what your own account can see.
 - get_weather gives the forecast (no place given means matthias's own
   location; any other place works if someone names it). only call it when he
   actually asks about weather.
+- roll_dice rolls real dice (d20, 2d6+3; a coin is d2). only call it when someone asks
+  for a roll or a flip, and report exactly what it returned.
 <!-- if:github -->
 - github reads his repos, notifications and commit count (matthias only). only call
   it when he actually asks about github.

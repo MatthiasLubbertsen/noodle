@@ -58,6 +58,7 @@ noodle/
     freedom.py            # calls matthias's self-hosted freedom.to focus-session api
     freedom_tool.py       # the full `freedom` tool (devices, blocklists, sessions, schedules)
     httpjson.py           # tiny shared GET-json helper (one retry) for the apis below
+    dice.py               # dice notation parser + roller (roll_dice tool)
     weather.py            # open-meteo forecasts (morning dm + get_weather tool)
     lastfm.py             # last.fm now playing / tracks today (now_playing tool)
     github.py             # github rest calls (github tool, commit count)
@@ -216,6 +217,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `search_memory` | semantic (vector) search of noodle's persisted memory: dms, threads, pings, journal, daily facts | matthias only |
 | `web_search` | short cited answer from the live web (exa via hack club ai) | anyone |
 | `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
+| `roll_dice` | roll dice in standard notation (d20, 2d6+3, coin = d2), up to 20 dice | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
 | `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |

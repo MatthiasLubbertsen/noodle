@@ -12,7 +12,7 @@ from bot import features, games, sandbox
 from bot import github as github_api
 from bot import links as links_api
 from bot.channels import with_join
-from bot import lastfm
+from bot import dice, lastfm
 from bot.exa import web_answer
 from bot import freedom_tool
 from bot.freedom_tool import error_message as _freedom_error_message
@@ -408,6 +408,24 @@ TOOLS = [
                     "location": {"type": "string", "description": "a place name, e.g. 'utrecht'. empty = matthias's own location"},
                     "days": {"type": "integer", "description": "days to cover incl. today (1-7), default 1"},
                 },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "roll_dice",
+            "description": (
+                "roll dice in standard notation (d20, 2d6+3, 4d8-1; up to 20 dice) with real "
+                "randomness. use only when someone actually asks to roll dice or flip a coin "
+                "(a coin is d2) - never invent a roll yourself."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notation": {"type": "string", "description": "e.g. 'd20' or '2d6+3'"},
+                },
+                "required": ["notation"],
             },
         },
     },
@@ -1464,6 +1482,10 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return _cancel_scheduled(args.get("id"), user_id)
     if name == "get_weather":
         return _get_weather(args.get("location"), args.get("days"), origin)
+    if name == "roll_dice":
+        result = dice.roll(args.get("notation", ""))
+        log_tool("roll_dice", args.get("notation", ""), "success")
+        return result
     if name == "now_playing":
         return _now_playing(user_id)
     if name == "run_code":
