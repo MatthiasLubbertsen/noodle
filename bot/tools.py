@@ -9,6 +9,7 @@ from bot import reminders, state
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
 from bot import features, games, sandbox
+from bot import images as image_tools
 from bot import github as github_api
 from bot import links as links_api
 from bot.channels import with_join
@@ -457,6 +458,37 @@ TOOLS = [
                     "timeout_seconds": {"type": "integer", "description": "1-60, default 20"},
                 },
                 "required": ["language", "code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_image",
+            "description": (
+                "make a new image from a text description, or edit/restyle the image(s) "
+                "matthias attached to THIS message (matthias only, enforced). the image is "
+                "posted into the chat by itself. only call it when he actually asks for a "
+                "picture, drawing, logo, edit etc - never for plots or charts of data "
+                "(that's run_code) and never on your own. write the prompt in english, "
+                "detailed and concrete (subject, style, colors, mood), whatever language "
+                "he used. costs real money, so make one image per request."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "what to draw, or how to change the attached image"},
+                    "aspect_ratio": {
+                        "type": "string",
+                        "enum": list(image_tools.ASPECT_RATIOS),
+                        "description": "default 1:1",
+                    },
+                    "edit_attached": {
+                        "type": "boolean",
+                        "description": "true to edit/restyle the image(s) attached to his current message instead of drawing from scratch",
+                    },
+                },
+                "required": ["prompt"],
             },
         },
     },
@@ -1109,6 +1141,48 @@ def _run_code(args: dict, user_id: str | None, origin: dict | None) -> str:
     return "\n\n".join(parts)[:_CODE_OUTPUT_CAP]
 
 
+def _generate_image(args: dict, user_id: str | None, origin: dict | None) -> str:
+    """make or edit an image with the hack club ai image model and post it where he asked
+    (matthias only). the model only gets a short text result back, never the image."""
+    if not _is_matthias(user_id):
+        log_tool("generate_image", "", "unauthorized")
+        return "only matthias can have images made."
+    if not origin or not origin.get("channel"):
+        return "no place to post the image."
+    prompt = (args.get("prompt") or "").strip()
+    if not prompt:
+        return "no prompt given."
+    references = None
+    if args.get("edit_attached"):
+        references = origin.get("images")
+        if not references:
+            return "there's no image attached to his message to edit."
+    result = image_tools.generate(prompt, args.get("aspect_ratio"), references)
+    if isinstance(result, str):
+        log_tool("generate_image", " ".join(prompt.split()[:4]), "failed")
+        return result
+    made, text = result
+    sent = []
+    for data, name in made:
+        payload = {"channel": origin["channel"], "file": data, "filename": name, "title": name}
+        if origin.get("thread_ts"):
+            payload["thread_ts"] = origin["thread_ts"]
+        try:
+            state.app.client.files_upload_v2(**payload)
+            sent.append(name)
+        except Exception:  # noqa: BLE001
+            logger.exception("uploading generated image %s failed", name)
+    if not sent:
+        log_tool("generate_image", " ".join(prompt.split()[:4]), "upload failed")
+        return "the image was made but uploading it to slack failed (needs the files:write scope)."
+    log_tool("generate_image", " ".join(prompt.split()[:4]), "ok")
+    extra = f" the image model also said: {text[:300]}" if text else ""
+    return (
+        f"image posted to the chat as a file ({', '.join(sent)}). you can't see it, so don't "
+        f"describe details you didn't ask for; just say you made it.{extra}"
+    )
+
+
 def _is_matthias(user_id: str | None) -> bool:
     return user_id == config.USER_ID
 
@@ -1468,6 +1542,8 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return _now_playing(user_id)
     if name == "run_code":
         return _run_code(args, user_id, origin)
+    if name == "generate_image":
+        return _generate_image(args, user_id, origin)
     if name == "play_game":
         log_tool("play_game", args.get("action", ""), "run")
         return games.play(args, user_id, origin)

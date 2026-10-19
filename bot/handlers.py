@@ -7,6 +7,7 @@ from openai import APIConnectionError
 
 from bot import matthias_day, state
 from bot.chunk import chunk_response
+from bot.images import read_slack_images
 from bot.gate import should_reply_unprompted
 from bot.llm import ask_noodle
 from bot.memory import conv_key
@@ -68,7 +69,8 @@ def _get_conv_lock(key: str) -> threading.Lock:
 
 def _is_noise(event: dict) -> bool:
     # our own messages and system/bot noise -> prevents reply loops
-    if event.get("bot_id") or event.get("subtype"):
+    # file_share is a normal message with an attachment (an image), not noise
+    if event.get("bot_id") or event.get("subtype") not in (None, "file_share"):
         return True
     if event.get("user") == state.AUTH_USER_ID:
         return True
@@ -130,7 +132,8 @@ def _should_respond(event: dict):
 
 def _process(channel: str, prompt: str, thread_ts: str | None, key: str,
              location: str | None = None, persist: bool = False,
-             user_id: str | None = None, origin: dict | None = None) -> None:
+             user_id: str | None = None, origin: dict | None = None,
+             files: list | None = None) -> None:
     # serialize everything for this conv_key: without this, several messages
     # arriving close together each run in their own thread and race on the
     # same state.MEMORY[key] list, which both corrupts the conversation
@@ -138,18 +141,23 @@ def _process(channel: str, prompt: str, thread_ts: str | None, key: str,
     # noodle is answering several different messages at once in the wrong
     # order. this just makes them wait their turn, in order, instead.
     with _get_conv_lock(key):
-        _process_locked(channel, prompt, thread_ts, key, location, persist, user_id, origin)
+        _process_locked(channel, prompt, thread_ts, key, location, persist, user_id, origin, files)
 
 
 def _process_locked(channel: str, prompt: str, thread_ts: str | None, key: str,
                      location: str | None, persist: bool, user_id: str | None,
-                     origin: dict | None = None) -> None:
+                     origin: dict | None = None, files: list | None = None) -> None:
     try:
         if thread_ts:
             # remember this thread so we keep answering in it
             state.PARTICIPATING_THREADS.add(thread_ts)
+        images = read_slack_images(files)
+        if images:
+            # also lets generate_image edit what was just sent
+            origin = {**(origin or {}), "images": images}
         reply = ask_noodle(
-            key, prompt, location=location, persist=persist, user_id=user_id, origin=origin
+            key, prompt, location=location, persist=persist, user_id=user_id, origin=origin,
+            images=images,
         )
         # cap fragments so noodle never spams the channel
         fragments = chunk_response(reply)[:8]
@@ -267,6 +275,6 @@ def handle_message(event: dict) -> None:
     # run the (slow) ai call + chunked sending off the socket thread
     threading.Thread(
         target=_process,
-        args=(channel, prompt, thread_ts, key, location, persist, sender_id, origin),
+        args=(channel, prompt, thread_ts, key, location, persist, sender_id, origin, event.get("files")),
         daemon=True,
     ).start()
