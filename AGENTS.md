@@ -67,7 +67,7 @@ noodle/
     oneshot.py            # one-off persona completion for scheduled messages
     wrapup.py             # end-of-day wrap-up dm
     games.py              # dm games (tictactoe, connect4, hangman, wordle, mastermind)
-    sandbox.py            # client for the code sandbox service (run_code tool)
+    sandbox.py            # client for the github actions code sandbox (run_code tool)
     features.py           # which optional features are on: decided only by whether their credentials are set
     prompt.py             # loads the system prompt minus the sections of features that are off
     weekly.py             # weekly journal + music recaps
@@ -75,11 +75,6 @@ noodle/
     netlog.py             # concise "called hcai .../called tool ..." log lines
   scripts/
     backfill_matthias_day.py  # one-time: backfill historical pings into memory
-  sandbox/                # the code sandbox: its OWN container (node + wasm), see 7g
-    server.js             # http runner: pool, timeouts, memory watchdog, auth
-    child.js              # one-shot job executor (pyodide python / quickjs javascript)
-    fetch-packages.js     # build-time download of pyodide's package wheels
-    Dockerfile
   requirements.txt        # python dependencies
   Dockerfile              # non-root `appuser`, see the data/logs volume note below
   docker-compose.yml      # bind-mounts ./data and ./logs - see "running it with docker"
@@ -218,7 +213,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
-| `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
+| `run_code` | run python, javascript or bash on a fresh throwaway github actions vm (full linux, internet, pip/npm installs): calculations, data crunching, plots and files (sent to the dm); ~20-60s per run | matthias only, dms only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
 | `github` | repo, commits, issues, pulls, search, notifications, commits today | matthias only |
 | `links` | create/list/get/update/delete his short links + click stats (link shortener api) | matthias only |
@@ -241,7 +236,7 @@ jobs that need them don't start. so the model never offers or promises something
 - `LASTFM_API_KEY` + `LASTFM_USER` -> `now_playing`, `music_stats`
 - `FREEDOM_API_KEY` -> `freedom`, `start_freedom_session`, `schedule_freedom_session`
 - `LINKS_API_BASE` + `LINKS_API_KEY` (both) -> `links`
-- `SANDBOX_TOKEN` (16+ chars) -> `run_code`
+- `SANDBOX_GITHUB_TOKEN` + `SANDBOX_REPO` (both) -> `run_code`
 everything else (search, flaron, memory, weather, journal, threads, reminders, games, web search)
 needs nothing extra. **adding a tool that needs a credential?** add it to `features.py`
 (`TOOL_FEATURE` + `enabled()`) and wrap its prompt section in an `if:` marker.
@@ -954,67 +949,44 @@ or id (so "block only mopa5m with the social blocklist" works),
   saying nothing actually happened - real incident: "hey noods let's play tick
   tack to" matched nothing and the model invented a game start.
 
-### 7g. the code sandbox (`run_code`)
-python 3.13 (pyodide: numpy, pandas, matplotlib, scipy, sympy) and javascript
-(quickjs, ES2020) run as WebAssembly in a separate container. matthias-only and
-dm-only, enforced in `tools._run_code()`; text output goes back to the model as
-tool context, files (matplotlib figures are collected automatically as png, plus
-anything the code writes to `/out/`, max 5 files) are uploaded straight into the
-dm with `files_upload_v2` (needs the `files:write` scope on noodle's token).
-- **layers, innermost first.** (1) wasm: no syscalls of its own. (2) every job
-  runs in its own node process started with `node --permission`: no file
-  writes, no reads outside `/app`, no child processes, no workers (verified:
-  even with pyodide's `js` bridge to the node host fully open, `execSync`,
-  `writeFileSync`, reading `/etc/passwd` and spawning workers are all denied;
-  the one gap is raw sockets, which node's permission model doesn't cover - the
-  container closes it). the job process gets an empty env, and `child.js` blanks
-  `process.binding` after pyodide's one use of it. (3) one process per job, killed
-  right after it: a fresh pristine interpreter every time, nothing leaks between
-  runs. (4) the container: non-root (uid 1000), read-only root fs, a 64m tmpfs,
-  all capabilities dropped, `no-new-privileges`, pids/memory/cpu limits, NO
-  secrets (its only env var is `SANDBOX_TOKEN`; the rest of `.env` is never
-  passed) and NO internet - its only network is the compose `sandbox` network
-  (`internal: true`) shared with noodle alone, nothing published to the host,
-  no traefik in front. (5) a watchdog in `server.js`: wall-clock kill
-  (default 20s, max 60s), RSS limit (900MB, polled every 200ms), 20k/10k char
-  stdout/stderr caps, 200kb code limit, one python job at a time (2 may wait,
-  more get a 429).
-- **limits worth knowing.** pyodide is not an airtight boundary by itself (its
-  python<->js bridge reaches the node host), which is exactly why layers 2-4
-  exist; `child.js` also blocks `import js` best-effort, but that is a
-  speed bump, not the wall. a python job costs a ~7s (up to ~15s on a slow
-  host) warm-up for the NEXT job because a fresh interpreter loads in the
-  background after every run, so two python runs in a row wait. scipy is
-  loaded on demand when imported (it's on disk, no network); anything not
-  bundled raises a normal `ModuleNotFoundError`. wasm32 caps a python process
-  at ~2GB. javascript has no `require`/`fetch`/timers. installing packages
-  is impossible by design.
-- **turning it on and off: only `SANDBOX_TOKEN`.** set 16+ random characters in `.env`
-  (`openssl rand -hex 24`) and noodle offers `run_code` and the container runs jobs; remove it
-  and `run_code` disappears from what the model sees (see `features.py`) and the container
-  idles: `sandbox/server.js` with no token just answers `/health` (`disabled: true`), refuses
-  `/run` with a 503 and never loads python, so it uses almost no memory and doesn't crash-loop.
-  compose hands the token to both containers and sets `SANDBOX_URL=http://sandbox:8080` for noodle.
-  the first `docker compose up -d --build` downloads pyodide's wheels (~50MB) at build time;
-  the running containers never need the internet. on an unprivileged LXC (nest) check that
-  `docker stats` shows the memory limit is actually enforced - if cgroup limits aren't
-  delegated, the in-process watchdog and node's heap limit are what's left. not yet built or
-  run in a real container: the runner itself is tested locally, the image is not.
+### 7g. the code sandbox (`run_code`): a throwaway github actions vm
+python, javascript and bash run on a fresh github-hosted ubuntu runner, one per call.
+matthias-only and dm-only, enforced in `tools._run_code()`; text output goes back to the model
+as tool context, files (anything the code writes to `/out/`, max 5 of 8MB) are uploaded straight
+into the dm with `files_upload_v2` (needs the `files:write` scope on noodle's token). this
+replaced the old wasm container (node + pyodide/quickjs, no network): a full vm lifts its limits
+(pip/npm installs, internet, any python package, bash, git).
+- **flow** (`bot/sandbox.py`, workflow in `.github/workflows/sandbox.yml`): noodle POSTs a
+  `workflow_dispatch` with `job_id` (random), `language`, `code`, `packages`, `timeout_seconds`;
+  the dispatch returns no run id, so it polls the run list for the run whose `run-name` is
+  `sandbox <job_id>`, polls that run until completed, downloads the `result` artifact (a zip with
+  `result.json` + `files/`; the redirect to the blob host is followed WITHOUT the token), and
+  finally deletes the run so the code doesn't linger in the repo. a run takes ~20-60s (queue +
+  vm boot + installs); noodle waits up to the code's timeout + 240s, then cancels the run.
+- **runner** (inline python in the workflow): writes the code to a file, python gets a venv
+  (stdlib only unless `packages` lists pip packages, so numpy etc. must be requested), javascript
+  runs with `npm install`ed packages, bash runs as is; `timeout_seconds` (1-300) is a hard
+  wall-clock kill on the code only; stdout/stderr capped at 20k/10k chars; `/out` is created
+  with sudo and collected. inputs only ever reach the script through env vars, never
+  interpolated into shell. code is capped at 60k chars (github's dispatch payload limit).
+- **security model.** the vm is destroyed after the run and the workflow has `permissions: {}`
+  and does no checkout, so the code has nothing of the repo. but it has the internet and sudo,
+  and runs next to any secret the repo holds, so **`SANDBOX_REPO` must hold NO secrets** (a
+  dedicated private repo). the token is a fine-grained one with Actions read+write on that repo
+  only (dispatch, read runs/artifacts, cancel, delete); it lives only in noodle's `.env` and is
+  never on the vm. in a public repo the dispatched code and its output are public. private
+  repos spend actions minutes.
+- **turning it on and off: `SANDBOX_REPO` + `SANDBOX_GITHUB_TOKEN`** (`SANDBOX_REF`, default
+  `main`, is the branch the workflow is dispatched on; the file must exist there). remove either
+  and `run_code` disappears from what the model sees (see `features.py`).
 - **what it can and can't do** (kept in sync in three places: the `run_code`
   tool description, the "using tools" section of the system prompt, and the
-  failure hints from `tools._code_hints()` - change all three together). CAN:
-  python + stdlib + numpy/pandas/matplotlib/scipy/sympy (and their deps),
-  javascript ES2020, plots and `/out/` files sent to the dm. CANNOT: any network
-  (requests, downloads, apis, git, pip/npm), other packages (sklearn, torch,
-  requests, opencv...), shell/subprocess/threads, read any file or data of
-  noodle's or slack's (input has to be inside the code - passing files in is a
-  possible later feature), state between runs, stdin, interactive/gui plots,
-  js `require`/`import`/`fetch`/timers/dom, more than 60s, ~900MB memory, 20k
-  chars of output, 5 output files of 8MB each. a failed run adds hints for
-  missing modules, no network, js-only gaps, missing files, timeouts and memory.
-- **later (not built):** a real shell tier (git, tests, conversions) would be a
-  second container behind a forward proxy with a domain allowlist (squid on the
-  internal network); this tier needs no network at all.
+  failure hints from `tools._code_hints()` - change all three together). CAN: python 3 (stdlib
+  by default, anything via `packages`), node, bash, git/curl, the internet, files in `/out/`.
+  CANNOT: see any file/data/secret of noodle's or slack's (input has to be in the code or
+  downloaded by it), keep state between runs, stdin, gui plots, more than 300s, 20k chars of
+  output, more than 5 output files. matplotlib figures are no longer collected automatically:
+  the code must `savefig('/out/...')`.
 
 ### 7h. no invented tool calls on game moves, reminders must be asked for
 - real incident: while matthias only sent tic-tac-toe moves ("5", "8"), the model called
@@ -1102,7 +1074,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `DAILY_WRAPUP_DM` | `HH:MM`, end-of-day wrap-up dm (default `21:30`) |
 | `WEEKLY_JOURNAL` / `WEEKLY_MUSIC` | `<mon..sun> HH:MM`, weekly journal recap (`sun 18:00`) / music recap (`sun 18:30`) |
 | `LINKS_API_BASE` / `LINKS_API_KEY` | link shortener api base url (no default, e.g. `https://go.example.com/api/v1`) + its `lnk_...` key; either unset = `links` tool off |
-| `SANDBOX_TOKEN` | shared secret between noodle and the code sandbox (16+ random chars); compose sets `SANDBOX_URL` itself. **unset = sandbox off**: `run_code` is not offered to the model and the container idles |
+| `SANDBOX_REPO` / `SANDBOX_REF` / `SANDBOX_GITHUB_TOKEN` | repo holding `.github/workflows/sandbox.yml` (no secrets in it!), branch to dispatch on (default `main`), fine-grained token with Actions read+write on it. **either repo or token unset = sandbox off**: `run_code` is not offered to the model |
 | `MATTHIAS_USER_TOKEN` | matthias's OWN xoxp token (`search:read`), used only to count today's messages incl. private channels - nothing else |
 | `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`), max per day (default 10) |
 | `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | PRIVATE, no defaults in code: morning dm places (comma separated) / get_weather default place |

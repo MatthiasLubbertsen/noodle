@@ -1,0 +1,143 @@
+# noodle's code sandbox: every run_code call dispatches this workflow and gets a fresh,
+# throwaway github-hosted vm (ubuntu, full network, sudo, destroyed afterwards).
+# see bot/sandbox.py for the client and AGENTS.md (7g) for the security model.
+#
+# the workflow needs to live in the repo named by SANDBOX_REPO (this one, or a dedicated repo
+# you copy it to). that repo must hold NO secrets: the code runs on the vm next to them.
+name: sandbox
+run-name: sandbox ${{ inputs.job_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: unique id noodle uses to find this run
+        required: true
+      language:
+        description: python, javascript or bash
+        required: true
+      code:
+        description: the program to run
+        required: true
+      packages:
+        description: space separated pip (python) or npm (javascript) packages to install first
+        required: false
+        default: ""
+      timeout_seconds:
+        description: wall-clock limit for the code itself (1-300)
+        required: false
+        default: "30"
+
+# the code can't do anything with the repo or its token
+permissions: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: run
+        env:
+          # inputs go through env, never interpolated into a shell script
+          LANGUAGE: ${{ inputs.language }}
+          CODE: ${{ inputs.code }}
+          PACKAGES: ${{ inputs.packages }}
+          TIMEOUT: ${{ inputs.timeout_seconds }}
+        run: |
+          sudo mkdir -p /out && sudo chmod 777 /out
+          python3 - <<'PY'
+          import json, os, pathlib, shutil, subprocess, time
+
+          lang = os.environ["LANGUAGE"].strip().lower()
+          code = os.environ["CODE"]
+          packages = os.environ.get("PACKAGES", "").split()
+          try:
+              timeout = max(1, min(int(os.environ.get("TIMEOUT") or 30), 300))
+          except ValueError:
+              timeout = 30
+
+          work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "job"
+          work.mkdir(parents=True)
+          result_dir = pathlib.Path(os.environ["RUNNER_TEMP"]) / "result"
+          (result_dir / "files").mkdir(parents=True)
+          STDOUT_CAP, STDERR_CAP = 20000, 10000
+          res = {"ok": False, "stdout": "", "stderr": "", "error": None,
+                 "timed_out": False, "truncated": False, "duration_ms": 0, "files": []}
+
+          def sh(cmd, limit, **kw):
+              return subprocess.run(cmd, cwd=work, capture_output=True, text=True,
+                                    errors="replace", timeout=limit, **kw)
+
+          def finish():
+              out = pathlib.Path("/out")
+              names = sorted(p for p in out.rglob("*") if p.is_file())
+              for p in names[:5]:
+                  if p.stat().st_size <= 8 * 1024 * 1024:
+                      shutil.copy(p, result_dir / "files" / p.name)
+                      res["files"].append(p.name)
+              if len(names) > 5:
+                  res["stderr"] += "\n[only the first 5 files in /out were kept]"
+              (result_dir / "result.json").write_text(json.dumps(res))
+
+          try:
+              env = dict(os.environ, MPLBACKEND="Agg")
+              if lang == "python":
+                  (work / "main.py").write_text(code)
+                  sh(["python3", "-m", "venv", ".venv"], 120)
+                  py = str(work / ".venv" / "bin" / "python")
+                  if packages:
+                      p = sh([py, "-m", "pip", "install", "-q", "--", *packages], 300)
+                      if p.returncode:
+                          res["error"] = "pip install failed:\n" + p.stderr[-3000:]
+                          raise SystemExit
+                  cmd = [py, "main.py"]
+              elif lang == "javascript":
+                  (work / "main.js").write_text(code)
+                  if packages:
+                      p = sh(["npm", "install", "--silent", "--no-audit", "--no-fund", "--", *packages], 300)
+                      if p.returncode:
+                          res["error"] = "npm install failed:\n" + p.stderr[-3000:]
+                          raise SystemExit
+                  cmd = ["node", "main.js"]
+              elif lang == "bash":
+                  (work / "main.sh").write_text(code)
+                  if packages:
+                      res["stderr"] = "[packages are ignored for bash, install things in the script]\n"
+                  cmd = ["bash", "main.sh"]
+              else:
+                  res["error"] = f"unknown language {lang!r}"
+                  raise SystemExit
+
+              start = time.time()
+              try:
+                  p = sh(cmd, timeout, env=env)
+                  res["ok"] = p.returncode == 0
+                  res["stdout"], res["stderr"] = p.stdout, res["stderr"] + p.stderr
+                  if not res["ok"]:
+                      res["error"] = f"exited with code {p.returncode}"
+              except subprocess.TimeoutExpired as exc:
+                  res["timed_out"] = True
+                  res["error"] = f"timed out after {timeout}s"
+                  res["stdout"] = (exc.stdout or b"").decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+                  res["stderr"] += (exc.stderr or b"").decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+              res["duration_ms"] = int((time.time() - start) * 1000)
+          except SystemExit:
+              pass
+          except Exception as exc:  # noqa: BLE001
+              res["error"] = f"runner error: {exc}"
+
+          if len(res["stdout"]) > STDOUT_CAP:
+              res["stdout"], res["truncated"] = res["stdout"][:STDOUT_CAP], True
+          if len(res["stderr"]) > STDERR_CAP:
+              res["stderr"], res["truncated"] = res["stderr"][-STDERR_CAP:], True
+          finish()
+          PY
+
+      - name: collect
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result
+          path: ${{ runner.temp }}/result
+          retention-days: 1
+          if-no-files-found: ignore

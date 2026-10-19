@@ -142,11 +142,14 @@ FREEDOM_DEVICE_NAMES = [
 # for any tool). unset = the count falls back to noodle's own, narrower search.
 MATTHIAS_USER_TOKEN = os.getenv("MATTHIAS_USER_TOKEN", "")
 
-# --- code sandbox (python + javascript in wasm, separate container) ---
-# base url of the sandbox service and its shared secret. NO TOKEN = NO SANDBOX: the run_code
-# tool is not offered to the model at all (see bot/features.py) and the sandbox container idles.
-SANDBOX_URL = os.getenv("SANDBOX_URL", "http://sandbox:8080").rstrip("/")
-SANDBOX_TOKEN = os.getenv("SANDBOX_TOKEN", "")
+# --- code sandbox (run_code: a throwaway github actions vm per run) ---
+# the repo that holds .github/workflows/sandbox.yml (owner/name; it must hold NO secrets), the
+# branch to dispatch on, and a token that may run actions there (fine-grained: Actions read+write
+# on that one repo). NO TOKEN OR NO REPO = NO SANDBOX: the run_code tool is not offered to the model
+# at all (see bot/features.py).
+SANDBOX_REPO = os.getenv("SANDBOX_REPO", "").strip().strip("/")
+SANDBOX_REF = os.getenv("SANDBOX_REF", "main").strip() or "main"
+SANDBOX_GITHUB_TOKEN = os.getenv("SANDBOX_GITHUB_TOKEN", "")
 
 # --- channel join/leave analytics ---
 # the one channel noodle watches for member_joined_channel/member_left_channel.
