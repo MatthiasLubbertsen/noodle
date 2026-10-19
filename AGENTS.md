@@ -1074,7 +1074,7 @@ cookie), both of **noodle's own account**, `start_rtm()` (from `build_app()`) ca
 `reconnect_url`, and reconnects on its own: being connected = online. `rtm.typing(channel,
 thread_ts)` is a context manager sending `{"type":"typing"}` every 2.5s while it runs;
 `handlers._process_locked()` wraps `ask_noodle()` in it, so it shows during slow tool calls.
-without the credentials (`features.enabled("typing")`) everything is a silent no-op. all
+the web session is used ONLY for the websocket (ping + typing): every message noodle sends still goes through the normal bolt token. if `getWebSocketURL` or the handshake fails with an auth error (`invalid_auth`, `token_expired`, 401/403...), `_report_expired()` dms matthias once per outage (persona-written, via `_post_dm`), then retries every 5 minutes; a successful connect resets the flag. without the credentials (`features.enabled("typing")`) everything is a silent no-op. all
 failures are logged and never break replies.
 
 ## running it locally
