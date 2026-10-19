@@ -66,8 +66,6 @@ DAILY_WRAPUP_DM = os.getenv("DAILY_WRAPUP_DM", "21:30")
 # weekly jobs, "<mon|tue|wed|thu|fri|sat|sun> HH:MM" (amsterdam time):
 # a recap of the week's @matthias-day journal entries...
 WEEKLY_JOURNAL = os.getenv("WEEKLY_JOURNAL", "sun 18:00")
-# ...and a digest of the busiest channels noodle is in
-WEEKLY_DIGEST = os.getenv("WEEKLY_DIGEST", "mon 09:00")
 # ...and a music insights recap from last.fm (needs LASTFM_*)
 WEEKLY_MUSIC = os.getenv("WEEKLY_MUSIC", "sun 18:30")
 
