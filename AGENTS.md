@@ -45,6 +45,7 @@ noodle/
     embeddings.py         # calls the ai endpoint's /embeddings route
     exa.py                # calls the ai endpoint's /exa/answer route (web_search)
     chunk.py              # splits replies into small slack messages
+    rtm.py                # presence (green dot) + typing indicator via the web client websocket
     stats.py              # "messages sent today" recap (via slack search)
     almanac.py            # silly/named days today (wikipedia)
     news.py               # hack club news rss + persisted "seen" state
@@ -1065,6 +1066,17 @@ dm with `files_upload_v2` (needs the `files:write` scope on noodle's token).
   `member_left_channel` subscribed as events (workspace/app-level config,
   not something this repo controls).
 
+### 8b. presence + typing indicator (`bot/rtm.py`)
+bolt/socket mode can't show the green dot or "typing...", the real web client does both over
+its own (undocumented) websocket. with `SLACK_WEB_TOKEN` (xoxc) + `SLACK_WEB_COOKIE` (the `d`
+cookie), both of **noodle's own account**, `start_rtm()` (from `build_app()`) calls the web api
+`client.getWebSocketURL`, connects with `?token=` + `cookie: d=`, pings every 40s, follows
+`reconnect_url`, and reconnects on its own: being connected = online. `rtm.typing(channel,
+thread_ts)` is a context manager sending `{"type":"typing"}` every 2.5s while it runs;
+`handlers._process_locked()` wraps `ask_noodle()` in it, so it shows during slow tool calls.
+without the credentials (`features.enabled("typing")`) everything is a silent no-op. all
+failures are logged and never break replies.
+
 ## running it locally
 
 ```bash
@@ -1084,6 +1096,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | --- | --- |
 | `SLACK_USER_TOKEN` | token (xoxp-...) of noodle's own dedicated slack account (not matthias's) |
 | `SLACK_APP_TOKEN` | socket mode app token (xapp-...) |
+| `SLACK_WEB_TOKEN` / `SLACK_WEB_COOKIE` | optional: noodle's web session (`xoxc-` token + `d` cookie) for presence + typing, see 8b. both unset = off |
 | `USER_ID` | only slack user allowed to DM noodle |
 | `OPENAI_API_KEY` | openrouter api key (sk-or-...) |
 | `AI_ENDPOINT` | openai-compatible base; `/v1` is appended automatically |

@@ -24,6 +24,8 @@ def enabled(feature: str) -> bool:
     if feature == "sandbox":
         # 16+ chars: the sandbox service refuses shorter tokens, so don't offer the tool for one
         return len(config.SANDBOX_TOKEN) >= 16 and bool(config.SANDBOX_URL)
+    if feature == "typing":
+        return bool(config.SLACK_WEB_TOKEN and config.SLACK_WEB_COOKIE)
     if feature == "github":
         return bool(config.GITHUB_TOKEN)
     if feature == "lastfm":

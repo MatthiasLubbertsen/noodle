@@ -18,6 +18,11 @@ def _require(name: str) -> str:
 # --- slack ---
 SLACK_USER_TOKEN = _require("SLACK_USER_TOKEN")
 SLACK_APP_TOKEN = _require("SLACK_APP_TOKEN")
+# optional: noodle's web-client session (xoxc token + `d` cookie of ITS account). with both
+# set, noodle connects like a real slack client: always online (green dot) and shows
+# "typing..." while it works on a reply. see bot/rtm.py.
+SLACK_WEB_TOKEN = os.getenv("SLACK_WEB_TOKEN", "")
+SLACK_WEB_COOKIE = os.getenv("SLACK_WEB_COOKIE", "")
 
 # --- security ---
 # only this slack user id is allowed to talk to noodle via direct message

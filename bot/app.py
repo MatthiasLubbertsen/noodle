@@ -15,6 +15,7 @@ from bot.prompt import load_prompt
 from bot.memory import dm_conv_key, trim_memory
 from bot.scheduler import start_daily_scheduler
 from bot.reminders import init_table as init_reminders_table
+from bot.rtm import start as start_rtm
 from bot.watch import handle_member_joined_channel, handle_member_left_channel
 
 logger = logging.getLogger("noodle")
@@ -54,6 +55,9 @@ def build_app() -> App:
 
     # join the channels noodle is configured to work in (silently - sends nothing)
     threading.Thread(target=ensure_joined, daemon=True).start()
+
+    # presence (green dot) + typing indicator, only when the web session is configured
+    start_rtm()
 
     # daily @matthias-day ping reminder + morning wakeup dm
     start_daily_scheduler()

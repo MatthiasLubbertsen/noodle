@@ -215,6 +215,7 @@ logs go to the console either way; the code also tries to write
 | --- | --- |
 | `SLACK_USER_TOKEN` | token (xoxp-...) of noodle's own dedicated slack account |
 | `SLACK_APP_TOKEN` | socket mode app token (xapp-...) |
+| `SLACK_WEB_TOKEN` / `SLACK_WEB_COOKIE` | optional: noodle's web-client session (`xoxc-` token + `d` cookie). both set = always online + typing indicator |
 | `USER_ID` | only slack user allowed to DM noodle |
 | `OPENAI_API_KEY` | openai compatible api key (sk-or-...) |
 | `AI_ENDPOINT` | openai compatible base; `/v1` is appended automatically |
