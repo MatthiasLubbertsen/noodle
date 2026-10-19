@@ -45,6 +45,7 @@ noodle/
     embeddings.py         # calls the ai endpoint's /embeddings route
     exa.py                # calls the ai endpoint's /exa/answer route (web_search)
     chunk.py              # splits replies into small slack messages
+    images.py             # read slack image attachments, generate images (hcai image model)
     stats.py              # "messages sent today" recap (via slack search)
     almanac.py            # silly/named days today (wikipedia)
     news.py               # hack club news rss + persisted "seen" state
@@ -219,6 +220,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
 | `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
+| `generate_image` | make an image from a text prompt, or edit the image(s) attached to his message, with an image model on hack club ai (`IMAGE_MODEL`); posted into the chat as a file | matthias only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
 | `github` | repo, commits, issues, pulls, search, notifications, commits today | matthias only |
 | `links` | create/list/get/update/delete his short links + click stats (link shortener api) | matthias only |
@@ -1040,6 +1042,23 @@ dm with `files_upload_v2` (needs the `files:write` scope on noodle's token).
 - an embeddings 502 in the logs is the ai endpoint failing upstream; `embeddings.py` retries once
   and a row that still fails is stored without an embedding (chat is unaffected).
 
+### 7j. images: reading and making them
+- **reading.** a message with an image attachment arrives as `subtype: "file_share"`, which
+  `handlers._is_noise()` explicitly lets through (every other subtype is still noise).
+  `handlers._process_locked()` downloads the image files (`bot/images.read_slack_images()`:
+  png/jpeg/gif/webp, max 4, 8MB each, fetched with noodle's own token, needs `files:read`) and
+  `llm.ask_noodle(..., images=...)` sends them to `VISION_MODEL` (blank = `MODEL`, which must
+  accept image input) as openai-style `image_url` base64 parts for that whole turn. afterwards the
+  bytes are dropped from live memory and only a `[attached image: name]` note stays (live and
+  persisted), so later turns don't resend megabytes. unreadable/oversized files are skipped quietly.
+- **writing.** `generate_image` (matthias only, enforced in code) calls hack club ai's image
+  generation (`bot/images.generate()`: chat completions with `modalities: ["image","text"]` on
+  `IMAGE_MODEL`, images come back as base64 data urls) and uploads the result with
+  `files_upload_v2` where he asked (same channel/thread; needs `files:write`). with
+  `edit_attached` the images of his current message go to the image model as references
+  (`origin["images"]`). the model never sees the result, only a short "posted" line. plots/charts
+  still go through `run_code`.
+
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
   (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore
@@ -1103,6 +1122,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `WEEKLY_JOURNAL` / `WEEKLY_MUSIC` | `<mon..sun> HH:MM`, weekly journal recap (`sun 18:00`) / music recap (`sun 18:30`) |
 | `LINKS_API_BASE` / `LINKS_API_KEY` | link shortener api base url (no default, e.g. `https://go.example.com/api/v1`) + its `lnk_...` key; either unset = `links` tool off |
 | `SANDBOX_TOKEN` | shared secret between noodle and the code sandbox (16+ random chars); compose sets `SANDBOX_URL` itself. **unset = sandbox off**: `run_code` is not offered to the model and the container idles |
+| `VISION_MODEL` / `IMAGE_MODEL` | model that reads images people send (must accept image input; blank = `MODEL`) / model that makes images (default `google/gemini-2.5-flash-image`; others: `google/gemini-3.1-flash-image`, `google/gemini-3-pro-image`) |
 | `MATTHIAS_USER_TOKEN` | matthias's OWN xoxp token (`search:read`), used only to count today's messages incl. private channels - nothing else |
 | `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`), max per day (default 10) |
 | `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | PRIVATE, no defaults in code: morning dm places (comma separated) / get_weather default place |

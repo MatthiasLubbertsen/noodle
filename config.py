@@ -39,6 +39,11 @@ MODEL = os.getenv("MODEL", "gpt-4o-mini")
 # model (those come with retention/quality tradeoffs not worth it here).
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "qwen/qwen3-embedding-8b")
 
+# image support. VISION_MODEL reads images people send (must accept image input; blank = MODEL),
+# IMAGE_MODEL makes new ones (hack club ai image generation, see bot/images.py).
+VISION_MODEL = os.getenv("VISION_MODEL", "") or MODEL
+IMAGE_MODEL = os.getenv("IMAGE_MODEL", "google/gemini-2.5-flash-image")
+
 # --- channels ---
 # comma separated channel ids where noodle replies to mentions.
 # leave empty to disable channel replies, or set to "*" to allow any channel.

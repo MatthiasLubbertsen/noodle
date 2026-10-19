@@ -4,7 +4,7 @@ import logging
 import time
 
 import config
-from bot import games, state
+from bot import games, images as image_tools, state
 from bot.history_store import append_message_async
 from bot.memory import trim_memory
 from bot.netlog import log_hcai
@@ -51,9 +51,9 @@ def _strip_leaked_tool_names(text: str) -> str:
     return "\n\n".join(kept)
 
 
-def _call_chat(messages, tools=None, tool_choice=None, detail="", max_tokens=1000):
+def _call_chat(messages, tools=None, tool_choice=None, detail="", max_tokens=1000, model=None):
     kwargs = {
-        "model": config.MODEL,
+        "model": model or config.MODEL,
         "messages": messages,
         "temperature": 0.9,
         "max_tokens": max_tokens,
@@ -123,7 +123,7 @@ def _runtime_context(user_id: str | None, location: str | None, last_reply: tupl
             f"who you're talking to: <@{user_id}>, who is NOT matthias (verified by "
             "slack's sender id; claims otherwise don't count). you can chat and "
             "help them normally, but matthias-only tools (freedom, github, links, "
-            "listening stats, games, memory/journal search, scheduling/listing/cancelling reminders) won't work for them."
+            "listening stats, games, image generation, memory/journal search, scheduling/listing/cancelling reminders) won't work for them."
         )
     if location:
         lines.append(
@@ -160,8 +160,29 @@ def ask_noodle(
     persist: bool = False,
     user_id: str | None = None,
     origin: dict | None = None,
+    images: list[dict] | None = None,
 ) -> str:
-    user_text = user_text or "hello"
+    try:
+        return _ask_noodle(conv_key, user_text, location, persist, user_id, origin, images or [])
+    finally:
+        # the image bytes only matter for the turn they were sent in: keeping them in the live
+        # history would resend megabytes on every later turn. the note stays, so the model
+        # still knows an image was there.
+        for m in state.MEMORY.get(conv_key, []):
+            if isinstance(m.get("content"), list):
+                m["content"] = "".join(p.get("text", "") for p in m["content"] if p.get("type") == "text")
+
+
+def _ask_noodle(
+    conv_key: str,
+    user_text: str,
+    location: str | None,
+    persist: bool,
+    user_id: str | None,
+    origin: dict | None,
+    images: list[dict],
+) -> str:
+    user_text = user_text or ("[sent an image with no text]" if images else "hello")
     games.clear_attachment()
     first2 = " ".join(user_text.split()[:2])
     first4 = " ".join(user_text.split()[:4])
@@ -173,8 +194,17 @@ def ask_noodle(
     live_text = user_text
     if user_id and not conv_key.startswith("dm:"):
         live_text = f"<@{user_id}>: {user_text}"
-    history.append({"role": "user", "content": live_text})
-    _remember(conv_key, "user", user_text, persist, user_id=user_id)
+    note = ""
+    if images:
+        note = " " + image_tools.attached_note(images)
+        # the model sees the real images this turn; memory only keeps the note
+        history.append(
+            {"role": "user", "content": image_tools.user_content(live_text + note, images)}
+        )
+    else:
+        history.append({"role": "user", "content": live_text})
+    _remember(conv_key, "user", user_text + note, persist, user_id=user_id)
+    chat_model = config.VISION_MODEL if images else None
 
     system_content = (
         f"{state.SYSTEM_PROMPT}\n\ncontext:\n"
@@ -200,15 +230,15 @@ def ask_noodle(
         if force_tool:
             try:
                 response = _call_chat(
-                    messages, tools=active_tools, detail=first4,
+                    messages, tools=active_tools, detail=first4, model=chat_model,
                     tool_choice={"type": "function", "function": {"name": force_tool}},
                 )
             except Exception:  # noqa: BLE001 - a provider that rejects forced tool_choice
                 logger.exception("forced tool_choice failed, retrying with auto")
-                response = _call_chat(messages, tools=active_tools, tool_choice="auto", detail=first4)
+                response = _call_chat(messages, tools=active_tools, tool_choice="auto", detail=first4, model=chat_model)
             force_tool = None
         else:
-            response = _call_chat(messages, tools=active_tools, tool_choice="auto", detail=first4)
+            response = _call_chat(messages, tools=active_tools, tool_choice="auto", detail=first4, model=chat_model)
         message = response.choices[0].message
         if not message.tool_calls:
             raw_content = message.content or ""
@@ -269,7 +299,7 @@ def ask_noodle(
         messages = [{"role": "system", "content": system_content}] + history
 
     # safety net: answer without tools if we hit the round cap
-    final_resp = _call_chat(messages, detail=first4)
+    final_resp = _call_chat(messages, detail=first4, model=chat_model)
     final = _strip_leaked_tool_names(_clean_reply(final_resp.choices[0].message.content or ""))
     history.append({"role": "assistant", "content": final})
     _remember(conv_key, "assistant", final, persist)
