@@ -10,6 +10,7 @@ from bot.chunk import chunk_response
 from bot.gate import should_reply_unprompted
 from bot.llm import ask_noodle
 from bot.memory import conv_key
+from bot.rtm import typing
 from bot.slack_text import (
     _channel_link,
     _clean_text,
@@ -148,9 +149,10 @@ def _process_locked(channel: str, prompt: str, thread_ts: str | None, key: str,
         if thread_ts:
             # remember this thread so we keep answering in it
             state.PARTICIPATING_THREADS.add(thread_ts)
-        reply = ask_noodle(
-            key, prompt, location=location, persist=persist, user_id=user_id, origin=origin
-        )
+        with typing(channel, thread_ts):
+            reply = ask_noodle(
+                key, prompt, location=location, persist=persist, user_id=user_id, origin=origin
+            )
         # cap fragments so noodle never spams the channel
         fragments = chunk_response(reply)[:8]
         for fragment in fragments:
