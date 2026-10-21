@@ -158,11 +158,10 @@ no nested `noodle/noodle` folder.
 - style rules: lowercase ONLY (no capitals); warm, casual, friendly, like a
   real friend texting, with a light dry/sarcastic streak (never mean, never
   every sentence, dropped entirely when someone is upset or needs real help);
-  the prompt is kept deliberately short; no baby-talk speech quirks (no `uwu`/`owo`/`:3`, no
+  replies are kept SHORT (one or two sentences by default, longer only when asked); no baby-talk speech quirks (no `uwu`/`owo`/`:3`, no
   turning `r`/`l` into `w`, no `_giggles_`-style cute actions); they/them.
-- the prompt tells the model to write its reply as one bigger, normal chat
-  message (a paragraph, or a couple if there's a lot to say) instead of
-  splitting every thought onto its own line. a hard cap (`[:8]` fragments)
+- the prompt tells the model to write its reply as one short chat message
+  instead of splitting every thought onto its own line. a hard cap (`[:8]` fragments)
   still prevents the bot from spamming a channel if it ever writes an
   unusually long, multi-paragraph reply.
 - the "using tools" section opens with a blanket rule: only call a tool when
