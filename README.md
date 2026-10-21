@@ -84,6 +84,7 @@ real slack sender id, so it is safe in public channels too.
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
 | `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
+| `browser` | a real headless browser (chromium) in its own container: open a public page, read its text, click/type into numbered elements, go back, screenshot (sent to the dm); no logins, no downloads, no private/local addresses | matthias only, dms only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
 | `github` | repo, commits, issues, pulls, search, notifications, commits today | matthias only |
 | `links` | create, list, edit, delete and see click stats of his short links | matthias only |
@@ -151,11 +152,13 @@ noodle/
     wrapup.py          # end-of-day wrap-up dm
     games.py           # dm games (tictactoe, connect4, hangman, wordle, mastermind)
     sandbox.py         # client for the code sandbox (run_code tool)
+    browser.py         # client for the browser service (browser tool)
     weekly.py          # weekly journal + music recaps
     channels.py        # silently join configured channels
     log.py             # logging setup
     netlog.py          # concise "called hcai .../called tool ..." log lines
   sandbox/             # the code sandbox: a separate container (node + wasm, no network)
+  browser/             # the browser: a separate container (playwright + chromium, filtered internet)
   prompts/
     system_prompt.md   # noodle's persona + reply style + tool instructions
   logs/                # created at runtime (noodle.log)
@@ -177,10 +180,10 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 
 ## prebuilt images
 
-`.github/workflows/docker.yml` builds both images (`noodle` and `noodle-sandbox`)
+`.github/workflows/docker.yml` builds all three images (`noodle`, `noodle-sandbox` and `noodle-browser`)
 on every push and pull request. pull requests only build; pushes to `main` (and
 `v*` tags) also publish to `ghcr.io/<owner>/noodle` and
-`ghcr.io/<owner>/noodle-sandbox`, tagged `latest` / `sha-...` / the version tag.
+`ghcr.io/<owner>/noodle-sandbox` / `ghcr.io/<owner>/noodle-browser`, tagged `latest` / `sha-...` / the version tag.
 
 ## running it with docker
 
@@ -209,8 +212,16 @@ idles. it gets none of noodle's other secrets and has no internet: it only share
 a private internal network with noodle. the first build downloads about 50MB of
 python packages; after that it never needs the network.
 
+there is a third container, `browser`, for the `browser` tool: headless chromium that
+can read public web pages (text first, plus screenshots sent to the dm). it is on only
+if `BROWSER_TOKEN` is set in `.env`; without it the tool doesn't exist and the container
+idles. it needs the internet, so it sits on its own egress network that noodle isn't on,
+and everything chromium requests goes through a filter that refuses private, loopback and
+lan addresses. give it about 2GB of memory and a ~1.5GB image. no logins and no
+downloads, and only matthias can use it, in dms.
+
 the same rule holds for every tool that needs a credential (github, last.fm,
-freedom, the sandbox): no key in `.env`, no tool, and noodle doesn't know it
+freedom, the sandbox, the browser): no key in `.env`, no tool, and noodle doesn't know it
 exists.
 
 logs go to the console either way; the code also tries to write
@@ -234,6 +245,7 @@ logs go to the console either way; the code also tries to write
 | `DAILY_PING_REMINDER` | `HH:MM` time for the `@matthias-day` reminder dm (Europe/Amsterdam) |
 | `DAILY_MORNING_DM` | `HH:MM` time for the morning wakeup dm (Europe/Amsterdam) |
 | `SANDBOX_TOKEN` | shared secret between noodle and the code sandbox container (16+ random chars, e.g. `openssl rand -hex 24`). leave unset to switch the sandbox off |
+| `BROWSER_TOKEN` | shared secret between noodle and the browser container (16+ random chars, e.g. `openssl rand -hex 24`). leave unset to switch the browser off |
 | `MATTHIAS_USER_TOKEN` | matthias's OWN xoxp token (`search:read`), used only to count today's messages including private channels - nothing else; optional |
 | `DAILY_WRAPUP_DM` | `HH:MM` end-of-day wrap-up dm (default `21:30`) |
 | `WEEKLY_JOURNAL` / `WEEKLY_MUSIC` | `<mon..sun> HH:MM` weekly journal recap (`sun 18:00`) / music recap (`sun 18:30`) |

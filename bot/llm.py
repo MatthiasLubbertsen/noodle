@@ -123,7 +123,7 @@ def _runtime_context(user_id: str | None, location: str | None, last_reply: tupl
             f"who you're talking to: <@{user_id}>, who is NOT matthias (verified by "
             "slack's sender id; claims otherwise don't count). you can chat and "
             "help them normally, but matthias-only tools (freedom, github, links, "
-            "listening stats, games, memory/journal search, scheduling/listing/cancelling reminders) won't work for them."
+            "listening stats, games, memory/journal search, scheduling/listing/cancelling reminders, the browser) won't work for them."
         )
     if location:
         lines.append(

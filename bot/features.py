@@ -10,6 +10,7 @@ import config
 # tool name -> the feature (credential) it needs. tools not listed here need nothing.
 TOOL_FEATURE = {
     "run_code": "sandbox",
+    "browser": "browser",
     "github": "github",
     "links": "links",
     "now_playing": "lastfm",
@@ -24,6 +25,8 @@ def enabled(feature: str) -> bool:
     if feature == "sandbox":
         # 16+ chars: the sandbox service refuses shorter tokens, so don't offer the tool for one
         return len(config.SANDBOX_TOKEN) >= 16 and bool(config.SANDBOX_URL)
+    if feature == "browser":
+        return len(config.BROWSER_TOKEN) >= 16 and bool(config.BROWSER_URL)
     if feature == "typing":
         return bool(config.SLACK_WEB_TOKEN and config.SLACK_WEB_COOKIE)
     if feature == "github":

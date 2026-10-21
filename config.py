@@ -153,6 +153,12 @@ MATTHIAS_USER_TOKEN = os.getenv("MATTHIAS_USER_TOKEN", "")
 SANDBOX_URL = os.getenv("SANDBOX_URL", "http://sandbox:8080").rstrip("/")
 SANDBOX_TOKEN = os.getenv("SANDBOX_TOKEN", "")
 
+# --- browser (headless chromium, separate container with filtered internet) ---
+# base url of the browser service and its shared secret. NO TOKEN = NO BROWSER: the browser tool
+# is not offered to the model at all (see bot/features.py) and the browser container idles.
+BROWSER_URL = os.getenv("BROWSER_URL", "http://browser:8080").rstrip("/")
+BROWSER_TOKEN = os.getenv("BROWSER_TOKEN", "")
+
 # --- channel join/leave analytics ---
 # the one channel noodle watches for member_joined_channel/member_left_channel.
 # leave empty to disable this feature entirely.

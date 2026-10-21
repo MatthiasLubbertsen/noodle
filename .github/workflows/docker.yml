@@ -21,6 +21,8 @@ jobs:
             context: .
           - name: noodle-sandbox
             context: ./sandbox
+          - name: noodle-browser
+            context: ./browser
     steps:
       - uses: actions/checkout@v4
 
