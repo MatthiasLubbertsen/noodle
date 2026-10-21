@@ -156,7 +156,9 @@ no nested `noodle/noodle` folder.
 ### 4. persona & system prompt
 - the persona lives in `prompts/system_prompt.md` and is loaded at startup.
 - style rules: lowercase ONLY (no capitals); warm, casual, friendly, like a
-  real friend texting; no baby-talk speech quirks (no `uwu`/`owo`/`:3`, no
+  real friend texting, with a light dry/sarcastic streak (never mean, never
+  every sentence, dropped entirely when someone is upset or needs real help);
+  the prompt is kept deliberately short; no baby-talk speech quirks (no `uwu`/`owo`/`:3`, no
   turning `r`/`l` into `w`, no `_giggles_`-style cute actions); they/them.
 - the prompt tells the model to write its reply as one bigger, normal chat
   message (a paragraph, or a couple if there's a lot to say) instead of
