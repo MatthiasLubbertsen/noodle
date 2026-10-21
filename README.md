@@ -33,8 +33,7 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
   articles (news.hackclub.com) since the last check, that's sent as a
   second, separate message right after.
 - add the weather (open-meteo) for your places to the morning dm, DM an
-  end-of-day wrap-up, a weekly recap of your `@matthias-day` journal and a
-  weekly digest of the busiest channels, and DM you new github notifications
+  end-of-day wrap-up, a weekly recap of your `@matthias-day` journal, and DM you new github notifications
   (quiet hours + a daily cap keep it polite).
 - answer weather, last.fm now-playing, github and "what did i do in march"
   (journal) questions with tools, and tl;dr a slack thread from a link.
@@ -152,7 +151,7 @@ noodle/
     wrapup.py          # end-of-day wrap-up dm
     games.py           # dm games (tictactoe, connect4, hangman, wordle, mastermind)
     sandbox.py         # client for the code sandbox (run_code tool)
-    weekly.py          # weekly journal recap + busiest-channel digest
+    weekly.py          # weekly journal + music recaps
     channels.py        # silently join configured channels
     log.py             # logging setup
     netlog.py          # concise "called hcai .../called tool ..." log lines
@@ -223,6 +222,7 @@ logs go to the console either way; the code also tries to write
 | --- | --- |
 | `SLACK_USER_TOKEN` | token (xoxp-...) of noodle's own dedicated slack account |
 | `SLACK_APP_TOKEN` | socket mode app token (xapp-...) |
+| `SLACK_WEB_TOKEN` / `SLACK_WEB_COOKIE` | optional: noodle's web-client session (`xoxc-` token + `d` cookie). both set = always online + typing indicator |
 | `USER_ID` | only slack user allowed to DM noodle |
 | `OPENAI_API_KEY` | openai compatible api key (sk-or-...) |
 | `AI_ENDPOINT` | openai compatible base; `/v1` is appended automatically |
@@ -236,7 +236,7 @@ logs go to the console either way; the code also tries to write
 | `SANDBOX_TOKEN` | shared secret between noodle and the code sandbox container (16+ random chars, e.g. `openssl rand -hex 24`). leave unset to switch the sandbox off |
 | `MATTHIAS_USER_TOKEN` | matthias's OWN xoxp token (`search:read`), used only to count today's messages including private channels - nothing else; optional |
 | `DAILY_WRAPUP_DM` | `HH:MM` end-of-day wrap-up dm (default `21:30`) |
-| `WEEKLY_JOURNAL` / `WEEKLY_DIGEST` / `WEEKLY_MUSIC` | `<mon..sun> HH:MM` weekly journal recap (`sun 18:00`) / busiest-channels digest (`mon 09:00`) / music recap (`sun 18:30`) |
+| `WEEKLY_JOURNAL` / `WEEKLY_MUSIC` | `<mon..sun> HH:MM` weekly journal recap (`sun 18:00`) / music recap (`sun 18:30`) |
 | `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`) / max per day (default 10) |
 | `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | private, set in `.env` only: morning dm places (comma separated) / default place for `get_weather` |
 | `LASTFM_API_KEY` / `LASTFM_USER` | optional, enables `now_playing` |

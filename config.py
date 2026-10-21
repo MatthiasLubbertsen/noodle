@@ -18,6 +18,11 @@ def _require(name: str) -> str:
 # --- slack ---
 SLACK_USER_TOKEN = _require("SLACK_USER_TOKEN")
 SLACK_APP_TOKEN = _require("SLACK_APP_TOKEN")
+# optional: noodle's web-client session (xoxc token + `d` cookie of ITS account). with both
+# set, noodle connects like a real slack client: always online (green dot) and shows
+# "typing..." while it works on a reply. see bot/rtm.py.
+SLACK_WEB_TOKEN = os.getenv("SLACK_WEB_TOKEN", "")
+SLACK_WEB_COOKIE = os.getenv("SLACK_WEB_COOKIE", "")
 
 # --- security ---
 # only this slack user id is allowed to talk to noodle via direct message
@@ -66,8 +71,6 @@ DAILY_WRAPUP_DM = os.getenv("DAILY_WRAPUP_DM", "21:30")
 # weekly jobs, "<mon|tue|wed|thu|fri|sat|sun> HH:MM" (amsterdam time):
 # a recap of the week's @matthias-day journal entries...
 WEEKLY_JOURNAL = os.getenv("WEEKLY_JOURNAL", "sun 18:00")
-# ...and a digest of the busiest channels noodle is in
-WEEKLY_DIGEST = os.getenv("WEEKLY_DIGEST", "mon 09:00")
 # ...and a music insights recap from last.fm (needs LASTFM_*)
 WEEKLY_MUSIC = os.getenv("WEEKLY_MUSIC", "sun 18:30")
 

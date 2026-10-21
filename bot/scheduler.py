@@ -12,7 +12,7 @@ from bot.memory import dm_conv_key, trim_memory
 from bot.morning import build_greeting_message, build_news_message, build_weather_message
 from bot.tz import AMSTERDAM_TZ
 from bot.oneshot import complete
-from bot.weekly import build_channel_digest, build_journal_recap, build_music_recap
+from bot.weekly import build_journal_recap, build_music_recap
 from bot.wrapup import build_wrapup_message
 
 logger = logging.getLogger("noodle")
@@ -144,16 +144,6 @@ def _send_weekly_music_dm() -> None:
         logger.exception("failed to send weekly music recap dm")
 
 
-def _send_weekly_digest_dm() -> None:
-    try:
-        text = build_channel_digest()
-        if text:
-            _post_dm(text)
-            logger.info("sent weekly channel digest dm to %s", config.USER_ID)
-    except Exception:  # noqa: BLE001
-        logger.exception("failed to send weekly channel digest dm")
-
-
 def _check_github() -> None:
     """dm about new github notifications - one dm per poll, held back during
     quiet hours and once the daily cap is hit (they stay unreported, so they
@@ -261,7 +251,6 @@ def start_daily_scheduler() -> None:
     ).start()
     for raw, default, job in (
         (config.WEEKLY_JOURNAL, (6, 18, 0), _send_weekly_journal_dm),
-        (config.WEEKLY_DIGEST, (0, 9, 0), _send_weekly_digest_dm),
         (config.WEEKLY_MUSIC, (6, 18, 30), _send_weekly_music_dm),
     ):
         weekday, hour, minute = _parse_weekly(raw, default)
