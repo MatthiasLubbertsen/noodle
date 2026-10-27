@@ -1148,11 +1148,13 @@ thread_ts)` is a context manager sending `{"type":"typing"}` every 2.5s while it
 the web session is used ONLY for the websocket (ping + typing): every message noodle sends still goes through the normal bolt token. if `getWebSocketURL` or the handshake fails with an auth error (`invalid_auth`, `token_expired`, 401/403...), `_report_expired()` dms matthias once per outage (persona-written, via `_post_dm`), then retries every 5 minutes; a successful connect resets the flag. without the credentials (`features.enabled("typing")`) everything is a silent no-op.
 **presence-triggered morning dm:** the same socket subscribes to matthias's presence (`presence_sub` with
 `ids=[USER_ID]`; `presence_change` events, single `user` or batched `users`, see vs.izie.top/redocumented). the first
-`active` of each amsterdam day outside `QUIET_HOURS` calls `wakeup.on_online()`, which sends the morning dm and
-persists the day in `data/morning_sent.json` (marked before sending, so a restart or crash can't repeat it). on every
+`active` of each amsterdam day calls `wakeup.on_online()` (quiet hours are deliberately NOT used), which sends the
+morning dm and persists the day in `data/morning_sent.json` (marked before sending, so a restart or crash can't repeat it). on every
 (re)connect noodle also asks `users.getPresence` once, since no event fires for being online before connecting.
 `features.enabled("presence")` is the same credential check as typing; without it the scheduler keeps the fixed
-`DAILY_MORNING_DM` time. caveat: if the socket is down all day, no morning dm is sent that day. all
+`DAILY_MORNING_DM` time. if he hasn't been seen by `MORNING_FALLBACK_DM` (default 12:00) the scheduler calls `wakeup.send_fallback()` and
+it goes out anyway (first of the two wins, same persisted day). since it can go out at any hour, `morning.build_greeting_message()`
+tells the model the actual time and day part (`_day_part()`), so it never says "morning" at noon; the runtime context says the same. all
 failures are logged and never break replies.
 
 ## running it locally
@@ -1184,6 +1186,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `CHUNK_DELAY_SECONDS` | pause between fragment messages |
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in one channel |
 | `DAILY_PING_REMINDER` | `HH:MM`, when the `@matthias-day` reminder dm goes out |
+| `MORNING_FALLBACK_DM` | `HH:MM` (default `12:00`): with the web session, send the morning dm at this time if matthias never came online |
 | `DAILY_MORNING_DM` | `HH:MM`, when the morning wakeup dm goes out; only used without `SLACK_WEB_TOKEN`/`SLACK_WEB_COOKIE` (with them it goes out when matthias first comes online) |
 | `MATTHIAS_DAY_GROUP_ID` | usergroup id for `@matthias-day` (defaults to the real id, `S0AK8LYJ8FR`) |
 | `MATTHIAS_DAY_CHANNEL_ID` | channel the daily recap pings are posted in (defaults to `#matthias`, `C0A9NJT2BCJ`) |

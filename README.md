@@ -246,6 +246,7 @@ logs go to the console either way; the code also tries to write
 | `CHUNK_DELAY_SECONDS` | pause between fragment messages |
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in a channel |
 | `DAILY_PING_REMINDER` | `HH:MM` time for the `@matthias-day` reminder dm (Europe/Amsterdam) |
+| `MORNING_FALLBACK_DM` | `HH:MM` (default `12:00`): with the web session, the morning dm goes out at this time if you haven't come online yet |
 | `DAILY_MORNING_DM` | `HH:MM` time for the morning wakeup dm (Europe/Amsterdam); only used when the web session above is not set |
 | `SANDBOX_TOKEN` | shared secret between noodle and the code sandbox container (16+ random chars, e.g. `openssl rand -hex 24`). leave unset to switch the sandbox off |
 | `MATTHIAS_USER_TOKEN` | matthias's OWN xoxp token (`search:read`), used only to count today's messages including private channels - nothing else; optional |

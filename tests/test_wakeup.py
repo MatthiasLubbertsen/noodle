@@ -28,33 +28,54 @@ class OnlineEventTests(unittest.TestCase):
 
 
 class OnceADayTests(unittest.TestCase):
-    def run_online(self, quiet: bool, state_path: Path) -> mock.Mock:
+    def run_it(self, fn_name: str, state_path: Path) -> mock.Mock:
         send = mock.Mock()
         with mock.patch.object(config, "MORNING_STATE_PATH", state_path), \
                 mock.patch.object(config, "DATA_DIR", state_path.parent), \
-                mock.patch("bot.proactive.in_quiet_hours", return_value=quiet), \
                 mock.patch("bot.scheduler._send_morning_dm", send):
-            wakeup.on_online()
+            getattr(wakeup, fn_name)()
         return send
 
     def test_first_online_sends_once(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "sent.json"
-            self.assertEqual(self.run_online(False, path).call_count, 1)
-            self.assertEqual(self.run_online(False, path).call_count, 0)
+            self.assertEqual(self.run_it("on_online", path).call_count, 1)
+            self.assertEqual(self.run_it("on_online", path).call_count, 0)
 
-    def test_quiet_hours_do_not_count(self):
+    def test_quiet_hours_are_not_used(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "sent.json"
-            self.assertEqual(self.run_online(True, path).call_count, 0)
-            self.assertFalse(path.exists())
-            self.assertEqual(self.run_online(False, path).call_count, 1)
+            with mock.patch("bot.proactive.in_quiet_hours", return_value=True):
+                self.assertEqual(self.run_it("on_online", path).call_count, 1)
+
+    def test_fallback_sends_only_if_not_sent(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "sent.json"
+            self.assertEqual(self.run_it("send_fallback", path).call_count, 1)
+            self.assertEqual(self.run_it("on_online", path).call_count, 0)
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "sent.json"
+            self.assertEqual(self.run_it("on_online", path).call_count, 1)
+            self.assertEqual(self.run_it("send_fallback", path).call_count, 0)
 
     def test_yesterday_does_not_block(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "sent.json"
             path.write_text(json.dumps({"day": "2000-01-01"}))
-            self.assertEqual(self.run_online(False, path).call_count, 1)
+            self.assertEqual(self.run_it("on_online", path).call_count, 1)
+
+
+class DayPartTests(unittest.TestCase):
+    def test_greeting_fits_the_hour(self):
+        from bot import morning
+
+        def at(h):
+            return datetime.datetime(2026, 10, 27, h, 0)
+
+        self.assertEqual(morning._greeting_word(at(8)), "good morning")
+        self.assertEqual(morning._greeting_word(at(12)), "good afternoon")
+        self.assertEqual(morning._greeting_word(at(19)), "good evening")
+        self.assertEqual(morning._greeting_word(at(3)), "hey")
 
 
 if __name__ == "__main__":

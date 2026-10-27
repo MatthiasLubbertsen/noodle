@@ -327,7 +327,15 @@ def start_daily_scheduler() -> None:
         target=_run_daily, args=(ping_hour, ping_minute, _send_ping_reminder), daemon=True
     ).start()
     # with the web session the morning dm follows his presence instead (bot/wakeup.py via rtm.py)
-    if not features.enabled("presence"):
+    if features.enabled("presence"):
+        # ...with a cutoff in case he never shows up (or the socket is down)
+        from bot import wakeup
+
+        fb_hour, fb_minute = _parse_hhmm(config.MORNING_FALLBACK_DM, (12, 0))
+        threading.Thread(
+            target=_run_daily, args=(fb_hour, fb_minute, wakeup.send_fallback), daemon=True
+        ).start()
+    else:
         morning_hour, morning_minute = _parse_hhmm(config.DAILY_MORNING_DM, (8, 0))
         threading.Thread(
             target=_run_daily, args=(morning_hour, morning_minute, _send_morning_dm), daemon=True

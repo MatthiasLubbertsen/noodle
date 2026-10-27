@@ -64,8 +64,11 @@ UNPROMPTED_COOLDOWN_SECONDS = float(os.getenv("UNPROMPTED_COOLDOWN_SECONDS", "30
 DAILY_PING_REMINDER = os.getenv("DAILY_PING_REMINDER", "19:00")
 # "HH:MM" time noodle DMs USER_ID the wakey-wakey / special-day / news digest.
 # only used without the web session (SLACK_WEB_TOKEN + SLACK_WEB_COOKIE): with it, the morning
-# dm goes out when USER_ID first comes online after QUIET_HOURS instead (see bot/wakeup.py)
+# dm goes out when USER_ID first comes online instead (see bot/wakeup.py), or at
+# MORNING_FALLBACK_DM if he hasn't by then
 DAILY_MORNING_DM = os.getenv("DAILY_MORNING_DM", "08:00")
+# "HH:MM": with presence mode, send the morning dm anyway at this time if he never came online
+MORNING_FALLBACK_DM = os.getenv("MORNING_FALLBACK_DM", "12:00")
 
 # "HH:MM" time noodle DMs a short end-of-day wrap-up (slack messages, commits,
 # tracks played). it never drafts the @matthias-day recap - matthias writes that.
