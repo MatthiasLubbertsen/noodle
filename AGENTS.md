@@ -79,7 +79,11 @@ noodle/
     weekly.py             # weekly journal + music recaps
     log.py                # logging setup
     netlog.py             # concise "called hcai .../called tool ..." log lines
-  tests/                  # unittest suite (`python -m unittest discover -s tests -t .`): sky maths, hackatime milestones
+  tests/                  # unittest suite (`python -m unittest discover -s tests -t .`, needs requirements.txt + `websockets`)
+    fake_slack.py         # fake slack: web api over http + the web client's rtm websocket (records calls/frames, can drop, refuse, push)
+    test_rtm.py           # bot/rtm.py against fake_slack: connect, ping, typing, reconnect_url, expired session
+    test_handlers.py      # bot/handlers.py with a real WebClient against fake_slack, only the model stubbed
+    test_text.py, test_dice_reminders.py, test_sky.py, test_hackatime_watch.py
   scripts/
     backfill_matthias_day.py  # one-time: backfill historical pings into memory
   sandbox/                # the code sandbox: its OWN container (node + wasm), see 7g
