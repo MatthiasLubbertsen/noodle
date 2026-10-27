@@ -49,9 +49,10 @@ def _today() -> str:
     return datetime.datetime.now(AMSTERDAM_TZ).strftime("%Y-%m-%d")
 
 
-def can_send() -> bool:
-    """under today's cap of unprompted dms and outside quiet hours?"""
-    if in_quiet_hours():
+def can_send(ignore_quiet_hours: bool = False) -> bool:
+    """under today's cap of unprompted dms and outside quiet hours? (ignore_quiet_hours
+    is for the aurora alert: it's only worth sending when it's dark, i.e. often at night.)"""
+    if not ignore_quiet_hours and in_quiet_hours():
         return False
     data = _load()
     return data.get("day") != _today() or data.get("count", 0) < config.PROACTIVE_DAILY_CAP

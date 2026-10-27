@@ -586,8 +586,10 @@ TOOLS = [
                 "projects (every project ever with its all-time time; query = part of a name to "
                 "search), project (one project: time, first/last day worked on, repo, languages; "
                 "optional range), days (time per day for a range, per month if longer than ~3 "
-                "months, max a year; default last 7 days; optional project), sessions (when he "
-                "coded on one day: start_date, default today). dates are YYYY-MM-DD, amsterdam days."
+                "months, max a year; default last 7 days; optional project) and sessions (when he "
+                "coded on one day: start_date, default today) - those two show his daily "
+                "rhythm, so they are matthias only, checked on the server. dates are "
+                "YYYY-MM-DD, amsterdam days."
             ),
             "parameters": {
                 "type": "object",
@@ -1551,7 +1553,7 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return _links(args, user_id)
     if name == "hackatime":
         log_tool("hackatime", f"{args.get('action', '')} {args.get('project') or args.get('query') or ''}".strip(), "run")
-        return hackatime.query(args)
+        return hackatime.query(args, is_owner=_is_matthias(user_id))
     if name == "get_journal":
         return _get_journal(args.get("start_date"), args.get("end_date"), user_id)
     if name == "summarize_thread":

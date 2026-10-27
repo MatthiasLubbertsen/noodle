@@ -125,14 +125,18 @@ def _issue(repo: str, number) -> str:
         )
         files = _get(f"/repos/{repo}/pulls/{int(number)}/files", {"per_page": 30})
         lines += [f"  {f['filename']} (+{f['additions']} -{f['deletions']})" for f in files]
-    comments = _get(f"/repos/{repo}/issues/{int(number)}/comments", {"per_page": 100}) if i.get("comments") else []
+    comments = []
+    if i.get("comments"):
+        # comments come oldest first, so read the last page to show the newest ones
+        last_page = (i["comments"] - 1) // 100 + 1
+        comments = _get(f"/repos/{repo}/issues/{int(number)}/comments", {"per_page": 100, "page": last_page})
     for c in comments[-10:]:
         lines.append(f"comment by {c['user']['login']} ({c['created_at'][:10]}): {c['body'][:800]}")
     return "\n".join(lines)
 
 
 def _commit(repo: str, ref: str) -> str:
-    c = _get(f"/repos/{repo}/commits/{ref}")
+    c = _get(f"/repos/{repo}/commits/{urllib.parse.quote(ref, safe='')}")
     stats = c.get("stats") or {}
     lines = [
         f"{c['sha'][:7]} by {c['commit']['author']['name']} on {c['commit']['author']['date'][:10]}, "

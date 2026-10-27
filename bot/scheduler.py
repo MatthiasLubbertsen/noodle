@@ -171,13 +171,17 @@ def _run_github_watcher() -> None:
 def _check_hackatime() -> None:
     """every full hour on a project: a plain line in the logs channel; every 5 hours: a
     persona post in his own channel. these are about his public coding, not dms to him,
-    so they don't go through the proactive guardrails."""
+    so they don't go through the proactive guardrails. new_milestones() has already marked
+    them reported, so one failing post must not stop the others."""
     for name, before, hours in hackatime_watch.new_milestones():
-        watch._log(hackatime_watch.log_line(name, before, hours))
-        mark = hackatime_watch.five_hour_mark(before, hours)
-        if mark and config.MATTHIAS_DAY_CHANNEL_ID:
-            _deliver(config.MATTHIAS_DAY_CHANNEL_ID, None, hackatime_watch.compose_milestone(name, mark))
-        logger.info("hackatime milestone: %s %dh -> %dh", name, before, hours)
+        try:
+            watch._log(hackatime_watch.log_line(name, before, hours))
+            mark = hackatime_watch.five_hour_mark(before, hours)
+            if mark and config.MATTHIAS_DAY_CHANNEL_ID:
+                _deliver(config.MATTHIAS_DAY_CHANNEL_ID, None, hackatime_watch.compose_milestone(name, mark))
+            logger.info("hackatime milestone: %s %dh -> %dh", name, before, hours)
+        except Exception:  # noqa: BLE001
+            logger.exception("hackatime milestone post failed for %s (%dh)", name, hours)
 
 
 def _run_hackatime_watcher() -> None:
@@ -189,9 +193,14 @@ def _run_hackatime_watcher() -> None:
         time.sleep(config.HACKATIME_POLL_SECONDS)
 
 
+# the night an aurora dm (forecast at sunset, or live) already went out: one per night
+_aurora_night = None
+
+
 def _send_sky_tonight(sunset: datetime.datetime) -> None:
     """at sunset: a dm if tonight's sky has something worth going outside for.
     unprompted, so it skips (never holds - it'd be stale) on quiet hours or the cap."""
+    global _aurora_night
     try:
         facts = sky.tonight_facts(sunset)
         if not facts:
@@ -205,6 +214,8 @@ def _send_sky_tonight(sunset: datetime.datetime) -> None:
             return
         _post_dm(sky.compose_tonight(facts))
         proactive.record_sent()
+        if sky.has_aurora(facts):
+            _aurora_night = sky.night_of(sunset)  # this dm already told him, no second one live
         logger.info("sent tonight's sky dm (%d thing(s))", len(facts))
     except Exception:  # noqa: BLE001
         logger.exception("tonight's sky check failed")
@@ -212,26 +223,30 @@ def _send_sky_tonight(sunset: datetime.datetime) -> None:
 
 def _run_sky_tonight() -> None:
     while True:
-        sunset = sky.next_sunset()
-        logger.info("next _send_sky_tonight scheduled for %s", sunset.isoformat())
-        time.sleep(max((sunset - datetime.datetime.now(AMSTERDAM_TZ)).total_seconds(), 1))
-        _send_sky_tonight(sunset)
-        time.sleep(60)  # so next_sunset() moves on to tomorrow's
+        try:
+            sunset = sky.next_sunset()
+            logger.info("next _send_sky_tonight scheduled for %s", sunset.isoformat())
+            time.sleep(max((sunset - datetime.datetime.now(AMSTERDAM_TZ)).total_seconds(), 1))
+            _send_sky_tonight(sunset)
+            time.sleep(60)  # so next_sunset() moves on to tomorrow's
+        except Exception:  # noqa: BLE001
+            # e.g. no sunset found: never let the thread die, just try again later
+            logger.exception("sky scheduler failed, retrying in an hour")
+            time.sleep(3600)
 
 
 def _run_aurora_watch() -> None:
     """every 10 minutes: dm once a night when the aurora is likely up right now."""
-    alerted_night = None
+    global _aurora_night
     while True:
         try:
-            # a night belongs to the date it started on, so 01:00 is still "last night"
-            night = (datetime.datetime.now(AMSTERDAM_TZ) - datetime.timedelta(hours=12)).date()
-            if night != alerted_night and proactive.can_send():
+            night = sky.night_of()
+            if night != _aurora_night and proactive.can_send(ignore_quiet_hours=config.AURORA_IN_QUIET_HOURS):
                 facts = sky.aurora_now()
                 if facts:
                     _post_dm(sky.compose_aurora(facts))
                     proactive.record_sent()
-                    alerted_night = night
+                    _aurora_night = night
                     logger.info("sent aurora alert dm")
         except Exception:  # noqa: BLE001
             logger.exception("aurora check failed")

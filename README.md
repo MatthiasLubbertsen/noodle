@@ -251,6 +251,7 @@ logs go to the console either way; the code also tries to write
 | `MATTHIAS_USER_TOKEN` | matthias's OWN xoxp token (`search:read`), used only to count today's messages including private channels - nothing else; optional |
 | `DAILY_WRAPUP_DM` | `HH:MM` end-of-day wrap-up dm (default `21:30`) |
 | `WEEKLY_JOURNAL` / `WEEKLY_MUSIC` | `<mon..sun> HH:MM` weekly journal recap (`sun 18:00`) / music recap (`sun 18:30`) |
+| `AURORA_IN_QUIET_HOURS` | `1` (default): the live aurora alert ignores quiet hours, still capped; `0` respects them |
 | `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`) / max per day (default 10) |
 | `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | private, set in `.env` only: morning dm places (comma separated) / default place for `get_weather` |
 | `LASTFM_API_KEY` / `LASTFM_USER` | optional, enables `now_playing` |

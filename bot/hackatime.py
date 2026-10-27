@@ -163,11 +163,18 @@ def _sessions(day: datetime.date, project: str | None) -> str:
     return f"coding sessions on {day} ({_dur(total)} of actual coding" + (f", project {project}" if project else "") + "):\n" + "\n".join(lines)
 
 
-def query(args: dict) -> str:
-    """the `hackatime` tool's backend. returns plain text or an error string."""
+# his daily rhythm (which days, which hours) is for him only; totals and projects are public
+OWNER_ONLY = ("days", "sessions")
+
+
+def query(args: dict, is_owner: bool = False) -> str:
+    """the `hackatime` tool's backend. returns plain text or an error string.
+    is_owner: the real sender is matthias (days/sessions show when he codes)."""
     if not configured():
         return "hackatime isn't configured (HACKATIME_USERNAME missing)"
     action = args.get("action") or "summary"
+    if action in OWNER_ONLY and not is_owner:
+        return f"only matthias can see {action} (they show when he codes); totals, projects and summaries are open to anyone"
     project = (args.get("project") or "").strip() or None
     today = datetime.datetime.now(AMSTERDAM_TZ).date()
     try:

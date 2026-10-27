@@ -79,6 +79,9 @@ WEEKLY_MUSIC = os.getenv("WEEKLY_MUSIC", "sun 18:30")
 # ("HH:MM-HH:MM", may wrap past midnight) and capped per day. fixed-time dms
 # (morning, wrap-up, weekly) are exempt.
 QUIET_HOURS = os.getenv("QUIET_HOURS", "23:00-07:30")
+# the live aurora alert is only useful when it's dark, which is mostly inside quiet hours, so
+# by default it ignores them (it still counts against the daily cap). 0 = respect them
+AURORA_IN_QUIET_HOURS = os.getenv("AURORA_IN_QUIET_HOURS", "1").strip().lower() not in ("0", "false", "no")
 PROACTIVE_DAILY_CAP = int(os.getenv("PROACTIVE_DAILY_CAP", "10"))
 
 # --- weather (open-meteo, no key needed) ---

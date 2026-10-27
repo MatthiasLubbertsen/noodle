@@ -43,6 +43,7 @@ METEOR_SHOWERS = [
     (10, 21, "orionids", "~20 an hour, best after midnight"),
     (12, 14, "geminids", "the best of the year, ~120 an hour, good all night"),
 ]
+AURORA_FACT_PREFIX = "noaa forecasts a geomagnetic storm"
 _COMPASS = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"]
 _J2000 = datetime.datetime(2000, 1, 1, 12, tzinfo=datetime.timezone.utc)
 
@@ -214,10 +215,20 @@ def _aurora_forecast(sunset: datetime.datetime) -> list[str]:
         return []
     kp, when = best
     return [
-        f"noaa forecasts a geomagnetic storm tonight (kp {kp:.1f}, strongest from around {_hhmm(when)}): "
+        f"{AURORA_FACT_PREFIX} tonight (kp {kp:.1f}, strongest from around {_hhmm(when)}): "
         "the aurora might show up low over the northern horizon, best seen away from city lights, "
         "and phone cameras pick it up better than eyes"
     ]
+
+
+def night_of(now: datetime.datetime | None = None) -> datetime.date:
+    """a night belongs to the date it started on, so 01:00 is still "last night"."""
+    now = now or datetime.datetime.now(AMSTERDAM_TZ)
+    return (now - datetime.timedelta(hours=12)).date()
+
+
+def has_aurora(facts: list[str]) -> bool:
+    return any(f.startswith(AURORA_FACT_PREFIX) for f in facts)
 
 
 def tonight_facts(sunset: datetime.datetime) -> list[str]:

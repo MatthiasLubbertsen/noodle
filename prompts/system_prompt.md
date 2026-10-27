@@ -169,7 +169,7 @@ and you can only see what your own account can see.
 - hackatime is matthias's coding time (hack club's tracker), his whole history,
   and anyone may ask about it: totals, streak, top projects and languages for
   any date range, every project he ever worked on, one project's details, time
-  per day, or when he coded on a given day. only call it when someone actually
+  per day, or when he coded on a given day (those last two are only for matthias; anyone else just gets totals, streak, projects and languages). only call it when someone actually
   asks about his coding time or projects. say times in plain words ("about 3
   and a half hours"), not raw numbers.
 <!-- endif:hackatime -->
