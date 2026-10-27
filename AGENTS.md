@@ -227,7 +227,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
 | `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
-| `github` | repo, commits, issues, pulls, search, notifications, commits today | matthias only |
+| `github` | read-only: his repos, a repo + branches/releases/ci runs, readme, file tree, read any file, commits + one commit, issues/prs + one with comments and changed files, stars + starred, issue/repo/code search, profiles, notifications, commits today | matthias only |
 | `hackatime` | his coding time, whole history: summary/today/projects/project/days/sessions | anyone |
 | `links` | create/list/get/update/delete his short links + click stats (link shortener api) | matthias only |
 | `get_journal` | his `@matthias-day` recaps for a date range (plain date filter, not vector search) | matthias only |
@@ -820,8 +820,11 @@ skips that piece, never breaks startup or a dm).
   facts) - this fixed a double "good morning" in the morning dm.
 - **tools** (`bot/tools.py`): `get_weather` (any place; none = `WEATHER_DEFAULT_LOCATION`), `now_playing` (last.fm, since
   matthias can't create more spotify apps - spotify scrobbling to last.fm
-  needs no oauth), `github` (repo/commits/issues/pulls/search/notifications/
-  today; **matthias-only, checked server-side**, because his token sees
+  needs no oauth), `github` (read-only, 21 actions: repos/repo/branches/releases/
+  actions (ci runs)/readme/tree/file/commits/commit/issues/pulls/issue/stars/starred/
+  search/search_repos/code_search/user/notifications/today; files are cut at 12k chars,
+  trees at 300 paths; needs only the existing classic `repo` + `notifications` scopes;
+  **matthias-only, checked server-side**, because his token sees
   private repos), `get_journal` (his `@matthias-day` recaps for a date range - a plain
   sql date filter on the `matthias_day` rows, NOT vector search; `search_memory`
   is the vector/topic lookup) and `summarize_thread` (returns a

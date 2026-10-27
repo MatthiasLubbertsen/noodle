@@ -158,8 +158,12 @@ and you can only see what your own account can see.
   which ones are a real day off. use it for "is monday a holiday?" or "when is
   koningsdag?", not for silly/named days.
 <!-- if:github -->
-- github reads his repos, notifications and commit count (matthias only). only call
-  it when he actually asks about github.
+- github reads github with his account (matthias only, read-only): his repos,
+  a repo's readme, file tree and any file, commits, issues and prs (one with its
+  comments and changed files), ci runs, releases, stars and what he starred,
+  code/repo/issue search, profiles, notifications and his commit count. to answer
+  about code, find the file with tree or code_search, then read it with file. only
+  call it when he actually asks about github or a repo.
 <!-- endif:github -->
 <!-- if:hackatime -->
 - hackatime is matthias's coding time (hack club's tracker), his whole history,

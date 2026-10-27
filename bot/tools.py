@@ -532,24 +532,42 @@ TOOLS = [
         "function": {
             "name": "github",
             "description": (
-                "look things up on github with matthias's account (matthias "
-                "only, checked on the server - it can see his private repos). "
-                "actions: repo (repo summary), commits (recent commits of a "
-                "repo), issues / pulls (open ones of a repo; state=closed|all "
-                "for others), search (issue/pr search with github search "
-                "syntax in q), notifications (his unread notifications), today "
-                "(his commit count today). repo may be 'name' (his own) or "
-                "'owner/name'."
+                "look things up on github with matthias's account (matthias only, checked on "
+                "the server - it can see his private repos). read-only. repo may be 'name' (his "
+                "own) or 'owner/name'. actions:\n"
+                "- repos: his repos, most recently pushed first\n"
+                "- repo: one repo's summary; branches; releases (latest 5); actions (latest ci "
+                "workflow runs and whether they passed)\n"
+                "- readme: the repo's readme. tree: every file path in the repo (path = only "
+                "under that folder). file: read one file (path), or list a folder. ref = a branch, "
+                "tag or commit for readme/tree/file\n"
+                "- commits: recent commits (optional path = only that file, ref = branch). commit: "
+                "one commit's message and changed files (ref = the sha)\n"
+                "- issues / pulls: open ones (state=closed|all for others). issue: one issue or pr "
+                "by number, with its description, comments and (for a pr) changed files\n"
+                "- stars: a repo's star count and newest stargazers; no repo = stars across all "
+                "his repos. starred: repos he starred, newest first\n"
+                "- search (issues/prs), search_repos, code_search (code in files, e.g. 'foo "
+                "repo:owner/name'): github search syntax in q\n"
+                "- user: a github profile (q = login, default his own)\n"
+                "- notifications (his unread notifications), today (his commit count today)"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["repo", "commits", "issues", "pulls", "search", "notifications", "today"],
+                        "enum": [
+                            "repos", "repo", "branches", "releases", "actions", "readme", "tree", "file",
+                            "commits", "commit", "issues", "pulls", "issue", "stars", "starred",
+                            "search", "search_repos", "code_search", "user", "notifications", "today",
+                        ],
                     },
-                    "repo": {"type": "string", "description": "for repo/commits/issues/pulls"},
-                    "q": {"type": "string", "description": "for search"},
+                    "repo": {"type": "string", "description": "'name' (his own) or 'owner/name'"},
+                    "path": {"type": "string", "description": "a file or folder path in the repo, for file/tree/commits"},
+                    "ref": {"type": "string", "description": "branch, tag or commit sha (commit: the sha)"},
+                    "number": {"type": "integer", "description": "issue or pr number, for issue"},
+                    "q": {"type": "string", "description": "search query, or a login for user"},
                     "state": {"type": "string", "enum": ["open", "closed", "all"], "description": "for issues/pulls, default open"},
                 },
                 "required": ["action"],
@@ -879,8 +897,11 @@ def _github(args: dict, user_id: str | None) -> str:
     if not _is_matthias(user_id):
         return "only matthias can use the github tool"
     action = args.get("action", "")
-    result = github_api.query(action, repo=args.get("repo"), q=args.get("q"), state=args.get("state") or "open")
-    log_tool("github", f"{action} {args.get('repo') or args.get('q') or ''}".strip(), "done")
+    result = github_api.query(
+        action, repo=args.get("repo"), q=args.get("q"), state=args.get("state") or "open",
+        path=args.get("path"), ref=args.get("ref"), number=args.get("number"),
+    )
+    log_tool("github", f"{action} {args.get('repo') or args.get('q') or ''} {args.get('path') or ''}".strip(), "done")
     return result
 
 
