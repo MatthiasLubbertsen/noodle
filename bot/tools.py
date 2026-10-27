@@ -8,7 +8,7 @@ import config
 from bot import reminders, state
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
-from bot import features, games, sandbox
+from bot import features, games, hackatime, sandbox
 from bot import github as github_api
 from bot import links as links_api
 from bot.channels import with_join
@@ -551,6 +551,34 @@ TOOLS = [
                     "repo": {"type": "string", "description": "for repo/commits/issues/pulls"},
                     "q": {"type": "string", "description": "for search"},
                     "state": {"type": "string", "enum": ["open", "closed", "all"], "description": "for issues/pulls, default open"},
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "hackatime",
+            "description": (
+                "matthias's coding time from hackatime (hack club's coding time tracker), his "
+                "whole history back to the first day. public: anyone may ask. actions: summary "
+                "(total, daily average, streak, top projects and languages; all time, or a "
+                "start_date..end_date range, optionally one project), today (same for today), "
+                "projects (every project ever with its all-time time; query = part of a name to "
+                "search), project (one project: time, first/last day worked on, repo, languages; "
+                "optional range), days (time per day for a range, per month if longer than ~3 "
+                "months, max a year; default last 7 days; optional project), sessions (when he "
+                "coded on one day: start_date, default today). dates are YYYY-MM-DD, amsterdam days."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["summary", "today", "projects", "project", "days", "sessions"]},
+                    "start_date": {"type": "string", "description": "YYYY-MM-DD, inclusive"},
+                    "end_date": {"type": "string", "description": "YYYY-MM-DD, inclusive"},
+                    "project": {"type": "string", "description": "exact hackatime project name"},
+                    "query": {"type": "string", "description": "for projects: part of a project name"},
                 },
                 "required": ["action"],
             },
@@ -1500,6 +1528,9 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return _github(args, user_id)
     if name == "links":
         return _links(args, user_id)
+    if name == "hackatime":
+        log_tool("hackatime", f"{args.get('action', '')} {args.get('project') or args.get('query') or ''}".strip(), "run")
+        return hackatime.query(args)
     if name == "get_journal":
         return _get_journal(args.get("start_date"), args.get("end_date"), user_id)
     if name == "summarize_thread":

@@ -104,6 +104,14 @@ GITHUB_USER = os.getenv("GITHUB_USER", "MatthiasLubbertsen")
 # how often the watcher checks for new notifications
 GITHUB_POLL_SECONDS = int(os.getenv("GITHUB_POLL_SECONDS", "300"))
 
+# --- hackatime (hack club's wakatime: coding time) ---
+# his hackatime username (or slack id). set = the public `hackatime` tool + the hour
+# milestone posts (every hour in LOGS_CHANNEL_ID, every 5 in MATTHIAS_DAY_CHANNEL_ID).
+# the api key (hackatime settings page) is only needed if his stats aren't public.
+HACKATIME_USERNAME = os.getenv("HACKATIME_USERNAME", "").strip()
+HACKATIME_API_KEY = os.getenv("HACKATIME_API_KEY", "")
+HACKATIME_POLL_SECONDS = int(os.getenv("HACKATIME_POLL_SECONDS", "600"))
+
 # the "@matthias-day" usergroup: pinging it triggers a "messages sent today" recap.
 # matched by id (<!subteam^ID>); the label "matthias-day" is always matched
 # too as a fallback (catches a plain, unexpanded "@matthias-day" typed as
@@ -175,6 +183,7 @@ NEWS_SEEN_PATH = DATA_DIR / "hackclub_news_seen.json"
 # sqlite, see bot/history_store.py.
 MEMORY_DB_PATH = DATA_DIR / "noodle_memory.db"
 GITHUB_SEEN_PATH = DATA_DIR / "github_seen.json"
+HACKATIME_SEEN_PATH = DATA_DIR / "hackatime_seen.json"
 PROACTIVE_STATE_PATH = DATA_DIR / "proactive_state.json"
 GAMES_STATE_PATH = DATA_DIR / "games.json"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

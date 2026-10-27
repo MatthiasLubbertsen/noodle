@@ -17,6 +17,7 @@ TOOL_FEATURE = {
     "freedom": "freedom",
     "start_freedom_session": "freedom",
     "schedule_freedom_session": "freedom",
+    "hackatime": "hackatime",
 }
 
 
@@ -32,6 +33,8 @@ def enabled(feature: str) -> bool:
         return bool(config.LASTFM_API_KEY and config.LASTFM_USER)
     if feature == "freedom":
         return bool(config.FREEDOM_API_KEY)
+    if feature == "hackatime":
+        return bool(config.HACKATIME_USERNAME)
     if feature == "links":
         return bool(config.LINKS_API_KEY and config.LINKS_API_BASE)
     raise KeyError(feature)
