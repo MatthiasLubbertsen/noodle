@@ -75,10 +75,13 @@ WEEKLY_JOURNAL = os.getenv("WEEKLY_JOURNAL", "sun 18:00")
 WEEKLY_MUSIC = os.getenv("WEEKLY_MUSIC", "sun 18:30")
 
 # --- proactivity guardrails ---
-# unprompted pings (the github watcher) are held during quiet hours
+# unprompted pings (the github watcher, sky/aurora dms) are held during quiet hours
 # ("HH:MM-HH:MM", may wrap past midnight) and capped per day. fixed-time dms
 # (morning, wrap-up, weekly) are exempt.
 QUIET_HOURS = os.getenv("QUIET_HOURS", "23:00-07:30")
+# the live aurora alert is only useful when it's dark, which is mostly inside quiet hours, so
+# by default it ignores them (it still counts against the daily cap). 0 = respect them
+AURORA_IN_QUIET_HOURS = os.getenv("AURORA_IN_QUIET_HOURS", "1").strip().lower() not in ("0", "false", "no")
 PROACTIVE_DAILY_CAP = int(os.getenv("PROACTIVE_DAILY_CAP", "10"))
 
 # --- weather (open-meteo, no key needed) ---
@@ -103,6 +106,14 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_USER = os.getenv("GITHUB_USER", "MatthiasLubbertsen")
 # how often the watcher checks for new notifications
 GITHUB_POLL_SECONDS = int(os.getenv("GITHUB_POLL_SECONDS", "300"))
+
+# --- hackatime (hack club's wakatime: coding time) ---
+# his hackatime username (or slack id). set = the public `hackatime` tool + the hour
+# milestone posts (every hour in LOGS_CHANNEL_ID, every 5 in MATTHIAS_DAY_CHANNEL_ID).
+# the api key (hackatime settings page) is only needed if his stats aren't public.
+HACKATIME_USERNAME = os.getenv("HACKATIME_USERNAME", "").strip()
+HACKATIME_API_KEY = os.getenv("HACKATIME_API_KEY", "")
+HACKATIME_POLL_SECONDS = int(os.getenv("HACKATIME_POLL_SECONDS", "600"))
 
 # the "@matthias-day" usergroup: pinging it triggers a "messages sent today" recap.
 # matched by id (<!subteam^ID>); the label "matthias-day" is always matched
@@ -175,6 +186,7 @@ NEWS_SEEN_PATH = DATA_DIR / "hackclub_news_seen.json"
 # sqlite, see bot/history_store.py.
 MEMORY_DB_PATH = DATA_DIR / "noodle_memory.db"
 GITHUB_SEEN_PATH = DATA_DIR / "github_seen.json"
+HACKATIME_SEEN_PATH = DATA_DIR / "hackatime_seen.json"
 PROACTIVE_STATE_PATH = DATA_DIR / "proactive_state.json"
 GAMES_STATE_PATH = DATA_DIR / "games.json"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
