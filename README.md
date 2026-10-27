@@ -80,6 +80,7 @@ real slack sender id, so it is safe in public channels too.
 | `flaron` | look up users, channels, apps, emoji, commands in the public flaron directory | anyone |
 | `search_memory` | semantic (vector) search of noodle's persisted memory: dms, threads, pings, journal, daily facts | matthias only |
 | `web_search` | short cited answer from the live web (exa via hack club ai) | anyone |
+| `fetch_url` | reads one web page from its url as plain text (direct fetch that can never reach private addresses, exa fallback for js/blocked pages like x and reddit); the result is labelled untrusted data | matthias only |
 | `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
@@ -126,7 +127,8 @@ noodle/
     memory.py          # per-conversation memory helpers (+ the stable dm key)
     history_store.py   # persistent + embedded memory (sqlite), semantic search
     embeddings.py      # calls the ai endpoint's /embeddings route
-    exa.py             # calls the ai endpoint's /exa/answer route (web_search)
+    exa.py             # calls the ai endpoint's /exa/answer + /exa/contents routes (web_search, fetch_url)
+    webfetch.py        # fetch_url: guarded direct GET + html to text, exa fallback
     chunk.py           # splits a reply into one slack message per paragraph
     stats.py           # "messages sent today" recap (via slack search)
     almanac.py         # silly/named days today (wikipedia)

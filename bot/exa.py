@@ -1,6 +1,7 @@
 import json
 import logging
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import config
@@ -9,6 +10,7 @@ from bot.netlog import log_hcai
 logger = logging.getLogger("noodle")
 
 ANSWER_URL_SUFFIX = "/exa/answer"
+CONTENTS_URL_SUFFIX = "/exa/contents"
 
 
 def web_answer(query: str) -> str | None:
@@ -55,3 +57,39 @@ def web_answer(query: str) -> str | None:
     if urls:
         answer += "\n\nsources: " + ", ".join(urls[:3])
     return answer
+
+
+def page_contents(page_url: str, max_chars: int) -> dict | None:
+    """ask exa for the readable text of one url (POST /exa/contents, same hack club ai proxy).
+    exa renders js and gets past most walls, which is why fetch_url falls back to it. returns
+    {"url", "title", "text"} or None (never raises) when exa couldn't read the page.
+    """
+    detail = urllib.parse.urlsplit(page_url).netloc
+    url = config.AI_ENDPOINT.rstrip("/") + CONTENTS_URL_SUFFIX
+    payload = json.dumps({"urls": [page_url], "text": {"maxCharacters": max_chars}}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {config.OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            log_hcai("exa contents", str(resp.status), detail=detail)
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        log_hcai("exa contents", str(exc.code), detail=detail)
+        return None
+    except Exception:  # noqa: BLE001
+        log_hcai("exa contents", "error", detail=detail)
+        logger.exception("exa contents failed")
+        return None
+
+    for r in data.get("results") or []:
+        text = (r.get("text") or "").strip() if isinstance(r, dict) else ""
+        if text:
+            return {"url": r.get("url") or page_url, "title": (r.get("title") or "").strip(), "text": text}
+    return None

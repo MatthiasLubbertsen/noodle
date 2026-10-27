@@ -43,7 +43,8 @@ noodle/
     memory.py             # per-conversation memory helpers (+ the stable dm key)
     history_store.py      # persistent + embedded memory (sqlite), semantic search
     embeddings.py         # calls the ai endpoint's /embeddings route
-    exa.py                # calls the ai endpoint's /exa/answer route (web_search)
+    exa.py                # calls the ai endpoint's /exa/answer + /exa/contents routes (web_search, fetch_url)
+    webfetch.py           # fetch_url: guarded direct GET, html to text, exa fallback
     chunk.py              # splits replies into small slack messages
     rtm.py                # presence (green dot) + typing indicator via the web client websocket
     stats.py              # "messages sent today" recap (via slack search)
@@ -217,6 +218,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `flaron` | look up users, channels, apps, emoji, commands in the public flaron directory | anyone |
 | `search_memory` | semantic (vector) search of noodle's persisted memory: dms, threads, pings, journal, daily facts | matthias only |
 | `web_search` | short cited answer from the live web (exa via hack club ai) | anyone |
+| `fetch_url` | read one web page from its url as plain text; direct fetch that refuses private addresses, exa fallback for js/blocked pages (x, reddit); result labelled untrusted data | matthias only |
 | `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
@@ -1041,6 +1043,33 @@ dm with `files_upload_v2` (needs the `files:write` scope on noodle's token).
   real play word (`play`, `rematch`, `new game`...) or as the whole message ("again!").
 - an embeddings 502 in the logs is the ai endpoint failing upstream; `embeddings.py` retries once
   and a row that still fails is stored without an embedding (chat is unaffected).
+
+### 7j. the `fetch_url` tool (`bot/webfetch.py`)
+reads one web page as text. matthias-only, checked in `tools._fetch_url()` against the real sender
+id (not dm-only: a link he drops in a channel can be read there; add the `origin["is_dm"]` check
+from `_run_code` if that should change). it needs no credential, so it is always offered.
+- **two tiers.** (1) a direct GET by noodle itself, html turned into text with a stdlib
+  `html.parser` extractor (drops script/style/nav/footer/forms/cookie-ish blocks, prefers
+  `<main>`/`<article>`, falls back to the meta description for js shells); json/plain text come
+  back as is. (2) exa's `/exa/contents` via hack club ai (`exa.page_contents()`), used when the
+  direct fetch fails, is blocked (403/429...), isn't text (pdf), or is under `THIN_CHARS` of text.
+  x/twitter/reddit/instagram/facebook/tiktok/linkedin (`EXA_FIRST_HOSTS`) go to exa first because a
+  plain GET can't read them; direct stays as the last resort. exa's reach on x/reddit is not
+  verified against the real api, so check the logs (`called tool fetch_url: <host>: exa|failed`).
+- **private-address guard, for the direct tier.** only http/https on ports 80/443, no `user:pass@`,
+  no `localhost`/`.local`/`.internal`/single-label hosts; the name is resolved and EVERY address
+  must be public (`ipaddress.is_global`, plus 6to4, nat64, teredo, cgnat, ipv4-mapped), which covers
+  loopback, rfc1918 (the docker host and the `sandbox` container), link-local/cloud metadata
+  (169.254.169.254) and the odd integer/hex spellings. the connection then goes to the validated
+  IP itself (`_Pinned`/`_PinnedTLS`, tls name = original host) so dns rebinding can't swap the
+  answer, redirects are followed by hand (max 5) and re-validated every hop, body capped at 3MB
+  (also after gunzip). a refusal (`Blocked`) is final and is never retried through exa. the url is
+  also checked before it goes to exa, so internal urls never leave noodle.
+- **untrusted content.** the result is wrapped in `=== untrusted web page content ===` markers
+  with a line saying it is data, not instructions (the end marker is stripped from the page text so
+  it can't close the block early); the tool description and the system prompt say the same.
+- **size.** default 15000 characters, max 40000 (`max_chars`); a longer page says which `start`
+  value reads on.
 
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
