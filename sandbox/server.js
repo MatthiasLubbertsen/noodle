@@ -2,7 +2,8 @@
 // (no published port); it runs python (pyodide) and javascript (quickjs) snippets
 // in throwaway node processes and returns stdout / result / output files.
 //
-//   POST /run   {language: "python"|"javascript", code, timeout_ms?}  (bearer auth)
+//   POST /run   {language: "python"|"javascript"|"bash", code, timeout_ms?,
+//                files?: {name: text}, workspace?: key, reset?: bool}     (bearer auth)
 //   GET  /health
 //
 // isolation layers, innermost first: wasm (no syscalls) -> node --permission (no
@@ -19,7 +20,8 @@ const PORT = parseInt(process.env.SANDBOX_PORT || "8080", 10);
 const TOKEN = process.env.SANDBOX_TOKEN || "";
 const DEFAULT_TIMEOUT_MS = 20000;
 const MAX_TIMEOUT_MS = 60000;
-const MAX_BODY = 200 * 1024;
+const MAX_CODE = 200 * 1024;
+const MAX_BODY = 1.5 * 1024 * 1024; // code (MAX_CODE) + bash input files (1MB), checked separately
 const MAX_RSS_MB = parseInt(process.env.SANDBOX_MAX_RSS_MB || "900", 10);
 const READY_TIMEOUT_MS = 120000;
 const CHILD = path.join(__dirname, "child.js");
@@ -86,35 +88,34 @@ function warmUp() {
   });
 }
 
-let pythonBusy = false;
-let pythonWaiting = 0;
-const MAX_WAITING = 2;
-const pythonQueue = [];
-function withPythonLock(fn) {
-  return new Promise((resolve, reject) => {
-    const go = () => {
-      pythonBusy = true;
-      fn().then(resolve, reject).finally(() => {
-        pythonBusy = false;
-        const next = pythonQueue.shift();
-        if (next) {
-          pythonWaiting--;
-          next();
-        }
-      });
-    };
-    if (!pythonBusy) return go();
-    if (pythonWaiting >= MAX_WAITING) return reject(Object.assign(new Error("sandbox is busy, try again in a moment"), { status: 429 }));
-    pythonWaiting++;
-    pythonQueue.push(go);
-  });
+// at most `max` jobs of a kind run at once, `maxWaiting` more may queue, the rest get a 429
+function makeLimiter(max, maxWaiting) {
+  let running = 0;
+  const queue = [];
+  return function limited(fn) {
+    return new Promise((resolve, reject) => {
+      const go = () => {
+        running++;
+        fn().then(resolve, reject).finally(() => {
+          running--;
+          const next = queue.shift();
+          if (next) next();
+        });
+      };
+      if (running < max) return go();
+      if (queue.length >= maxWaiting) return reject(Object.assign(new Error("sandbox is busy, try again in a moment"), { status: 429 }));
+      queue.push(go);
+    });
+  };
 }
+const withPythonLock = makeLimiter(1, 2);
+const withBashLock = makeLimiter(2, 2);
 
 function failure(error, extra = {}) {
   return { stdout: "", stderr: "", result: null, error, files: [], truncated: false, ...extra };
 }
 
-async function execute(child, code, timeoutMs) {
+async function execute(child, job, timeoutMs, graceMs = 0) {
   // child is ready; run the one job with a hard wall-clock kill + memory watchdog
   return new Promise((resolve) => {
     let settled = false;
@@ -126,7 +127,7 @@ async function execute(child, code, timeoutMs) {
       kill(child);
       resolve(res);
     };
-    const timer = setTimeout(() => finish(failure(`timed out after ${Math.round(timeoutMs / 1000)}s`, { timed_out: true })), timeoutMs);
+    const timer = setTimeout(() => finish(failure(`timed out after ${Math.round(timeoutMs / 1000)}s`, { timed_out: true })), timeoutMs + graceMs);
     const watchdog = setInterval(() => {
       if (rssMb(child.proc.pid) > MAX_RSS_MB) finish(failure("ran out of memory", { out_of_memory: true }));
     }, 200);
@@ -135,7 +136,7 @@ async function execute(child, code, timeoutMs) {
       else if (m && m.fatal) finish(failure(`runner error: ${m.fatal}`));
     });
     child.proc.once("exit", () => finish(failure("the interpreter crashed")));
-    child.proc.send({ code, timeoutMs });
+    child.proc.send({ ...job, timeoutMs });
   });
 }
 
@@ -152,7 +153,7 @@ async function runPython(code, timeoutMs) {
       return failure(`python isn't available right now (${e.message})`);
     }
     try {
-      return await execute(child, code, timeoutMs);
+      return await execute(child, { code }, timeoutMs);
     } finally {
       kill(child);
       warmUp(); // fresh interpreter for the next job, so nothing leaks between runs
@@ -168,7 +169,69 @@ async function runJavaScript(code, timeoutMs) {
     kill(child);
     return failure(`javascript isn't available right now (${e.message})`);
   }
-  return execute(child, code, timeoutMs + 2000); // quickjs interrupts itself at timeoutMs first
+  return execute(child, { code }, timeoutMs, 2000); // quickjs interrupts itself at timeoutMs first
+}
+
+// ---- bash: a throwaway process per job, plus a small persistent workspace
+// the shell's /work directory survives between runs: the child returns its files, they are kept
+// here (in memory only, never on disk) and handed to the next job. a fresh process each time
+// means no interpreter state leaks - only files do. bounded: 4 workspaces, 4MB / 200 files each,
+// dropped after 30 idle minutes.
+const WORKSPACE_TTL_MS = 30 * 60 * 1000;
+const MAX_WORKSPACES = 4;
+const MAX_INPUT_FILES = 50;
+const MAX_INPUT_BYTES = 1024 * 1024;
+const workspaces = new Map(); // key -> {files: [{path, data}], touched}
+
+function workspaceFor(key) {
+  const now = Date.now();
+  for (const [k, w] of workspaces) if (now - w.touched > WORKSPACE_TTL_MS) workspaces.delete(k);
+  return workspaces.get(key);
+}
+
+function safeRelPath(name) {
+  if (typeof name !== "string") return null;
+  const norm = path.posix.normalize(name.replace(/\\/g, "/").replace(/^\/+/, ""));
+  if (!norm || norm === "." || norm.startsWith("../") || norm === ".." || norm.length > 200 || norm.includes("\0")) return null;
+  return norm;
+}
+
+async function runBash(body, timeoutMs) {
+  const key = typeof body.workspace === "string" && /^[\w:.-]{1,64}$/.test(body.workspace) ? body.workspace : "default";
+  if (body.reset) workspaces.delete(key);
+  const prior = workspaceFor(key);
+
+  const merged = new Map((prior ? prior.files : []).map((f) => [f.path, f.data]));
+  if (body.files && typeof body.files === "object") {
+    const entries = Object.entries(body.files);
+    if (entries.length > MAX_INPUT_FILES) return failure(`too many input files (max ${MAX_INPUT_FILES})`);
+    let bytes = 0;
+    for (const [name, text] of entries) {
+      const rel = safeRelPath(name);
+      if (!rel || typeof text !== "string") return failure(`bad input file name: ${String(name).slice(0, 60)}`);
+      bytes += Buffer.byteLength(text);
+      if (bytes > MAX_INPUT_BYTES) return failure("input files are too big (max 1MB in total)");
+      merged.set(rel, Buffer.from(text, "utf8").toString("base64"));
+    }
+  }
+  const files = [...merged].map(([p, data]) => ({ path: p, data }));
+
+  const child = spawnChild("bash");
+  try {
+    await child.ready;
+  } catch (e) {
+    kill(child);
+    return failure(`the shell isn't available right now (${e.message})`);
+  }
+  const result = await execute(child, { code: body.code, files }, timeoutMs, 2000); // the shell stops itself at timeoutMs first
+  if (result.workspace) {
+    if (!workspaces.has(key) && workspaces.size >= MAX_WORKSPACES) workspaces.delete(workspaces.keys().next().value);
+    workspaces.set(key, { files: result.workspace, touched: Date.now() });
+  } else if (prior) {
+    prior.touched = Date.now(); // timed out / killed: keep what it had
+  }
+  delete result.workspace;
+  return result;
 }
 
 // ---- http
@@ -217,12 +280,18 @@ const server = http.createServer(async (req, res) => {
       return send(res, e.status || 400, { error: e.status ? e.message : "bad json" });
     }
     const { language, code } = body || {};
-    if (!["python", "javascript"].includes(language)) return send(res, 400, { error: "language must be python or javascript" });
+    if (!["python", "javascript", "bash"].includes(language)) return send(res, 400, { error: "language must be python, javascript or bash" });
     if (typeof code !== "string" || !code.trim()) return send(res, 400, { error: "code is required" });
+    if (code.length > MAX_CODE) return send(res, 413, { error: "code too large" });
     const timeoutMs = Math.min(Math.max(parseInt(body.timeout_ms, 10) || DEFAULT_TIMEOUT_MS, 1000), MAX_TIMEOUT_MS);
 
     const t0 = Date.now();
-    const result = language === "python" ? await runPython(code, timeoutMs) : await runJavaScript(code, timeoutMs);
+    const result =
+      language === "python"
+        ? await runPython(code, timeoutMs)
+        : language === "bash"
+          ? await withBashLock(() => runBash(body, timeoutMs))
+          : await runJavaScript(code, timeoutMs);
     const files = (result.files || []).map((f) => ({ ...f, size: Buffer.byteLength(f.data, "base64") }));
     console.log(`run ${language} ${code.length} chars -> ${result.error ? "error" : "ok"} in ${Date.now() - t0}ms (${files.length} files)`);
     return send(res, 200, { ok: !result.error, language, duration_ms: Date.now() - t0, ...result, files });

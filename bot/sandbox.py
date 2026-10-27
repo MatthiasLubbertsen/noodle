@@ -13,12 +13,20 @@ def configured() -> bool:
     return features.enabled("sandbox")
 
 
-def run(language: str, code: str, timeout_s: int) -> dict | str:
+def run(language: str, code: str, timeout_s: int, files: dict | None = None, reset: bool = False) -> dict | str:
     """run a snippet in the sandbox service. returns its json result
     ({ok, stdout, stderr, result, error, truncated, duration_ms, files}) or an
     error string. never raises. the service itself has no network and no
-    secrets - see sandbox/server.js."""
-    payload = json.dumps({"language": language, "code": code, "timeout_ms": timeout_s * 1000}).encode("utf-8")
+    secrets - see sandbox/server.js. `files` ({name: text}) and `reset` only matter for
+    bash: input files land in its /work, which persists between runs until reset."""
+    body = {"language": language, "code": code, "timeout_ms": timeout_s * 1000}
+    if language == "bash":
+        body["workspace"] = "matthias"
+        if files:
+            body["files"] = files
+        if reset:
+            body["reset"] = True
+    payload = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         config.SANDBOX_URL + "/run",
         data=payload,

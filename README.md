@@ -93,7 +93,7 @@ real slack sender id, so it is safe in public channels too.
 | `public_holidays` | a country's public holidays (default NL) for the next 12 months or a year, and which are a day off, via nager.date | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
-| `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
+| `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy), javascript or a simulated bash shell (grep sed awk jq xan tar...; its /work folder persists between runs) in an isolated sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions, text/data wrangling; no network | matthias only, dms only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
 | `github` | read-only: his repos, a repo + branches/releases/ci runs, readme, file tree, read any file, commits + one commit, issues/prs + one with comments and changed files, stars + starred, issue/repo/code search, profiles, notifications, commits today | matthias only |
 | `hackatime` | his coding time, whole history: totals, streak, projects, one project, per day, sessions | anyone |
@@ -219,7 +219,7 @@ step if those directories already exist with permissions the container can
 write to.
 
 `docker compose up` also starts a second container, `sandbox`, that runs the
-`run_code` tool's python/javascript. it is on only if `SANDBOX_TOKEN` is set in
+`run_code` tool's python/javascript/bash. it is on only if `SANDBOX_TOKEN` is set in
 `.env`: without it noodle doesn't offer `run_code` at all and the container just
 idles. it gets none of noodle's other secrets and has no internet: it only shares
 a private internal network with noodle. the first build downloads about 50MB of

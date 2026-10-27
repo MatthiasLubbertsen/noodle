@@ -465,21 +465,32 @@ TOOLS = [
         "function": {
             "name": "run_code",
             "description": (
-                "run a python or javascript snippet in an isolated sandbox and get "
+                "run a python, javascript or bash snippet in an isolated sandbox and get "
                 "the output back (matthias only, dms only, enforced). use it for real "
-                "calculations, data crunching, simulations, plots and file conversions "
-                "- not for arithmetic you can do in your head. "
+                "calculations, data crunching, simulations, plots, file conversions and "
+                "shell-style text/data wrangling - not for arithmetic you can do in your head. "
                 "CAN: python 3.13 with the standard library plus numpy, pandas, "
                 "matplotlib, scipy and sympy (and their deps: pillow, dateutil, pytz, "
                 "mpmath); matplotlib figures are sent to the dm as png automatically, "
                 "and files the code writes to /out/ (csv, txt, json, png...; max 5, "
                 "8MB each) are sent too; javascript is plain ES2020 (QuickJS) with "
-                "console.log, and the last expression's value is returned. "
+                "console.log, and the last expression's value is returned; bash is a "
+                "simulated shell (real bash syntax: pipes, loops, functions, variables, "
+                "heredocs) with grep, sed, awk, jq, yq, xan (csv), sort, uniq, cut, tr, "
+                "find, diff, tar, gzip, base64, md5sum/sha256sum, seq, date and friends, "
+                "working on an in-memory /work directory that is kept between bash runs "
+                "(so you can build things up across several calls; `reset` wipes it) and "
+                "that you can seed with `files` (text only, e.g. data he pasted); files "
+                "left in /out/ are sent to the dm. "
                 "CANNOT: no internet at all (no http requests, downloads, apis, git, "
                 "pip/npm install); no other packages (no sklearn, torch, requests, "
-                "opencv...); no shell, subprocesses or threads; no access to files, "
+                "opencv...); no real shell: bash has no real processes, so no "
+                "python/node/curl/git/sqlite3/apt/ssh/docker or any other binary, only "
+                "its built-in commands; no threads; no access to files, "
                 "slack data, memory or anything noodle has - everything the code needs "
-                "must be written into the code itself; nothing persists between runs; "
+                "must be written into the code itself (or passed as bash `files`); "
+                "python and javascript keep nothing between runs, only the bash /work "
+                "directory does (for a while); "
                 "no input()/stdin, no interactive or gui plots; javascript has no "
                 "require/import/fetch/timers/dom. limits: 20s by default (60s max), "
                 "about 900MB memory, 20k characters of output, so heavy training or "
@@ -489,9 +500,15 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "language": {"type": "string", "enum": ["python", "javascript"]},
-                    "code": {"type": "string", "description": "the full program to run"},
+                    "language": {"type": "string", "enum": ["python", "javascript", "bash"]},
+                    "code": {"type": "string", "description": "the full program or shell script to run"},
                     "timeout_seconds": {"type": "integer", "description": "1-60, default 20"},
+                    "files": {
+                        "type": "object",
+                        "description": "bash only: text files to put in /work before running, as {\"name.csv\": \"contents\"} (max 50 files, 1MB total)",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "reset": {"type": "boolean", "description": "bash only: wipe the /work directory first and start from nothing"},
                 },
                 "required": ["language", "code"],
             },
@@ -1130,6 +1147,12 @@ def _code_hints(result: dict, language: str) -> list[str]:
         hints.append("hint: the sandbox has no internet at all, so anything that needs the network can't work. ask him to paste the data instead.")
     if re.search(r"(require|import|fetch|setTimeout|setInterval|process|window|document) is not defined|ReferenceError", text) and language == "javascript":
         hints.append("hint: javascript here is bare ES2020 - no require/import/fetch/timers/dom/node apis.")
+    if language == "bash" and re.search(r"command not found|not available", text):
+        hints.append(
+            "hint: that command doesn't exist in the simulated shell, which only has built-in commands "
+            "(grep sed awk jq yq xan sort uniq cut tr find diff tar gzip base64 and similar). no python/node/curl/git/"
+            "sqlite3 or other binaries. use the python or javascript option for that, or say it can't be done."
+        )
     if re.search(r"FileNotFoundError|No such file", text):
         hints.append("hint: the sandbox can't see any files of his or noodle's - the data has to be inside the code. only /out/ is for writing results.")
     if result.get("timed_out"):
@@ -1140,7 +1163,7 @@ def _code_hints(result: dict, language: str) -> list[str]:
 
 
 def _run_code(args: dict, user_id: str | None, origin: dict | None) -> str:
-    """run a python/javascript snippet in the wasm sandbox (matthias, dms only).
+    """run a python/javascript snippet or bash script in the sandbox (matthias, dms only).
     text goes back to the model as tool context; files (plots, csvs) are
     uploaded straight into the dm."""
     if not _is_matthias(user_id):
@@ -1153,8 +1176,8 @@ def _run_code(args: dict, user_id: str | None, origin: dict | None) -> str:
         return "the code sandbox is switched off."
     language = (args.get("language") or "").lower()
     code = args.get("code") or ""
-    if language not in ("python", "javascript"):
-        return "language must be python or javascript."
+    if language not in ("python", "javascript", "bash"):
+        return "language must be python, javascript or bash."
     if not code.strip():
         return "no code given."
     try:
@@ -1162,7 +1185,10 @@ def _run_code(args: dict, user_id: str | None, origin: dict | None) -> str:
     except (TypeError, ValueError):
         timeout_s = 20
 
-    result = sandbox.run(language, code, timeout_s)
+    files = args.get("files")
+    if files is not None and not (isinstance(files, dict) and all(isinstance(v, str) for v in files.values())):
+        return "files must be an object of {name: text}."
+    result = sandbox.run(language, code, timeout_s, files=files if language == "bash" else None, reset=bool(args.get("reset")))
     if isinstance(result, str):
         log_tool("run_code", f"{language} {len(code)} chars", "failed")
         return result

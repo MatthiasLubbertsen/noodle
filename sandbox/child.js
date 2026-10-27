@@ -3,7 +3,8 @@
 // no native addons), killed after exactly one job. the container around it has
 // no network, no secrets and a read-only filesystem.
 //
-// protocol over node's IPC channel: parent sends {language, code, timeoutMs},
+// protocol over node's IPC channel: parent sends {code, timeoutMs, files?}
+// (files = [{path, data(base64)}] to put under /work first, bash only),
 // child answers with one result object. python children load pyodide + the
 // preloaded scientific packages first, then send {ready: true}.
 const path = require("path");
@@ -185,6 +186,103 @@ async function runJavaScript(code, timeoutMs) {
   return { stdout: out.text(), stderr: err.text(), result, error, files: [], truncated: out.truncated || err.truncated };
 }
 
+// ------------------------------------------------------------------ bash
+// a simulated shell (just-bash): bash syntax + ~80 commands (grep sed awk jq sort tar gzip
+// xan yq diff find ...) re-implemented in javascript on an in-memory filesystem. there is no
+// exec(): nothing here can start a real process, read a real file or open a socket - there
+// IS no real process to start. it is JS in this node process though, not a vm, so the
+// real boundary against a bug in it is what surrounds it: `node --permission` (no fs writes,
+// no child processes, no workers), then the container (no network, no secrets, read-only fs).
+// network, python3, js-exec and sqlite3 stay off: each is extra surface (python/js-exec/sqlite
+// run in node workers, which the permission model denies on purpose).
+const WORK = "/work";
+const WORKSPACE = { files: 200, bytes: 4 * 1024 * 1024 };
+
+async function runBash(job) {
+  const { Bash, InMemoryFs } = await import("just-bash");
+  const fs = new InMemoryFs(undefined, { maxTotalBytes: 32 * 1024 * 1024 });
+  await fs.mkdir(WORK, { recursive: true });
+  await fs.mkdir("/out", { recursive: true });
+  for (const f of job.files || []) {
+    const abs = path.posix.join(WORK, f.path);
+    await fs.mkdir(path.posix.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, Buffer.from(f.data, "base64"));
+  }
+  const bash = new Bash({
+    fs,
+    cwd: WORK,
+    env: { HOME: WORK, USER: "sandbox" },
+    executionLimitProfile: "hardened",
+    executionLimits: {
+      maxExecutionTimeMs: job.timeoutMs,
+      maxOutputSize: 2 * 1024 * 1024,
+      maxFileSystemBytes: 32 * 1024 * 1024,
+    },
+    defenseInDepth: true,
+  });
+  const out = capped();
+  const err = capped();
+  let exitCode = null;
+  let error = null;
+  try {
+    const r = await bash.exec(job.code, { signal: AbortSignal.timeout(job.timeoutMs), rawScript: true });
+    exitCode = r.exitCode;
+    for (const line of String(r.stdout).split("\n")) out.push(line, LIMITS.stdout);
+    for (const line of String(r.stderr).split("\n")) err.push(line, LIMITS.stderr);
+    if (exitCode !== 0) error = `exit code ${exitCode}`;
+  } catch (e) {
+    error = `shell error: ${e && e.message ? e.message : e}`;
+  }
+
+  // deliverables: whatever the script left in /out
+  const files = [];
+  let total = 0;
+  const all = fs.getAllPaths();
+  for (const p of all.filter((x) => x.startsWith("/out/")).sort()) {
+    if (files.length >= LIMITS.files) break;
+    const st = await fs.stat(p).catch(() => null);
+    if (!st || !st.isFile || st.size > LIMITS.fileBytes) continue;
+    const name = p.slice(5);
+    if (name.includes("/")) continue;
+    const buf = Buffer.from(await fs.readFileBuffer(p));
+    total += buf.length;
+    files.push({ name, data: buf.toString("base64"), mime: MIME[name.split(".").pop().toLowerCase()] || "application/octet-stream" });
+  }
+  if (total > LIMITS.totalFileBytes) {
+    files.length = 0;
+    error = (error ? error + "\n" : "") + "output files were too big to return";
+  }
+
+  // the workspace: everything under /work, handed back so the next run can start from it
+  let workspace = [];
+  let workspaceBytes = 0;
+  let workspaceDropped = false;
+  for (const p of all.filter((x) => x.startsWith(WORK + "/")).sort()) {
+    const st = await fs.stat(p).catch(() => null);
+    if (!st || !st.isFile) continue;
+    const buf = Buffer.from(await fs.readFileBuffer(p));
+    workspaceBytes += buf.length;
+    if (workspace.length >= WORKSPACE.files || workspaceBytes > WORKSPACE.bytes) {
+      workspaceDropped = true;
+      break;
+    }
+    workspace.push({ path: p.slice(WORK.length + 1), data: buf.toString("base64") });
+  }
+  if (workspaceDropped) workspace = null; // too big to keep: the parent keeps the previous one
+
+  return {
+    stdout: out.text().replace(/\n+$/, ""),
+    stderr: err.text().replace(/\n+$/, ""),
+    result: null,
+    error,
+    exit_code: exitCode,
+    files,
+    workspace,
+    workspace_dropped: workspaceDropped,
+    truncated: out.truncated || err.truncated,
+  };
+}
+
 // ---------------------------------------------------------------- main
 const language = process.argv[2];
 (async () => {
@@ -193,7 +291,9 @@ const language = process.argv[2];
   process.once("message", async (job) => {
     let result;
     try {
-      result = language === "python" ? await runPython(job.code) : await runJavaScript(job.code, job.timeoutMs);
+      if (language === "python") result = await runPython(job.code);
+      else if (language === "bash") result = await runBash(job);
+      else result = await runJavaScript(job.code, job.timeoutMs);
     } catch (e) {
       result = { stdout: "", stderr: "", result: null, error: `runner error: ${e && e.message}`, files: [], truncated: false };
     }

@@ -82,7 +82,8 @@ noodle/
   tests/                  # unittest suite (`python -m unittest discover -s tests -t .`): sky maths, hackatime milestones
   scripts/
     backfill_matthias_day.py  # one-time: backfill historical pings into memory
-  sandbox/                # the code sandbox: its OWN container (node + wasm), see 7g
+  sandbox/                # the code sandbox: its OWN container (node + wasm + simulated shell), see 7g
+    test.js               # `node --test sandbox/test.js`: shell tier, isolation + limits
     server.js             # http runner: pool, timeouts, memory watchdog, auth
     child.js              # one-shot job executor (pyodide python / quickjs javascript)
     fetch-packages.js     # build-time download of pyodide's package wheels
@@ -228,7 +229,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `public_holidays` | a country's public holidays (default NL), next 12 months or one year, marked day off or not (nager.date, no key) | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
-| `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
+| `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy), javascript or a simulated bash shell (grep sed awk jq xan tar...; its /work folder persists between runs) in an isolated sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions, text/data wrangling; no network | matthias only, dms only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
 | `github` | read-only: his repos, a repo + branches/releases/ci runs, readme, file tree, read any file, commits + one commit, issues/prs + one with comments and changed files, stars + starred, issue/repo/code search, profiles, notifications, commits today | matthias only |
 | `hackatime` | his coding time, whole history: summary/today/projects/project (anyone), days/sessions (matthias only: they show when he codes) | anyone / matthias only |
@@ -974,6 +975,39 @@ or id (so "block only mopa5m with the social blocklist" works),
   saying nothing actually happened - real incident: "hey noods let's play tick
   tack to" matched nothing and the model invented a game start.
 
+### 7g-b. the shell tier (`run_code` with `language: "bash"`)
+the "real shell" ask, answered without a real shell. a real one (git, tests, binaries) means a
+real kernel boundary: gvisor needs host setup, firecracker needs kvm, and matthias's server may be
+an unprivileged lxc with neither. so bash is **[just-bash](https://github.com/vercel-labs/just-bash)**:
+bash syntax and ~80 commands (grep sed awk jq yq xan sort uniq find diff tar gzip base64 sha256sum
+date seq...) re-implemented in javascript over an in-memory filesystem. there is no `exec()` in it,
+so it cannot start a process, read a host file or open a socket: those things don't exist for it. free,
+pure js, ~100MB RSS and ~0.3s per run (nothing warm to keep around, unlike python).
+- **layers.** just-bash itself says it is not a vm (same-realm js). so it is never trusted alone, it
+  runs inside the same stack as python: `node --permission` job process (no fs writes, no child
+  processes, no workers, no native addons, empty env, verified: `writeFileSync`, `execSync`,
+  `new Worker`, `process.dlopen` all `ERR_ACCESS_DENIED`) -> killed after one job -> the container
+  (no network, no secrets, read-only fs, non-root, caps dropped, memory/pids limits). a bug in
+  just-bash would hand an attacker js inside a process that still can't write, spawn or phone home.
+  just-bash's own limits are on too (`hardened` profile: command count, call depth, output and
+  filesystem size, wall clock, `defenseInDepth`), and server.js adds the hard wall-clock kill + rss
+  watchdog.
+- **off on purpose:** network (`curl`), `python3`, `js-exec` and `sqlite3` (the last three run in node
+  workers, which the permission model denies by design; python and javascript already exist as their
+  own languages).
+- **persistence without leaks.** `/work` is the cwd. after each run the child hands its files back and
+  `server.js` keeps them in memory (never on disk) per workspace key (noodle always uses one:
+  `matthias`) and seeds the next job with them: 4 workspaces max, 4MB / 200 files each, 30 idle
+  minutes. every job is still a fresh process, so no interpreter state survives, only files. `reset`
+  wipes it. a snapshot over the caps is dropped and the previous one stays.
+- **input and output.** `files` (`{name: text}`, max 50 / 1MB, names must stay inside `/work`, enforced
+  in `server.js` AND by just-bash's fs) seeds `/work` with data he pasted; files left in `/out/` (max 5,
+  8MB each) are uploaded to the dm like python's. a non-zero exit code is reported to the model
+  (`exit code: N`) so a failed `grep` isn't mistaken for success.
+- **runs with python's concurrency rules, separately:** 2 bash jobs at once, 2 may wait, more get a 429.
+- tested by `node --test sandbox/test.js` (isolation probes, limits, workspace, input validation) and
+  `tests/test_sandbox_tool.py` (the tool's wiring, hints and validation).
+
 ### 7g. the code sandbox (`run_code`)
 python 3.13 (pyodide: numpy, pandas, matplotlib, scipy, sympy) and javascript
 (quickjs, ES2020) run as WebAssembly in a separate container. matthias-only and
@@ -1032,7 +1066,7 @@ dm with `files_upload_v2` (needs the `files:write` scope on noodle's token).
   js `require`/`import`/`fetch`/timers/dom, more than 60s, ~900MB memory, 20k
   chars of output, 5 output files of 8MB each. a failed run adds hints for
   missing modules, no network, js-only gaps, missing files, timeouts and memory.
-- **later (not built):** a real shell tier (git, tests, conversions) would be a
+- **later (not built):** a real-binary tier (git, tests, compilers) would be a
   second container behind a forward proxy with a domain allowlist (squid on the
   internal network); this tier needs no network at all.
 
