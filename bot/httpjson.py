@@ -15,7 +15,8 @@ def get_json(url: str, params: dict | None = None, headers: dict | None = None, 
     for attempt in (1, 2):  # one retry: these are all flaky-network best-effort calls
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+                # noaa sometimes serves its json padded with NUL bytes (seen live)
+                return json.loads(resp.read().rstrip(b"\x00").decode("utf-8"))
         except (urllib.error.URLError, TimeoutError):
             if attempt == 2:
                 raise

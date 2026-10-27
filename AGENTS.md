@@ -45,6 +45,7 @@ noodle/
     embeddings.py         # calls the ai endpoint's /embeddings route
     exa.py                # calls the ai endpoint's /exa/answer route (web_search)
     chunk.py              # splits replies into small slack messages
+    rtm.py                # presence (green dot) + typing indicator via the web client websocket
     stats.py              # "messages sent today" recap (via slack search)
     almanac.py            # silly/named days today (wikipedia)
     news.py               # hack club news rss + persisted "seen" state
@@ -59,11 +60,15 @@ noodle/
     freedom_tool.py       # the full `freedom` tool (devices, blocklists, sessions, schedules)
     httpjson.py           # tiny shared GET-json helper (one retry) for the apis below
     dice.py               # dice notation parser + roller (roll_dice tool)
-    weather.py            # open-meteo forecasts (morning dm + get_weather tool)
+    weather.py            # open-meteo forecasts (morning dm + get_weather tool), cloud cover
+    holidays.py           # nager.date public holidays (morning dm + public_holidays tool)
+    sky.py                # sunset "tonight's sky" dm + live aurora alerts, see 7j
     lastfm.py             # last.fm now playing / tracks today (now_playing tool)
     github.py             # github rest calls (github tool, commit count)
     links.py              # link shortener api calls (links tool)
     github_watch.py       # new-notification diffing + persisted "seen" state
+    hackatime.py          # hackatime api calls (hackatime tool, project totals)
+    hackatime_watch.py    # hour milestones per project + persisted "seen" state
     proactive.py          # quiet hours + daily cap for unprompted pings
     oneshot.py            # one-off persona completion for scheduled messages
     wrapup.py             # end-of-day wrap-up dm
@@ -74,6 +79,7 @@ noodle/
     weekly.py             # weekly journal + music recaps
     log.py                # logging setup
     netlog.py             # concise "called hcai .../called tool ..." log lines
+  tests/                  # unittest suite (`python -m unittest discover -s tests -t .`): sky maths, hackatime milestones
   scripts/
     backfill_matthias_day.py  # one-time: backfill historical pings into memory
   sandbox/                # the code sandbox: its OWN container (node + wasm), see 7g
@@ -156,11 +162,12 @@ no nested `noodle/noodle` folder.
 ### 4. persona & system prompt
 - the persona lives in `prompts/system_prompt.md` and is loaded at startup.
 - style rules: lowercase ONLY (no capitals); warm, casual, friendly, like a
-  real friend texting; no baby-talk speech quirks (no `uwu`/`owo`/`:3`, no
+  real friend texting, with a light dry/sarcastic streak (never mean, never
+  every sentence, dropped entirely when someone is upset or needs real help);
+  replies are kept SHORT (one or two sentences by default, longer only when asked); no baby-talk speech quirks (no `uwu`/`owo`/`:3`, no
   turning `r`/`l` into `w`, no `_giggles_`-style cute actions); they/them.
-- the prompt tells the model to write its reply as one bigger, normal chat
-  message (a paragraph, or a couple if there's a lot to say) instead of
-  splitting every thought onto its own line. a hard cap (`[:8]` fragments)
+- the prompt tells the model to write its reply as one short chat message
+  instead of splitting every thought onto its own line. a hard cap (`[:8]` fragments)
   still prevents the bot from spamming a channel if it ever writes an
   unusually long, multi-paragraph reply.
 - the "using tools" section opens with a blanket rule: only call a tool when
@@ -218,11 +225,13 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `web_search` | short cited answer from the live web (exa via hack club ai) | anyone |
 | `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
 | `roll_dice` | roll dice in standard notation (d20, 2d6+3, coin = d2), up to 20 dice | anyone |
+| `public_holidays` | a country's public holidays (default NL), next 12 months or one year, marked day off or not (nager.date, no key) | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
 | `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
-| `github` | repo, commits, issues, pulls, search, notifications, commits today | matthias only |
+| `github` | read-only: his repos, a repo + branches/releases/ci runs, readme, file tree, read any file, commits + one commit, issues/prs + one with comments and changed files, stars + starred, issue/repo/code search, profiles, notifications, commits today | matthias only |
+| `hackatime` | his coding time, whole history: summary/today/projects/project (anyone), days/sessions (matthias only: they show when he codes) | anyone / matthias only |
 | `links` | create/list/get/update/delete his short links + click stats (link shortener api) | matthias only |
 | `get_journal` | his `@matthias-day` recaps for a date range (plain date filter, not vector search) | matthias only |
 | `summarize_thread` | reads a whole thread (link or current thread) so the model can tl;dr it; same auto-join rule as `fetch_slack_message` | anyone |
@@ -233,7 +242,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `list_scheduled` | list scheduled reminders and freedom sessions | matthias only |
 | `cancel_scheduled` | cancel one reminder or freedom session by id | matthias only |
 
-**no credential, no tool.** eight of these need a credential, and without it they are
+**no credential, no tool.** nine of these need a credential, and without it they are
 not just broken but absent: `bot/features.py` decides from the env alone, `tools.available_tools()`
 drops them from the list the model is sent, `prompt.load_prompt()` removes their sections of the
 system prompt (wrapped in `<!-- if:NAME -->...<!-- endif:NAME -->` in `prompts/system_prompt.md`)
@@ -243,6 +252,7 @@ jobs that need them don't start. so the model never offers or promises something
 - `LASTFM_API_KEY` + `LASTFM_USER` -> `now_playing`, `music_stats`
 - `FREEDOM_API_KEY` -> `freedom`, `start_freedom_session`, `schedule_freedom_session`
 - `LINKS_API_BASE` + `LINKS_API_KEY` (both) -> `links`
+- `HACKATIME_USERNAME` -> `hackatime` (and the milestone watcher); `HACKATIME_API_KEY` only if his stats aren't public
 - `SANDBOX_TOKEN` (16+ chars) -> `run_code`
 everything else (search, flaron, memory, weather, journal, threads, reminders, games, web search)
 needs nothing extra. **adding a tool that needs a credential?** add it to `features.py`
@@ -813,8 +823,11 @@ skips that piece, never breaks startup or a dm).
   facts) - this fixed a double "good morning" in the morning dm.
 - **tools** (`bot/tools.py`): `get_weather` (any place; none = `WEATHER_DEFAULT_LOCATION`), `now_playing` (last.fm, since
   matthias can't create more spotify apps - spotify scrobbling to last.fm
-  needs no oauth), `github` (repo/commits/issues/pulls/search/notifications/
-  today; **matthias-only, checked server-side**, because his token sees
+  needs no oauth), `github` (read-only, 21 actions: repos/repo/branches/releases/
+  actions (ci runs)/readme/tree/file/commits/commit/issues/pulls/issue/stars/starred/
+  search/search_repos/code_search/user/notifications/today; files are cut at 12k chars,
+  trees at 300 paths; needs only the existing classic `repo` + `notifications` scopes;
+  **matthias-only, checked server-side**, because his token sees
   private repos), `get_journal` (his `@matthias-day` recaps for a date range - a plain
   sql date filter on the `matthias_day` rows, NOT vector search; `search_memory`
   is the vector/topic lookup) and `summarize_thread` (returns a
@@ -831,17 +844,22 @@ skips that piece, never breaks startup or a dm).
   digest anymore (removed). like all
   scheduled dms they go through `_deliver()`, so they are saved to memory and
   searchable.
+- **github tool and untrusted text.** the `github` tool (file, readme, issue, code_search) returns text
+  written by anyone, into a context that also holds matthias-only tools (`freedom`, `links`,
+  reminders). only the sender id is checked in code, never what a tool result says, so a hostile
+  readme or issue comment could try to steer the model. same trust model as `fetch_slack_message`;
+  only some tools have a code-level guard beyond the sender id (reminders need `_REMINDER_ASK`), so don't point the bot at repos you don't trust.
 - **github watcher** (`github_watch.py`, started only if `GITHUB_TOKEN` is
   set): polls `/notifications` every `GITHUB_POLL_SECONDS`, DMs one message
   per poll for notifications not yet reported (ignores `subscribed`), state in
   `data/github_seen.json`. first run ever baselines what is already unread and
   reports nothing. needs a CLASSIC token (`repo` + `notifications`); fine-
   grained tokens can't read notifications.
-- **proactivity guardrails** (`proactive.py`): the watcher is the only
-  unprompted ping, so it's held during `QUIET_HOURS` (default 23:00-07:30) and
-  capped at `PROACTIVE_DAILY_CAP` dms/day (state in
-  `data/proactive_state.json`). held notifications stay unreported and go out
-  on the next allowed poll. fixed-time dms are exempt.
+- **proactivity guardrails** (`proactive.py`): unprompted pings (this watcher,
+  and the sky/aurora dms from 7j) are held during `QUIET_HOURS` (default
+  23:00-07:30) and capped at `PROACTIVE_DAILY_CAP` dms/day (state in
+  `data/proactive_state.json`). held github notifications stay unreported and go
+  out on the next allowed poll (sky dms are skipped instead). fixed-time dms are exempt.
 
 ### 7d. the `freedom` tool (full freedom api / mcp surface)
 `bot/freedom_tool.py` exposes everything freedom's mcp has as ONE tool with an
@@ -1042,6 +1060,57 @@ dm with `files_upload_v2` (needs the `files:write` scope on noodle's token).
 - an embeddings 502 in the logs is the ai endpoint failing upstream; `embeddings.py` retries once
   and a row that still fails is stored without an embedding (chat is unaffected).
 
+### 7j. dutch holidays, tonight's sky, aurora alerts
+- **holidays** (`bot/holidays.py`, nager.date, no key, cached per year+country): the morning
+  greeting gets today's dutch holiday as a fact (and says whether it's a day off: nager's
+  `Public` type; good friday/liberation day are only `School`/`Authorities`/`Observance`).
+  the `public_holidays` tool lists any country's holidays for the next 12 months or a year.
+- **tonight's sky** (`bot/sky.py`, `scheduler._run_sky_tonight()`): at every sunset (computed
+  for matthias's place, `weather.home_coords()`: `WEATHER_DEFAULT_LOCATION`, else the first
+  `WEATHER_LOCATIONS`, else the middle of the netherlands) it checks 45 min to 4 h after sunset
+  for: the moon/planets within 3° while both are 10°+ up (only on the closest evening, since two
+  planets stay close for days), mars/jupiter/saturn at opposition, mercury/venus at greatest
+  evening elongation, a partial/total lunar eclipse visible before sunrise, the peak of a big
+  meteor shower (static dates) and a noaa kp forecast >= `AURORA_KP` (6) for the dark hours.
+  computed locally with `astronomy-engine` (pure python, no key; nasa has no "visible tonight"
+  api). about a dozen nights a year qualify (checked against 2026: saturn opposition oct 4,
+  partial eclipse aug 28, venus-jupiter jun 9...).
+- **aurora alert** (`scheduler._run_aurora_watch()`): every 10 min, once per night, when the sun
+  is below -12°, noaa's 1-minute estimated kp is >= `AURORA_KP` and it isn't overcast.
+- **one aurora dm per night, across both paths.** `scheduler._aurora_night` is set by whichever
+  went out first (the sunset dm when it carried the noaa forecast, or the live alert), keyed by
+  `sky.night_of()` (01:00 is still "last night").
+- both are unprompted pings: they go through `proactive.can_send()`/`record_sent()`. the sunset
+  dm is *skipped*, never held, in quiet hours or past the cap (a stale sky alert is useless). the
+  live aurora alert ignores quiet hours by default (`AURORA_IN_QUIET_HOURS=1`: it's only worth
+  sending when it's dark, which is mostly 23:00-07:30), but still counts against the cap.
+  `_run_sky_tonight()` catches everything (e.g. no sunset found) and retries in an hour, the
+  thread never dies. both skip
+  nights with >= 75% mean cloud cover (open-meteo); a failed cloud lookup counts as clear so an
+  api hiccup never swallows something rare. persona-written via `complete()`, facts saved with
+  `remember_facts()`, the place is never named. noaa sometimes serves its json padded with NUL
+  bytes, which `httpjson.get_json()` strips.
+
+### 7k. hackatime: coding time tool + hour milestones
+- `bot/hackatime.py` (the `hackatime` tool, **public on purpose**: anyone may ask about his coding
+  time - except `days` and `sessions`, which reveal his daily rhythm and are matthias-only,
+  enforced in `hackatime.query(is_owner=...)` from the real sender id; project names and repo
+  links stay public, so don't track private projects in hackatime if that matters). actions: `summary` (all time or a range, optionally one project: total, daily average,
+  streak, top projects + languages), `today`, `projects` (every project ever with all-time time,
+  `query` filters by name), `project` (one project's time, first/last day, repo, languages; its
+  endpoint only covers a recent stretch without a start, so all-time passes `ALL_TIME`),
+  `days` (time per amsterdam day from heartbeat spans, per month past ~3 months, max a year) and
+  `sessions` (spans merged when < 15 min apart). dates are whole amsterdam days sent with their
+  utc offset, end date included. a 404/403 becomes a plain "not found" / "stats not public".
+- `bot/hackatime_watch.py` + `scheduler._run_hackatime_watcher()` (every
+  `HACKATIME_POLL_SECONDS`, default 600): diffs each project's all-time hours against
+  `data/hackatime_seen.json`. every full hour crossed -> a plain line in `LOGS_CHANNEL_ID` (machine
+  log, no ping); every multiple of 5 crossed -> a persona post in `MATTHIAS_DAY_CHANNEL_ID` via
+  `_deliver()` (with the repo link if hackatime has one). first run ever only baselines; a jump
+  over several hours (downtime) posts once with the latest number; each project's post is in its
+  own try/except (they're marked reported first, so one failure must not drop the rest); a project recounted lower never
+  re-announces an hour. these are posts about his coding, not dms, so no proactive guardrails.
+
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
   (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore
@@ -1067,6 +1136,17 @@ dm with `files_upload_v2` (needs the `files:write` scope on noodle's token).
   `member_left_channel` subscribed as events (workspace/app-level config,
   not something this repo controls).
 
+### 8b. presence + typing indicator (`bot/rtm.py`)
+bolt/socket mode can't show the green dot or "typing...", the real web client does both over
+its own (undocumented) websocket. with `SLACK_WEB_TOKEN` (xoxc) + `SLACK_WEB_COOKIE` (the `d`
+cookie), both of **noodle's own account**, `start_rtm()` (from `build_app()`) calls the web api
+`client.getWebSocketURL`, connects with `?token=` + `cookie: d=`, pings every 40s, follows
+`reconnect_url`, and reconnects on its own: being connected = online. `rtm.typing(channel,
+thread_ts)` is a context manager sending `{"type":"typing"}` every 2.5s while it runs;
+`handlers._process_locked()` wraps `ask_noodle()` in it, so it shows during slow tool calls.
+the web session is used ONLY for the websocket (ping + typing): every message noodle sends still goes through the normal bolt token. if `getWebSocketURL` or the handshake fails with an auth error (`invalid_auth`, `token_expired`, 401/403...), `_report_expired()` dms matthias once per outage (persona-written, via `_post_dm`), then retries every 5 minutes; a successful connect resets the flag. without the credentials (`features.enabled("typing")`) everything is a silent no-op. all
+failures are logged and never break replies.
+
 ## running it locally
 
 ```bash
@@ -1086,6 +1166,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | --- | --- |
 | `SLACK_USER_TOKEN` | token (xoxp-...) of noodle's own dedicated slack account (not matthias's) |
 | `SLACK_APP_TOKEN` | socket mode app token (xapp-...) |
+| `SLACK_WEB_TOKEN` / `SLACK_WEB_COOKIE` | optional: noodle's web session (`xoxc-` token + `d` cookie) for presence + typing, see 8b. both unset = off |
 | `USER_ID` | only slack user allowed to DM noodle |
 | `OPENAI_API_KEY` | openrouter api key (sk-or-...) |
 | `AI_ENDPOINT` | openai-compatible base; `/v1` is appended automatically |
@@ -1106,9 +1187,11 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `LINKS_API_BASE` / `LINKS_API_KEY` | link shortener api base url (no default, e.g. `https://go.example.com/api/v1`) + its `lnk_...` key; either unset = `links` tool off |
 | `SANDBOX_TOKEN` | shared secret between noodle and the code sandbox (16+ random chars); compose sets `SANDBOX_URL` itself. **unset = sandbox off**: `run_code` is not offered to the model and the container idles |
 | `MATTHIAS_USER_TOKEN` | matthias's OWN xoxp token (`search:read`), used only to count today's messages incl. private channels - nothing else |
+| `AURORA_IN_QUIET_HOURS` | `1` (default): the live aurora alert ignores quiet hours (still capped); `0` respects them |
 | `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`), max per day (default 10) |
 | `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | PRIVATE, no defaults in code: morning dm places (comma separated) / get_weather default place |
 | `LASTFM_API_KEY` / `LASTFM_USER` | last.fm key + username; optional, enables `now_playing` |
+| `HACKATIME_USERNAME` / `HACKATIME_API_KEY` / `HACKATIME_POLL_SECONDS` | hackatime username or slack id (enables the tool + milestones); key only if stats aren't public; poll interval (600) |
 | `GITHUB_TOKEN` / `GITHUB_USER` / `GITHUB_POLL_SECONDS` | classic token (`repo`, `notifications`); optional, enables the github tool + watcher |
 | `WATCHED_CHANNEL_ID` | channel watched for joins/leaves; empty disables it |
 | `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
