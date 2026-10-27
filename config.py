@@ -62,7 +62,9 @@ UNPROMPTED_COOLDOWN_SECONDS = float(os.getenv("UNPROMPTED_COOLDOWN_SECONDS", "30
 # everything runs in Europe/Amsterdam time - not configurable, matthias lives there.
 # "HH:MM" time noodle DMs USER_ID a reminder to send today's @matthias-day ping
 DAILY_PING_REMINDER = os.getenv("DAILY_PING_REMINDER", "19:00")
-# "HH:MM" time noodle DMs USER_ID the wakey-wakey / special-day / news digest
+# "HH:MM" time noodle DMs USER_ID the wakey-wakey / special-day / news digest.
+# only used without the web session (SLACK_WEB_TOKEN + SLACK_WEB_COOKIE): with it, the morning
+# dm goes out when USER_ID first comes online after QUIET_HOURS instead (see bot/wakeup.py)
 DAILY_MORNING_DM = os.getenv("DAILY_MORNING_DM", "08:00")
 
 # "HH:MM" time noodle DMs a short end-of-day wrap-up (slack messages, commits,
@@ -188,5 +190,6 @@ MEMORY_DB_PATH = DATA_DIR / "noodle_memory.db"
 GITHUB_SEEN_PATH = DATA_DIR / "github_seen.json"
 HACKATIME_SEEN_PATH = DATA_DIR / "hackatime_seen.json"
 PROACTIVE_STATE_PATH = DATA_DIR / "proactive_state.json"
+MORNING_STATE_PATH = DATA_DIR / "morning_sent.json"
 GAMES_STATE_PATH = DATA_DIR / "games.json"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

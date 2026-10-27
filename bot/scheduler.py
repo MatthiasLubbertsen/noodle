@@ -4,7 +4,7 @@ import threading
 import time
 
 import config
-from bot import github, github_watch, hackatime, hackatime_watch, proactive, reminders, sky, state, watch
+from bot import features, github, github_watch, hackatime, hackatime_watch, proactive, reminders, sky, state, watch
 from bot.chunk import chunk_response
 from bot.history_store import append_message_async
 from bot.llm import _kind_for
@@ -326,10 +326,12 @@ def start_daily_scheduler() -> None:
     threading.Thread(
         target=_run_daily, args=(ping_hour, ping_minute, _send_ping_reminder), daemon=True
     ).start()
-    morning_hour, morning_minute = _parse_hhmm(config.DAILY_MORNING_DM, (8, 0))
-    threading.Thread(
-        target=_run_daily, args=(morning_hour, morning_minute, _send_morning_dm), daemon=True
-    ).start()
+    # with the web session the morning dm follows his presence instead (bot/wakeup.py via rtm.py)
+    if not features.enabled("presence"):
+        morning_hour, morning_minute = _parse_hhmm(config.DAILY_MORNING_DM, (8, 0))
+        threading.Thread(
+            target=_run_daily, args=(morning_hour, morning_minute, _send_morning_dm), daemon=True
+        ).start()
     wrap_hour, wrap_minute = _parse_hhmm(config.DAILY_WRAPUP_DM, (21, 30))
     threading.Thread(
         target=_run_daily, args=(wrap_hour, wrap_minute, _send_wrapup_dm), daemon=True
