@@ -24,6 +24,7 @@ from bot.freedom import list_schedules as freedom_list_schedules
 from bot.freedom import list_sessions as freedom_list_sessions
 from bot.freedom import start_session as freedom_start_session
 from bot.history_store import load_kind_between, search_similar
+from bot.holidays import holidays_text
 from bot.netlog import log_tool
 from bot.slack_text import _channel_link, _parse_slack_ref
 from bot.tz import AMSTERDAM_TZ
@@ -407,6 +408,24 @@ TOOLS = [
                 "properties": {
                     "location": {"type": "string", "description": "a place name, e.g. 'utrecht'. empty = matthias's own location"},
                     "days": {"type": "integer", "description": "days to cover incl. today (1-7), default 1"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "public_holidays",
+            "description": (
+                "public holidays for a country, via nager.date: the next 12 months, or a whole "
+                "year. each one says whether it's a real day off. use when someone asks about a "
+                "holiday or whether a day is a day off ('is monday a holiday?', 'when is koningsdag?')."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "country": {"type": "string", "description": "2-letter country code, e.g. NL, DE, US. default NL"},
+                    "year": {"type": "integer", "description": "a whole calendar year. leave out for the next 12 months"},
                 },
             },
         },
@@ -1464,6 +1483,10 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return _cancel_scheduled(args.get("id"), user_id)
     if name == "get_weather":
         return _get_weather(args.get("location"), args.get("days"), origin)
+    if name == "public_holidays":
+        country = args.get("country") or "NL"
+        log_tool("public_holidays", f"{country} {args.get('year') or 'next 12 months'}", "run")
+        return holidays_text(country, args.get("year"))
     if name == "now_playing":
         return _now_playing(user_id)
     if name == "run_code":

@@ -4,7 +4,7 @@ import threading
 import time
 
 import config
-from bot import github, github_watch, proactive, reminders, state
+from bot import github, github_watch, proactive, reminders, sky, state
 from bot.chunk import chunk_response
 from bot.history_store import append_message_async
 from bot.llm import _kind_for
@@ -168,6 +168,55 @@ def _run_github_watcher() -> None:
         time.sleep(config.GITHUB_POLL_SECONDS)
 
 
+def _send_sky_tonight(sunset: datetime.datetime) -> None:
+    """at sunset: a dm if tonight's sky has something worth going outside for.
+    unprompted, so it skips (never holds - it'd be stale) on quiet hours or the cap."""
+    try:
+        facts = sky.tonight_facts(sunset)
+        if not facts:
+            logger.info("sky: nothing special tonight")
+            return
+        if sky.overcast(sunset, sunset + datetime.timedelta(hours=4)):
+            logger.info("sky: %d thing(s) tonight but overcast, not sending", len(facts))
+            return
+        if not proactive.can_send():
+            logger.info("sky: quiet hours or daily cap, not sending")
+            return
+        _post_dm(sky.compose_tonight(facts))
+        proactive.record_sent()
+        logger.info("sent tonight's sky dm (%d thing(s))", len(facts))
+    except Exception:  # noqa: BLE001
+        logger.exception("tonight's sky check failed")
+
+
+def _run_sky_tonight() -> None:
+    while True:
+        sunset = sky.next_sunset()
+        logger.info("next _send_sky_tonight scheduled for %s", sunset.isoformat())
+        time.sleep(max((sunset - datetime.datetime.now(AMSTERDAM_TZ)).total_seconds(), 1))
+        _send_sky_tonight(sunset)
+        time.sleep(60)  # so next_sunset() moves on to tomorrow's
+
+
+def _run_aurora_watch() -> None:
+    """every 10 minutes: dm once a night when the aurora is likely up right now."""
+    alerted_night = None
+    while True:
+        try:
+            # a night belongs to the date it started on, so 01:00 is still "last night"
+            night = (datetime.datetime.now(AMSTERDAM_TZ) - datetime.timedelta(hours=12)).date()
+            if night != alerted_night and proactive.can_send():
+                facts = sky.aurora_now()
+                if facts:
+                    _post_dm(sky.compose_aurora(facts))
+                    proactive.record_sent()
+                    alerted_night = night
+                    logger.info("sent aurora alert dm")
+        except Exception:  # noqa: BLE001
+            logger.exception("aurora check failed")
+        time.sleep(600)
+
+
 def _fire_reminder(reminder: dict) -> None:
     channel, thread_ts = reminder["channel"], reminder["thread_ts"]
     mention = "" if channel == config.USER_ID else f"<@{config.USER_ID}>"
@@ -258,3 +307,5 @@ def start_daily_scheduler() -> None:
     if github.configured():
         threading.Thread(target=_run_github_watcher, daemon=True).start()
     threading.Thread(target=_run_reminder_poller, daemon=True).start()
+    threading.Thread(target=_run_sky_tonight, daemon=True).start()
+    threading.Thread(target=_run_aurora_watch, daemon=True).start()

@@ -59,7 +59,9 @@ noodle/
     freedom.py            # calls matthias's self-hosted freedom.to focus-session api
     freedom_tool.py       # the full `freedom` tool (devices, blocklists, sessions, schedules)
     httpjson.py           # tiny shared GET-json helper (one retry) for the apis below
-    weather.py            # open-meteo forecasts (morning dm + get_weather tool)
+    weather.py            # open-meteo forecasts (morning dm + get_weather tool), cloud cover
+    holidays.py           # nager.date public holidays (morning dm + public_holidays tool)
+    sky.py                # sunset "tonight's sky" dm + live aurora alerts, see 7j
     lastfm.py             # last.fm now playing / tracks today (now_playing tool)
     github.py             # github rest calls (github tool, commit count)
     links.py              # link shortener api calls (links tool)
@@ -218,6 +220,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `search_memory` | semantic (vector) search of noodle's persisted memory: dms, threads, pings, journal, daily facts | matthias only |
 | `web_search` | short cited answer from the live web (exa via hack club ai) | anyone |
 | `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
+| `public_holidays` | a country's public holidays (default NL), next 12 months or one year, marked day off or not (nager.date, no key) | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
 | `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
@@ -837,11 +840,11 @@ skips that piece, never breaks startup or a dm).
   `data/github_seen.json`. first run ever baselines what is already unread and
   reports nothing. needs a CLASSIC token (`repo` + `notifications`); fine-
   grained tokens can't read notifications.
-- **proactivity guardrails** (`proactive.py`): the watcher is the only
-  unprompted ping, so it's held during `QUIET_HOURS` (default 23:00-07:30) and
-  capped at `PROACTIVE_DAILY_CAP` dms/day (state in
-  `data/proactive_state.json`). held notifications stay unreported and go out
-  on the next allowed poll. fixed-time dms are exempt.
+- **proactivity guardrails** (`proactive.py`): unprompted pings (this watcher,
+  and the sky/aurora dms from 7j) are held during `QUIET_HOURS` (default
+  23:00-07:30) and capped at `PROACTIVE_DAILY_CAP` dms/day (state in
+  `data/proactive_state.json`). held github notifications stay unreported and go
+  out on the next allowed poll (sky dms are skipped instead). fixed-time dms are exempt.
 
 ### 7d. the `freedom` tool (full freedom api / mcp surface)
 `bot/freedom_tool.py` exposes everything freedom's mcp has as ONE tool with an
@@ -1041,6 +1044,30 @@ dm with `files_upload_v2` (needs the `files:write` scope on noodle's token).
   real play word (`play`, `rematch`, `new game`...) or as the whole message ("again!").
 - an embeddings 502 in the logs is the ai endpoint failing upstream; `embeddings.py` retries once
   and a row that still fails is stored without an embedding (chat is unaffected).
+
+### 7j. dutch holidays, tonight's sky, aurora alerts
+- **holidays** (`bot/holidays.py`, nager.date, no key, cached per year+country): the morning
+  greeting gets today's dutch holiday as a fact (and says whether it's a day off: nager's
+  `Public` type; good friday/liberation day are only `School`/`Authorities`/`Observance`).
+  the `public_holidays` tool lists any country's holidays for the next 12 months or a year.
+- **tonight's sky** (`bot/sky.py`, `scheduler._run_sky_tonight()`): at every sunset (computed
+  for matthias's place, `weather.home_coords()`: `WEATHER_DEFAULT_LOCATION`, else the first
+  `WEATHER_LOCATIONS`, else the middle of the netherlands) it checks 45 min to 4 h after sunset
+  for: the moon/planets within 3° while both are 10°+ up (only on the closest evening, since two
+  planets stay close for days), mars/jupiter/saturn at opposition, mercury/venus at greatest
+  evening elongation, a partial/total lunar eclipse visible before sunrise, the peak of a big
+  meteor shower (static dates) and a noaa kp forecast >= `AURORA_KP` (6) for the dark hours.
+  computed locally with `astronomy-engine` (pure python, no key; nasa has no "visible tonight"
+  api). about a dozen nights a year qualify (checked against 2026: saturn opposition oct 4,
+  partial eclipse aug 28, venus-jupiter jun 9...).
+- **aurora alert** (`scheduler._run_aurora_watch()`): every 10 min, once per night, when the sun
+  is below -12°, noaa's 1-minute estimated kp is >= `AURORA_KP` and it isn't overcast.
+- both are unprompted pings: they go through `proactive.can_send()`/`record_sent()`, but are
+  *skipped*, never held, in quiet hours or past the cap (a stale sky alert is useless). both skip
+  nights with >= 75% mean cloud cover (open-meteo); a failed cloud lookup counts as clear so an
+  api hiccup never swallows something rare. persona-written via `complete()`, facts saved with
+  `remember_facts()`, the place is never named. noaa sometimes serves its json padded with NUL
+  bytes, which `httpjson.get_json()` strips.
 
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`

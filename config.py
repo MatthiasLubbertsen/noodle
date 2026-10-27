@@ -75,7 +75,7 @@ WEEKLY_JOURNAL = os.getenv("WEEKLY_JOURNAL", "sun 18:00")
 WEEKLY_MUSIC = os.getenv("WEEKLY_MUSIC", "sun 18:30")
 
 # --- proactivity guardrails ---
-# unprompted pings (the github watcher) are held during quiet hours
+# unprompted pings (the github watcher, sky/aurora dms) are held during quiet hours
 # ("HH:MM-HH:MM", may wrap past midnight) and capped per day. fixed-time dms
 # (morning, wrap-up, weekly) are exempt.
 QUIET_HOURS = os.getenv("QUIET_HOURS", "23:00-07:30")

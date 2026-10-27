@@ -29,12 +29,18 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
   pinged.
 - DM you a tiny wakey-wakey message every morning at `DAILY_MORNING_DM`
   (default 08:00, Europe/Amsterdam), mentioning it only if today has a silly/
-  named day (like watermelon day). if there are any new hack club news
+  named day (like watermelon day) or a dutch public holiday (nager.date). if there are any new hack club news
   articles (news.hackclub.com) since the last check, that's sent as a
   second, separate message right after.
 - add the weather (open-meteo) for your places to the morning dm, DM an
   end-of-day wrap-up, a weekly recap of your `@matthias-day` journal, and DM you new github notifications
   (quiet hours + a daily cap keep it polite).
+- DM you at sunset when the night sky has something worth going outside for
+  (the moon and a planet close together, an opposition, mercury/venus at their
+  best, a lunar eclipse, a big meteor shower, a strong aurora forecast), and
+  right away when noaa's live kp index says the aurora might be up. overcast
+  nights are skipped. the planets are computed locally (astronomy-engine, no
+  key); about a dozen nights a year qualify.
 - answer weather, last.fm now-playing, github and "what did i do in march"
   (journal) questions with tools, and tl;dr a slack thread from a link.
 - ignore any message that starts with `# ` (a hash and a space), always,
@@ -81,6 +87,7 @@ real slack sender id, so it is safe in public channels too.
 | `search_memory` | semantic (vector) search of noodle's persisted memory: dms, threads, pings, journal, daily facts | matthias only |
 | `web_search` | short cited answer from the live web (exa via hack club ai) | anyone |
 | `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
+| `public_holidays` | a country's public holidays (default NL) for the next 12 months or a year, and which are a day off, via nager.date | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
 | `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
@@ -141,7 +148,9 @@ noodle/
     freedom.py         # calls matthias's self-hosted freedom.to api
     freedom_tool.py    # the full `freedom` tool (devices, blocklists, sessions, schedules)
     httpjson.py        # tiny shared GET-json helper for the apis below
-    weather.py         # open-meteo forecasts (morning dm + get_weather)
+    weather.py         # open-meteo forecasts (morning dm + get_weather), cloud cover
+    holidays.py        # nager.date public holidays (morning dm + public_holidays)
+    sky.py             # tonight's sky + aurora alerts (astronomy-engine, noaa kp index)
     lastfm.py          # last.fm now playing / tracks today (now_playing)
     github.py          # github rest calls (github tool, commit count)
     links.py           # link shortener api calls (links tool)

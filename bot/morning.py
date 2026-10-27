@@ -4,6 +4,7 @@ import re
 import config
 from bot import state
 from bot.almanac import fun_holidays_today
+from bot.holidays import today_nl
 from bot.news import unread_articles
 from bot.oneshot import complete, remember_facts
 from bot.slack_text import _clean_reply
@@ -30,11 +31,16 @@ def build_greeting_message() -> str:
         if holidays
         else "no silly/named days today"
     )
+    dutch_holiday = today_nl()
+    if dutch_holiday:
+        facts += "\ndutch holiday today: " + dutch_holiday
     prompt = (
         "it's morning, wake matthias up. write ONE short good-morning message "
         "in your own voice, 1-2 sentences, not a report. just say good morning "
         "and mention if today has a silly/named day (skip it if there isn't "
-        "one, don't say 'no special day' or anything like that). that's it, "
+        "one, don't say 'no special day' or anything like that). a dutch holiday "
+        "matters more than a silly day, so lead with it if there is one, and say "
+        "whether it's a day off. that's it, "
         "nothing else - no news, no extra facts, keep it tiny.\n\n"
         f"facts:\n{facts}"
     )
