@@ -227,6 +227,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `roll_dice` | roll dice in standard notation (d20, 2d6+3, coin = d2), up to 20 dice | anyone |
 | `public_holidays` | a country's public holidays (default NL), next 12 months or one year, marked day off or not (nager.date, no key) | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
+| `message_stats` | his slack messages today + his 14-day daily average | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
 | `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |

@@ -118,8 +118,9 @@ def build_daily_summary(user_id: str) -> str:
     text = complete(
         "someone just pinged matthias's daily recap group, so you're posting today's "
         "message count in the channel for everyone to see. say it in your own voice, "
-        "1-2 short sentences, a bit playful. mention the number, and if you're given his "
-        "average, say whether today is above or below it. nothing else "
+        "1-2 short sentences, a bit playful. mention the number. if you're given his "
+        "average you may play with it however you like (above, below, right on it, "
+        "or ignore it), be as creative as you want, no fixed format. nothing else "
         "about what he wrote or where. use ONLY these facts.\n\nfacts: " + facts,
         max_tokens=120,
     )
