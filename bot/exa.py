@@ -92,4 +92,11 @@ def page_contents(page_url: str, max_chars: int) -> dict | None:
         text = (r.get("text") or "").strip() if isinstance(r, dict) else ""
         if text:
             return {"url": r.get("url") or page_url, "title": (r.get("title") or "").strip(), "text": text}
+    # exa answers 200 with no results and the reason per url (e.g. x.com / reddit: SOURCE_NOT_AVAILABLE 403)
+    for st in data.get("statuses") or []:
+        err = st.get("error") if isinstance(st, dict) else None
+        if isinstance(err, dict):
+            reason = f"exa couldn't read it ({err.get('tag') or 'error'}, {err.get('httpStatusCode') or '?'})"
+            logger.info("exa contents for %s: %s", detail, reason)
+            return {"url": page_url, "title": "", "text": "", "error": reason}
     return None

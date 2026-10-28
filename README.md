@@ -80,7 +80,7 @@ real slack sender id, so it is safe in public channels too.
 | `flaron` | look up users, channels, apps, emoji, commands in the public flaron directory | anyone |
 | `search_memory` | semantic (vector) search of noodle's persisted memory: dms, threads, pings, journal, daily facts | matthias only |
 | `web_search` | short cited answer from the live web (exa via hack club ai) | anyone |
-| `fetch_url` | reads one web page from its url as plain text (direct fetch that can never reach private addresses, exa fallback for js/blocked pages like x and reddit); the result is labelled untrusted data | matthias only |
+| `fetch_url` | reads one web page from its url as plain text (direct fetch that can never reach private addresses, exa fallback for js pages; x and reddit are walled off and usually fail); the result is labelled untrusted data | matthias only |
 | `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |

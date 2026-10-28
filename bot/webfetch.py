@@ -9,6 +9,7 @@ noodle, and the url is checked first so an internal one is never sent out either
 import http.client
 import ipaddress
 import logging
+import re
 import socket
 import ssl
 import time
@@ -17,16 +18,17 @@ import zlib
 from html.parser import HTMLParser
 
 from bot.exa import page_contents
-from bot.httpjson import USER_AGENT
 
 logger = logging.getLogger("noodle")
 
 MAX_REDIRECTS = 5
 MAX_BODY_BYTES = 3_000_000
+# no contact details in here: this string is sent to every site that gets fetched
+USER_AGENT = "Mozilla/5.0 (compatible; noodle-bot/1.0)"
 CONNECT_TIMEOUT = 8
 DEADLINE_SECONDS = 20
 ALLOWED_PORTS = {80, 443}
-THIN_CHARS = 300  # less readable text than this from a direct fetch = probably a js shell or a wall
+THIN_CHARS = 120  # less readable text than this from a direct fetch = probably a js shell or a wall
 # hosts a plain GET can't read (login wall / js app / blocks datacenter ips): exa goes first
 EXA_FIRST_HOSTS = ("x.com", "twitter.com", "reddit.com", "redd.it", "instagram.com", "facebook.com", "tiktok.com", "linkedin.com")
 
@@ -126,7 +128,7 @@ def _get_once(url: str) -> tuple[http.client.HTTPConnection, http.client.HTTPRes
     path = urllib.parse.urlunsplit(("", "", parts.path or "/", parts.query, ""))
     try:
         conn.request("GET", path, headers={
-            "User-Agent": f"Mozilla/5.0 (compatible; {USER_AGENT})",
+            "User-Agent": USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.1",
             "Accept-Language": "en",
             "Accept-Encoding": "gzip, identity",
@@ -137,38 +139,51 @@ def _get_once(url: str) -> tuple[http.client.HTTPConnection, http.client.HTTPRes
         raise FetchError(f"couldn't connect ({type(exc).__name__})") from exc
 
 
-def _read_capped(resp: http.client.HTTPResponse) -> bytes:
-    """read the body, never more than MAX_BODY_BYTES even after gunzip (so a zip bomb can't blow up memory)."""
+def _read_capped(resp: http.client.HTTPResponse, sock, deadline: float) -> tuple[bytes, bool]:
+    """read the body, never more than MAX_BODY_BYTES (also after gunzip, so a zip bomb can't blow up
+    memory) and never past the deadline (a server dripping a byte a second would otherwise hold the
+    thread forever: read1 returns after one socket read, so the deadline is checked every few bytes).
+    returns (body, cut) where cut means the page was longer than we were willing to read."""
     gz = (resp.getheader("Content-Encoding") or "").lower() == "gzip"
     dec = zlib.decompressobj(16 + 15) if gz else None
     out = bytearray()
+    cut = False
     try:
-        while len(out) < MAX_BODY_BYTES:
-            chunk = resp.read(65536)
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0 or len(out) >= MAX_BODY_BYTES:
+                cut = True
+                break
+            if sock is not None:
+                sock.settimeout(max(0.5, min(CONNECT_TIMEOUT, left)))
+            chunk = resp.read1(65536)
             if not chunk:
                 break
             out += dec.decompress(chunk, MAX_BODY_BYTES - len(out)) if dec else chunk
     except (OSError, http.client.HTTPException, zlib.error) as exc:
         if not out:
             raise FetchError(f"the download failed ({type(exc).__name__})") from exc
-    return bytes(out[:MAX_BODY_BYTES])
+        cut = True
+    return bytes(out[:MAX_BODY_BYTES]), cut
 
 
-def direct_get(url: str) -> tuple[str, str, bytes]:
-    """GET with manual redirects, every hop re-validated. returns (final_url, content_type, body)."""
+def direct_get(url: str) -> tuple[str, str, bytes, bool]:
+    """GET with manual redirects, every hop re-validated. one deadline covers the redirects AND the
+    body. returns (final_url, content_type, body, cut)."""
     deadline = time.monotonic() + DEADLINE_SECONDS
     for _ in range(MAX_REDIRECTS + 1):
+        if time.monotonic() > deadline:
+            raise FetchError("took too long")
         conn, resp = _get_once(url)
         try:
             if resp.status in (301, 302, 303, 307, 308) and resp.getheader("Location"):
                 url = urllib.parse.urljoin(url, resp.getheader("Location"))
-                if time.monotonic() > deadline:
-                    raise FetchError("took too long")
                 continue
             if resp.status >= 400:
                 raise FetchError(f"the site answered {resp.status}")
             ctype = resp.getheader("Content-Type") or ""
-            return url, ctype.lower(), _read_capped(resp)
+            body, cut = _read_capped(resp, conn.sock, deadline)
+            return url, ctype.lower(), body, cut
         finally:
             conn.close()
     raise FetchError("too many redirects")
@@ -282,7 +297,7 @@ _TEXTY = ("text/", "application/json", "application/xml", "application/xhtml", "
 
 def read_direct(url: str) -> tuple[str, str, str]:
     """(final_url, title, text) from a direct fetch. FetchError when it isn't readable that way."""
-    final, ctype, body = direct_get(url)
+    final, ctype, body, cut = direct_get(url)
     base = ctype.split(";")[0].strip()
     if base and not base.startswith(_TEXTY):
         raise FetchError(f"not a text page ({base})")
@@ -293,8 +308,11 @@ def read_direct(url: str) -> tuple[str, str, str]:
         raw = body.decode("utf-8", errors="replace")
     if base in ("text/html", "application/xhtml+xml") or (not base and "<html" in raw[:2000].lower()):
         title, text = html_to_text(raw)
-        return final, title, text
-    return final, "", raw.strip()
+    else:
+        title, text = "", raw.strip()
+    if cut:
+        text += "\n\n[the page is longer than noodle reads (3MB or 20s); this is only the first part]"
+    return final, title, text
 
 
 # --- the tool ----------------------------------------------------------------------------------
@@ -302,10 +320,19 @@ def read_direct(url: str) -> tuple[str, str, str]:
 DEFAULT_CHARS = 15000
 MAX_CHARS = 40000
 _END = "=== end of untrusted web page content ==="
+# any spelling of our markers (case, spacing, number of =) is removed from everything that comes from the page
+_MARKER = re.compile(r"=+\s*(?:end\s+of\s+)?untrusted\s+web\s+page\s+content\s*=+", re.I)
 
 
-def _wrap(url: str, title: str, via: str, text: str, start: int, limit: int) -> str:
-    text = text.replace(_END, "")  # the page can't fake the closing marker
+def _plain(s: str, limit: int = 300) -> str:
+    """one line, no marker lookalikes: for the header values (title, url) that sit outside the content block"""
+    return " ".join(_MARKER.sub("", s or "").split())[:limit]
+
+
+def _wrap(url: str, title: str, via: str, text: str, start: int, limit: int, more: bool = False) -> str:
+    """more: the source may hold more than `text` (exa returned as much as we asked for)"""
+    text = _MARKER.sub("", text)  # the page can't fake the closing marker
+    url, title = _plain(url, 500), _plain(title, 200)
     total = len(text)
     chunk = text[start:start + limit]
     if not chunk.strip():
@@ -321,7 +348,7 @@ def _wrap(url: str, title: str, via: str, text: str, start: int, limit: int) -> 
         head.append(f"title: {title}")
     shown_to = start + len(chunk)
     note = f"showing characters {start}-{shown_to} of {total}"
-    if shown_to < total:
+    if shown_to < total or more:
         note += f"; call again with start={shown_to} to read on"
     head.append(note)
     return "\n".join(head) + "\n\n" + chunk + "\n" + _END
@@ -352,19 +379,24 @@ def fetch(url: str, start=0, max_chars=DEFAULT_CHARS) -> tuple[str, str]:
         try:
             final, title, text = read_direct(url)
         except FetchError as exc:
-            reason = str(exc)
+            reason = reason or str(exc)
             logger.info("direct fetch of %s failed: %s", host, exc)
             return None
         if len(text) >= THIN_CHARS:
             return _wrap(final, title, "directly", text, start, limit)
-        reason = "the page was almost empty (probably built with javascript)"
+        reason = reason or "the page was almost empty (probably built with javascript)"
         return None
 
     def via_exa() -> str | None:
         # check_url above already refused private/odd urls, so nothing internal is sent out
-        got = page_contents(url, limit + start)
+        nonlocal reason
+        asked = limit + start
+        got = page_contents(url, asked)
+        if got and got.get("error") and not reason:
+            reason = got["error"]
         if got and len(got["text"].strip()) > len(text):
-            return _wrap(got["url"] or url, got["title"] or title, "through exa", got["text"].strip(), start, limit)
+            body = got["text"].strip()
+            return _wrap(got["url"] or url, got["title"] or title, "through exa", body, start, limit, more=len(body) >= asked * 0.9)  # exa may trim to a word boundary
         return None
 
     # sites a plain GET can't read go to exa first, but direct stays as the last resort
@@ -379,4 +411,5 @@ def fetch(url: str, start=0, max_chars=DEFAULT_CHARS) -> tuple[str, str]:
     if text.strip():  # only a thin direct result exists: a little beats nothing
         return _wrap(final, title, "directly", text, start, limit), "direct (thin)"
     why = reason or "exa couldn't read it either"
-    return f"couldn't read {url}: {why}. if it needs a login the page can't be read at all - say so and ask him to paste the text.", "failed"
+    hint = " if it needs a login or blocks bots, it can't be read at all - say so and offer to work from text he pastes." if any(w in why for w in ("40", "empty", "block", "couldn't read", "either")) else ""
+    return f"couldn't read {url}: {why}.{hint}", "failed"

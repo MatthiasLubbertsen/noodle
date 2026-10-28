@@ -218,7 +218,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `flaron` | look up users, channels, apps, emoji, commands in the public flaron directory | anyone |
 | `search_memory` | semantic (vector) search of noodle's persisted memory: dms, threads, pings, journal, daily facts | matthias only |
 | `web_search` | short cited answer from the live web (exa via hack club ai) | anyone |
-| `fetch_url` | read one web page from its url as plain text; direct fetch that refuses private addresses, exa fallback for js/blocked pages (x, reddit); result labelled untrusted data | matthias only |
+| `fetch_url` | read one web page from its url as plain text; direct fetch that refuses private addresses, exa fallback for js pages (x/reddit usually fail); result labelled untrusted data | matthias only |
 | `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
@@ -1053,9 +1053,13 @@ from `_run_code` if that should change). it needs no credential, so it is always
   `<main>`/`<article>`, falls back to the meta description for js shells); json/plain text come
   back as is. (2) exa's `/exa/contents` via hack club ai (`exa.page_contents()`), used when the
   direct fetch fails, is blocked (403/429...), isn't text (pdf), or is under `THIN_CHARS` of text.
-  x/twitter/reddit/instagram/facebook/tiktok/linkedin (`EXA_FIRST_HOSTS`) go to exa first because a
-  plain GET can't read them; direct stays as the last resort. exa's reach on x/reddit is not
-  verified against the real api, so check the logs (`called tool fetch_url: <host>: exa|failed`).
+  x/twitter/reddit/instagram/facebook/tiktok/linkedin (`EXA_FIRST_HOSTS`) go to exa first, direct
+  stays as the last resort. **tested against the real api: exa does NOT read x.com or reddit** (it
+  answers 200 with `results: []` and `statuses[].error.tag = SOURCE_NOT_AVAILABLE`, which
+  `exa.page_contents()` surfaces as the failure reason; free, `costDollars` 0). an old tweet can still
+  come through the direct tier; reddit gives 403. exa does handle js-only pages and pdfs. if x/reddit
+  matter, add small adapters (fxtwitter json for x, reddit `.json`), not built. check the logs
+  (`called tool fetch_url: <host>: exa|direct|failed`).
 - **private-address guard, for the direct tier.** only http/https on ports 80/443, no `user:pass@`,
   no `localhost`/`.local`/`.internal`/single-label hosts; the name is resolved and EVERY address
   must be public (`ipaddress.is_global`, plus 6to4, nat64, teredo, cgnat, ipv4-mapped), which covers
@@ -1063,11 +1067,13 @@ from `_run_code` if that should change). it needs no credential, so it is always
   (169.254.169.254) and the odd integer/hex spellings. the connection then goes to the validated
   IP itself (`_Pinned`/`_PinnedTLS`, tls name = original host) so dns rebinding can't swap the
   answer, redirects are followed by hand (max 5) and re-validated every hop, body capped at 3MB
-  (also after gunzip). a refusal (`Blocked`) is final and is never retried through exa. the url is
+  (also after gunzip) and one 20s deadline covers redirects AND the body (`read1` loop, so a slow
+  drip can't hold the thread). a cut-off page says so in its text. a refusal (`Blocked`) is final and is never retried through exa. the url is
   also checked before it goes to exa, so internal urls never leave noodle.
 - **untrusted content.** the result is wrapped in `=== untrusted web page content ===` markers
   with a line saying it is data, not instructions (the end marker is stripped from the page text so
-  it can't close the block early); the tool description and the system prompt say the same.
+  it can't close the block early; any case/spacing of the markers is stripped, and title/url are
+  flattened to one line the same way); the tool description and the system prompt say the same.
 - **size.** default 15000 characters, max 40000 (`max_chars`); a longer page says which `start`
   value reads on.
 
