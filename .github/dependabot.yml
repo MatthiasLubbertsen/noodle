@@ -1,0 +1,29 @@
+# version updates only, kept quiet: one grouped PR per ecosystem, once a month.
+# note: dependabot *security* updates are a repo setting (settings > advanced security),
+# not something this file controls.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 1
+    groups:
+      python: { patterns: ["*"] }
+  - package-ecosystem: npm
+    directory: /sandbox
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 1
+    groups:
+      sandbox: { patterns: ["*"] }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 1
+    groups:
+      actions: { patterns: ["*"] }
+  - package-ecosystem: docker
+    directories: [/, /sandbox]
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 1
+    groups:
+      docker: { patterns: ["*"] }

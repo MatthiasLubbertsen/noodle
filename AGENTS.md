@@ -43,9 +43,11 @@ noodle/
     memory.py             # per-conversation memory helpers (+ the stable dm key)
     history_store.py      # persistent + embedded memory (sqlite), semantic search
     embeddings.py         # calls the ai endpoint's /embeddings route
-    exa.py                # calls the ai endpoint's /exa/answer route (web_search)
+    exa.py                # calls the ai endpoint's /exa/answer + /exa/contents routes (web_search, fetch_url)
+    webfetch.py           # fetch_url: guarded direct GET, html to text, exa fallback
     chunk.py              # splits replies into small slack messages
     rtm.py                # presence (green dot) + typing indicator via the web client websocket
+    wakeup.py             # morning dm when matthias first comes online (presence over rtm.py)
     stats.py              # "messages sent today" recap (via slack search)
     almanac.py            # silly/named days today (wikipedia)
     news.py               # hack club news rss + persisted "seen" state
@@ -80,7 +82,12 @@ noodle/
     weekly.py             # weekly journal + music recaps
     log.py                # logging setup
     netlog.py             # concise "called hcai .../called tool ..." log lines
-  tests/                  # unittest suite (`python -m unittest discover -s tests -t .`): sky maths, hackatime milestones
+  tests/                  # unittest suite (`python -m unittest discover -s tests -t .`, needs requirements.txt + `websockets`)
+    fake_slack.py         # fake slack: web api over http + the web client's rtm websocket (records calls/frames, can drop, refuse, push)
+    test_rtm.py           # bot/rtm.py against fake_slack: connect, ping, typing, reconnect_url, expired session
+    test_handlers.py      # bot/handlers.py with a real WebClient against fake_slack, only the model stubbed
+    test_text.py, test_dice_reminders.py, test_sky.py, test_hackatime_watch.py
+  .github/                # workflows: docker.yml (gates on tests.yml, then builds/pushes images), tests.yml (python tests, lint, sandbox syntax, compose check), dependabot.yml
   scripts/
     backfill_matthias_day.py  # one-time: backfill historical pings into memory
   sandbox/                # the code sandbox: its OWN container (node + wasm + simulated shell), see 7g
@@ -225,6 +232,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `flaron` | look up users, channels, apps, emoji, commands in the public flaron directory | anyone |
 | `search_memory` | semantic (vector) search of noodle's persisted memory: dms, threads, pings, journal, daily facts | matthias only |
 | `web_search` | short cited answer from the live web (exa via hack club ai) | anyone |
+| `fetch_url` | read one web page from its url as plain text; direct fetch that refuses private addresses, exa fallback for js pages (x/reddit usually fail); result labelled untrusted data | matthias only |
 | `get_weather` | forecast for any place; no place = matthias's own location, which outside a dm is only ever reported as "current location" | anyone |
 | `roll_dice` | roll dice in standard notation (d20, 2d6+3, coin = d2), up to 20 dice | anyone |
 | `public_holidays` | a country's public holidays (default NL), next 12 months or one year, marked day off or not (nager.date, no key) | anyone |
@@ -732,8 +740,10 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   in whatever was missed.
 
 ### 7. morning wakeup dm
-- also from `bot/scheduler.py`, a second daily background job DMs `USER_ID`
-  at `DAILY_MORNING_DM` (default 08:00 Europe/Amsterdam).
+- with the web session configured (see 8b), the morning dm goes out when `USER_ID` first comes
+  online each day instead of at a fixed time (`bot/wakeup.py`, details in 8b). without it, a
+  second daily background job in `bot/scheduler.py` DMs `USER_ID` at `DAILY_MORNING_DM`
+  (default 08:00 Europe/Amsterdam).
 - `bot/almanac.py` calls wikipedia's public `onthisday/holidays` REST api (no
   auth) for silly/named days today (e.g. "Roald Dahl Day", "Watermelon Day")
   — entries whose text starts with "Christian feast day" are filtered out
@@ -1172,6 +1182,39 @@ dm with `files_upload_v2` (needs the `files:write` scope on noodle's token).
   own try/except (they're marked reported first, so one failure must not drop the rest); a project recounted lower never
   re-announces an hour. these are posts about his coding, not dms, so no proactive guardrails.
 
+### 7l. the `fetch_url` tool (`bot/webfetch.py`)
+reads one web page as text. matthias-only, checked in `tools._fetch_url()` against the real sender
+id (not dm-only: a link he drops in a channel can be read there; add the `origin["is_dm"]` check
+from `_run_code` if that should change). it needs no credential, so it is always offered.
+- **two tiers.** (1) a direct GET by noodle itself, html turned into text with a stdlib
+  `html.parser` extractor (drops script/style/nav/footer/forms/cookie-ish blocks, prefers
+  `<main>`/`<article>`, falls back to the meta description for js shells); json/plain text come
+  back as is. (2) exa's `/exa/contents` via hack club ai (`exa.page_contents()`), used when the
+  direct fetch fails, is blocked (403/429...), isn't text (pdf), or is under `THIN_CHARS` of text.
+  x/twitter/reddit/instagram/facebook/tiktok/linkedin (`EXA_FIRST_HOSTS`) go to exa first, direct
+  stays as the last resort. **tested against the real api: exa does NOT read x.com or reddit** (it
+  answers 200 with `results: []` and `statuses[].error.tag = SOURCE_NOT_AVAILABLE`, which
+  `exa.page_contents()` surfaces as the failure reason; free, `costDollars` 0). an old tweet can still
+  come through the direct tier; reddit gives 403. exa does handle js-only pages and pdfs. if x/reddit
+  matter, add small adapters (fxtwitter json for x, reddit `.json`), not built. check the logs
+  (`called tool fetch_url: <host>: exa|direct|failed`).
+- **private-address guard, for the direct tier.** only http/https on ports 80/443, no `user:pass@`,
+  no `localhost`/`.local`/`.internal`/single-label hosts; the name is resolved and EVERY address
+  must be public (`ipaddress.is_global`, plus 6to4, nat64, teredo, cgnat, ipv4-mapped), which covers
+  loopback, rfc1918 (the docker host and the `sandbox` container), link-local/cloud metadata
+  (169.254.169.254) and the odd integer/hex spellings. the connection then goes to the validated
+  IP itself (`_Pinned`/`_PinnedTLS`, tls name = original host) so dns rebinding can't swap the
+  answer, redirects are followed by hand (max 5) and re-validated every hop, body capped at 3MB
+  (also after gunzip) and one 20s deadline covers redirects AND the body (`read1` loop, so a slow
+  drip can't hold the thread). a cut-off page says so in its text. a refusal (`Blocked`) is final and is never retried through exa. the url is
+  also checked before it goes to exa, so internal urls never leave noodle.
+- **untrusted content.** the result is wrapped in `=== untrusted web page content ===` markers
+  with a line saying it is data, not instructions (the end marker is stripped from the page text so
+  it can't close the block early; any case/spacing of the markers is stripped, and title/url are
+  flattened to one line the same way); the tool description and the system prompt say the same.
+- **size.** default 15000 characters, max 40000 (`max_chars`); a longer page says which `start`
+  value reads on.
+
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
   (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore
@@ -1205,7 +1248,16 @@ cookie), both of **noodle's own account**, `start_rtm()` (from `build_app()`) ca
 `reconnect_url`, and reconnects on its own: being connected = online. `rtm.typing(channel,
 thread_ts)` is a context manager sending `{"type":"typing"}` every 2.5s while it runs;
 `handlers._process_locked()` wraps `ask_noodle()` in it, so it shows during slow tool calls.
-the web session is used ONLY for the websocket (ping + typing): every message noodle sends still goes through the normal bolt token. if `getWebSocketURL` or the handshake fails with an auth error (`invalid_auth`, `token_expired`, 401/403...), `_report_expired()` dms matthias once per outage (persona-written, via `_post_dm`), then retries every 5 minutes; a successful connect resets the flag. without the credentials (`features.enabled("typing")`) everything is a silent no-op. all
+the web session is used ONLY for the websocket (ping + typing): every message noodle sends still goes through the normal bolt token. if `getWebSocketURL` or the handshake fails with an auth error (`invalid_auth`, `token_expired`, 401/403...), `_report_expired()` dms matthias once per outage (persona-written, via `_post_dm`), then retries every 5 minutes; a successful connect resets the flag. without the credentials (`features.enabled("typing")`) everything is a silent no-op.
+**presence-triggered morning dm:** the same socket subscribes to matthias's presence (`presence_sub` with
+`ids=[USER_ID]`; `presence_change` events, single `user` or batched `users`, see vs.izie.top/redocumented). the first
+`active` of each amsterdam day calls `wakeup.on_online()` (quiet hours are deliberately NOT used), which sends the
+morning dm and persists the day in `data/morning_sent.json` (marked before sending, so a restart or crash can't repeat it). on every
+(re)connect noodle also asks `users.getPresence` once, since no event fires for being online before connecting.
+`features.enabled("presence")` is the same credential check as typing; without it the scheduler keeps the fixed
+`DAILY_MORNING_DM` time. if he hasn't been seen by `MORNING_FALLBACK_DM` (default 12:00) the scheduler calls `wakeup.send_fallback()` and
+it goes out anyway (first of the two wins, same persisted day). since it can go out at any hour, `morning.build_greeting_message()`
+tells the model the actual time and day part (`_day_part()`), so it never says "morning" at noon; the runtime context says the same. all
 failures are logged and never break replies.
 
 ## running it locally
@@ -1237,7 +1289,8 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `CHUNK_DELAY_SECONDS` | pause between fragment messages |
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in one channel |
 | `DAILY_PING_REMINDER` | `HH:MM`, when the `@matthias-day` reminder dm goes out |
-| `DAILY_MORNING_DM` | `HH:MM`, when the morning wakeup dm goes out |
+| `MORNING_FALLBACK_DM` | `HH:MM` (default `12:00`): with the web session, send the morning dm at this time if matthias never came online |
+| `DAILY_MORNING_DM` | `HH:MM`, when the morning wakeup dm goes out; only used without `SLACK_WEB_TOKEN`/`SLACK_WEB_COOKIE` (with them it goes out when matthias first comes online) |
 | `MATTHIAS_DAY_GROUP_ID` | usergroup id for `@matthias-day` (defaults to the real id, `S0AK8LYJ8FR`) |
 | `MATTHIAS_DAY_CHANNEL_ID` | channel the daily recap pings are posted in (defaults to `#matthias`, `C0A9NJT2BCJ`) |
 | `FREEDOM_API_BASE` | base url of matthias's self-hosted freedom api (defaults to `https://freedom.matthiaz.dev`) |

@@ -5,6 +5,9 @@ the web client does both over its own websocket, which needs the client's sessio
 credentials: an `xoxc-` token and the `d` cookie of noodle's own account. optional - without
 `SLACK_WEB_TOKEN` + `SLACK_WEB_COOKIE` (see features.py) nothing here runs and `typing()` is a no-op.
 
+presence: the same socket also tells us when matthias (`USER_ID`, the account noodle talks to) comes
+online - `presence_sub` + `presence_change` events - which `bot/wakeup.py` uses for the morning dm.
+
 flow: `client.getWebSocketURL` (web api, xoxc + cookie) -> `primary_websocket_url`; connect with
 `?token=<xoxc>` and header `cookie: d=<cookie>`; send `{"type": "ping"}` every ~40s; follow
 `reconnect_url` messages; typing is `{"id": n, "type": "typing", "channel": ...}`.
@@ -111,6 +114,29 @@ def _pinger(ws) -> None:
             return
 
 
+def _is_online_event(msg: dict) -> bool:
+    """a presence_change saying matthias is active. batched deliveries carry `users` (a list)
+    instead of `user`, so both shapes count."""
+    if msg.get("type") != "presence_change" or msg.get("presence") != "active":
+        return False
+    return config.USER_ID in (msg.get("users") or [msg.get("user")])
+
+
+def _subscribe_presence() -> None:
+    """ask for matthias's presence events, and catch up on whether he is already online (no
+    event comes for something that was true before we connected)."""
+    if not config.USER_ID:
+        return
+    _send({"type": "presence_sub", "ids": [config.USER_ID]})
+    try:
+        from bot import state, wakeup
+
+        if state.app and state.app.client.users_getPresence(user=config.USER_ID).get("presence") == "active":
+            wakeup.on_online()
+    except Exception:  # noqa: BLE001
+        logger.debug("presence catch-up failed", exc_info=True)
+
+
 def _run_once(url: str) -> str | None:
     """one connection, until it drops. returns a reconnect url if slack sent one."""
     global _ws
@@ -125,6 +151,8 @@ def _run_once(url: str) -> str | None:
     global _expired_reported
     _expired_reported = False
     logger.info("rtm connected (presence + typing on)")
+    if features.enabled("presence"):
+        threading.Thread(target=_subscribe_presence, daemon=True).start()
     reconnect = None
     try:
         while True:
@@ -137,6 +165,10 @@ def _run_once(url: str) -> str | None:
                 continue
             if msg.get("type") == "reconnect_url":
                 reconnect = msg.get("url") or reconnect
+            elif _is_online_event(msg):
+                from bot import wakeup
+
+                threading.Thread(target=wakeup.on_online, daemon=True).start()
     except Exception:  # noqa: BLE001
         logger.info("rtm connection closed", exc_info=True)
     finally:

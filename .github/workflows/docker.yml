@@ -10,8 +10,18 @@ permissions:
   contents: read
   packages: write
 
+# a newer push to the same pr cancels the older run; main and tag runs are never cancelled
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # tests, lint and config checks must pass before any image is built or pushed
+  test:
+    uses: ./.github/workflows/tests.yml
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

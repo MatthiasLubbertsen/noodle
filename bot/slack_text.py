@@ -149,9 +149,7 @@ def _channel_link(cid: str) -> str:
     # fallback to the public flaron directory
     from bot import directory
 
-    d = directory.lookup_channel(cid)
-    if d and "no channel info" not in d:
-        m = re.search(r"#(\S+)", d)
-        if m:
-            return f"<#{cid}|{m.group(1)}>"
+    name = directory.lookup_channel_name(cid)
+    if name:
+        return f"<#{cid}|{name}>"
     return f"<#{cid}>"
