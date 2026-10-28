@@ -27,6 +27,9 @@ def enabled(feature: str) -> bool:
         return len(config.SANDBOX_TOKEN) >= 16 and bool(config.SANDBOX_URL)
     if feature == "typing":
         return bool(config.SLACK_WEB_TOKEN and config.SLACK_WEB_COOKIE)
+    if feature == "presence":
+        # the morning dm follows his presence over the same web-client websocket as typing
+        return enabled("typing")
     if feature == "github":
         return bool(config.GITHUB_TOKEN)
     if feature == "lastfm":
