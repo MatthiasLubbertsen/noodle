@@ -14,8 +14,8 @@ jobs:
     name: python tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13" # same as the Dockerfile
           cache: pip
@@ -27,8 +27,8 @@ jobs:
     name: lint (real bugs only)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - run: pip install ruff
@@ -40,8 +40,8 @@ jobs:
     name: sandbox syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: for f in sandbox/*.js; do node --check "$f"; done
@@ -50,6 +50,6 @@ jobs:
     name: compose file
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # .env is gitignored but compose references it
       - run: touch .env && docker compose config -q
