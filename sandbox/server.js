@@ -21,7 +21,9 @@ const TOKEN = process.env.SANDBOX_TOKEN || "";
 const DEFAULT_TIMEOUT_MS = 20000;
 const MAX_TIMEOUT_MS = 60000;
 const MAX_CODE = 200 * 1024;
-const MAX_BODY = 1.5 * 1024 * 1024; // code (MAX_CODE) + bash input files (1MB), checked separately
+// code (MAX_CODE), bash input files (1MB) and a fetched repo (MAX_REPO_BYTES, base64) are each checked
+// on their own; this is just the outer bound, and only reached after the bearer check
+const MAX_BODY = 40 * 1024 * 1024;
 const MAX_RSS_MB = parseInt(process.env.SANDBOX_MAX_RSS_MB || "900", 10);
 const READY_TIMEOUT_MS = 120000;
 const CHILD = path.join(__dirname, "child.js");
@@ -32,11 +34,18 @@ const CHILD = path.join(__dirname, "child.js");
 const DISABLED = TOKEN.length < 16;
 if (DISABLED) console.log("SANDBOX_TOKEN not set (needs 16+ characters): sandbox is disabled, idling");
 
+// the shell's python3 / js-exec / sqlite3 run in node worker threads, so ONLY bash jobs get
+// --allow-worker (python/javascript jobs never do). workers inherit the permission model's fs and
+// child-process denials on node 22 - but that is exactly the kind of thing a node update could
+// change, so it is verified at startup (workersAreSafe) and the flag is dropped if the probe fails.
+let workersOk = false;
 function spawnChild(language) {
-  const proc = fork(CHILD, [language], {
+  const execArgv = ["--permission", `--allow-fs-read=${__dirname}`, "--max-old-space-size=512"];
+  if (language === "bash" && workersOk) execArgv.push("--allow-worker", "--disable-warning=SecurityWarning");
+  const proc = fork(CHILD, [language, workersOk ? "workers" : "noworkers"], {
     cwd: __dirname,
     env: {}, // nothing from this process leaks into the job
-    execArgv: ["--permission", `--allow-fs-read=${__dirname}`, "--max-old-space-size=512"],
+    execArgv,
     stdio: ["ignore", "ignore", "ignore", "ipc"],
   });
   const child = { proc, language, exited: false, isReady: false, rejectReady: null };
@@ -59,6 +68,44 @@ function spawnChild(language) {
   child.ready.catch(() => {}); // handled by whoever awaits it
   proc.once("exit", () => (child.exited = true));
   return child;
+}
+
+// run, under the exact flags a bash job gets, a worker that tries to write a file, read /etc/passwd and
+// spawn a process. every attempt must be denied, otherwise workers stay off and python3/js-exec/sqlite3
+// are simply unavailable inside the shell.
+function workersAreSafe() {
+  const marker = path.join(require("os").tmpdir(), `noodle-probe-${process.pid}-${Date.now()}`);
+  const workerCode = [
+    'const fs = require("fs");',
+    "const r = [];",
+    `const attempts = [() => fs.writeFileSync(${JSON.stringify(marker)}, "x"), () => fs.readFileSync("/etc/passwd"), () => require("child_process").execSync("id")];`,
+    'for (const f of attempts) { try { f(); r.push("allowed"); } catch (e) { r.push("denied"); } }',
+    'require("worker_threads").parentPort.postMessage(r.join());',
+  ].join("\n");
+  const probe = [
+    'const { Worker } = require("worker_threads");',
+    `const w = new Worker(${JSON.stringify(workerCode)}, { eval: true, env: {} });`,
+    'w.on("message", (m) => console.log(m));',
+    'w.on("error", () => console.log("error"));',
+  ].join("\n");
+  return new Promise((resolve) => {
+    const p = require("child_process").spawn(
+      process.execPath,
+      ["--permission", `--allow-fs-read=${__dirname}`, "--allow-worker", "--disable-warning=SecurityWarning", "-e", probe],
+      { env: {}, stdio: ["ignore", "pipe", "ignore"] }
+    );
+    let out = "";
+    p.stdout.on("data", (d) => (out += d));
+    const timer = setTimeout(() => p.kill("SIGKILL"), 10000);
+    p.on("exit", () => {
+      clearTimeout(timer);
+      const ok = out.trim() === "denied,denied,denied" && !fs.existsSync(marker);
+      try {
+        fs.unlinkSync(marker);
+      } catch (_) {}
+      resolve(ok);
+    });
+  });
 }
 
 function kill(child) {
@@ -175,10 +222,12 @@ async function runJavaScript(code, timeoutMs) {
 // ---- bash: a throwaway process per job, plus a small persistent workspace
 // the shell's /work directory survives between runs: the child returns its files, they are kept
 // here (in memory only, never on disk) and handed to the next job. a fresh process each time
-// means no interpreter state leaks - only files do. bounded: 4 workspaces, 4MB / 200 files each,
+// means no interpreter state leaks - only files do. bounded: 2 workspaces, 30MB / 4000 files each,
 // dropped after 30 idle minutes.
 const WORKSPACE_TTL_MS = 30 * 60 * 1000;
-const MAX_WORKSPACES = 4;
+const MAX_WORKSPACES = 2;
+const MAX_REPO_FILES = 4000;
+const MAX_REPO_BYTES = 25 * 1024 * 1024;
 const MAX_INPUT_FILES = 50;
 const MAX_INPUT_BYTES = 1024 * 1024;
 const workspaces = new Map(); // key -> {files: [{path, data}], touched}
@@ -213,6 +262,22 @@ async function runBash(body, timeoutMs) {
       if (bytes > MAX_INPUT_BYTES) return failure("input files are too big (max 1MB in total)");
       merged.set(rel, Buffer.from(text, "utf8").toString("base64"));
     }
+  }
+  // a repo fetched by noodle's own code (never by the shell: it has no network). replaces any older copy
+  if (Array.isArray(body.repo_files) && body.repo_files.length) {
+    if (body.repo_files.length > MAX_REPO_FILES) return failure("repo has too many files");
+    const incoming = [];
+    let bytes = 0;
+    for (const f of body.repo_files) {
+      const rel = f && safeRelPath(f.path);
+      if (!rel || typeof f.data !== "string") return failure("bad repo file entry");
+      bytes += Math.floor((f.data.length * 3) / 4);
+      if (bytes > MAX_REPO_BYTES) return failure("repo is too big");
+      incoming.push([rel, f.data]);
+    }
+    const top = incoming[0][0].split("/")[0];
+    for (const k of [...merged.keys()]) if (k === top || k.startsWith(top + "/")) merged.delete(k);
+    for (const [rel, data] of incoming) merged.set(rel, data);
   }
   const files = [...merged].map(([p, data]) => ({ path: p, data }));
 
@@ -301,7 +366,13 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => console.log(`sandbox listening on :${PORT}`));
-if (!DISABLED) warmUp();
+if (!DISABLED) {
+  warmUp();
+  workersAreSafe().then((ok) => {
+    workersOk = ok;
+    console.log(ok ? "shell workers enabled (python3, js-exec, sqlite3): probe denied fs + spawn" : "WARNING: worker probe was not fully denied, shell python3/js-exec/sqlite3 stay off");
+  });
+}
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, () => {
     kill(warmPython);

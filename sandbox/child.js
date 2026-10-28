@@ -193,14 +193,16 @@ async function runJavaScript(code, timeoutMs) {
 // IS no real process to start. it is JS in this node process though, not a vm, so the
 // real boundary against a bug in it is what surrounds it: `node --permission` (no fs writes,
 // no child processes, no workers), then the container (no network, no secrets, read-only fs).
-// network, python3, js-exec and sqlite3 stay off: each is extra surface (python/js-exec/sqlite
-// run in node workers, which the permission model denies on purpose).
+// network (curl) is never enabled. python3, js-exec and sqlite3 are: they are wasm run in node
+// worker threads, allowed for bash jobs only after server.js's startup probe shows workers keep
+// the permission model's restrictions. none of them has a network or a real file to reach.
 const WORK = "/work";
-const WORKSPACE = { files: 200, bytes: 4 * 1024 * 1024 };
+const WORKSPACE = { files: 4000, bytes: 30 * 1024 * 1024 };
+const WORKERS = process.argv[3] === "workers"; // only set by server.js after its permission probe passed
 
 async function runBash(job) {
   const { Bash, InMemoryFs } = await import("just-bash");
-  const fs = new InMemoryFs(undefined, { maxTotalBytes: 32 * 1024 * 1024 });
+  const fs = new InMemoryFs(undefined, { maxTotalBytes: 96 * 1024 * 1024 });
   await fs.mkdir(WORK, { recursive: true });
   await fs.mkdir("/out", { recursive: true });
   for (const f of job.files || []) {
@@ -216,9 +218,14 @@ async function runBash(job) {
     executionLimits: {
       maxExecutionTimeMs: job.timeoutMs,
       maxOutputSize: 2 * 1024 * 1024,
-      maxFileSystemBytes: 32 * 1024 * 1024,
+      maxFileSystemBytes: 96 * 1024 * 1024,
     },
     defenseInDepth: true,
+    // python3 (CPython wasm), js-exec (QuickJS wasm) and sqlite3 (sql.js wasm) run in worker threads,
+    // which only exist when server.js verified that workers keep the permission model's restrictions.
+    // no network option is passed, so there is no curl and nothing here can reach a socket
+    python: WORKERS,
+    javascript: WORKERS,
   });
   const out = capped();
   const err = capped();

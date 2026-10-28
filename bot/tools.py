@@ -8,7 +8,7 @@ import config
 from bot import reminders, state
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
-from bot import features, games, hackatime, sandbox
+from bot import features, games, hackatime, repo_fetch, sandbox
 from bot import github as github_api
 from bot import links as links_api
 from bot.channels import with_join
@@ -478,17 +478,24 @@ TOOLS = [
                 "simulated shell (real bash syntax: pipes, loops, functions, variables, "
                 "heredocs) with grep, sed, awk, jq, yq, xan (csv), sort, uniq, cut, tr, "
                 "find, diff, tar, gzip, base64, md5sum/sha256sum, seq, date and friends, "
+                "plus python3 (plain CPython: the standard library only, no numpy - use the "
+                "python language for that), js-exec (QuickJS javascript) and sqlite3, "
                 "working on an in-memory /work directory that is kept between bash runs "
                 "(so you can build things up across several calls; `reset` wipes it) and "
-                "that you can seed with `files` (text only, e.g. data he pasted); files "
-                "left in /out/ are sent to the dm. "
+                "that you can seed with `files` (text only, e.g. data he pasted) or with a "
+                "github repo via `repo` (see below); files left in /out/ are sent to the dm. "
+                "`repo` (\"owner/name\", \"owner/name@branch\" or a github.com url) makes the "
+                "system itself download a snapshot of that repo into /work/<name> before the "
+                "script runs (no git history, size capped, his private repos work too); use it "
+                "once at the start, the folder then stays in /work. you can't download "
+                "anything yourself, that is the only network thing and it's done for you. "
                 "CANNOT: no internet at all (no http requests, downloads, apis, git, "
                 "pip/npm install); no other packages (no sklearn, torch, requests, "
                 "opencv...); no real shell: bash has no real processes, so no "
-                "python/node/curl/git/sqlite3/apt/ssh/docker or any other binary, only "
-                "its built-in commands; no threads; no access to files, "
+                "curl/git/apt/ssh/docker or any other binary (`node` is just js-exec), only its built-in "
+                "commands (and python3, js-exec, sqlite3); no threads; no access to files, "
                 "slack data, memory or anything noodle has - everything the code needs "
-                "must be written into the code itself (or passed as bash `files`); "
+                "must be written into the code itself (or passed as bash `files` / `repo`); "
                 "python and javascript keep nothing between runs, only the bash /work "
                 "directory does (for a while); "
                 "no input()/stdin, no interactive or gui plots; javascript has no "
@@ -509,6 +516,7 @@ TOOLS = [
                         "additionalProperties": {"type": "string"},
                     },
                     "reset": {"type": "boolean", "description": "bash only: wipe the /work directory first and start from nothing"},
+                    "repo": {"type": "string", "description": "bash only, optional: a github repo to download into /work/<name> first, e.g. \"owner/name\" or \"owner/name@branch\""},
                 },
                 "required": ["language", "code"],
             },
@@ -1150,8 +1158,9 @@ def _code_hints(result: dict, language: str) -> list[str]:
     if language == "bash" and re.search(r"command not found|not available", text):
         hints.append(
             "hint: that command doesn't exist in the simulated shell, which only has built-in commands "
-            "(grep sed awk jq yq xan sort uniq cut tr find diff tar gzip base64 and similar). no python/node/curl/git/"
-            "sqlite3 or other binaries. use the python or javascript option for that, or say it can't be done."
+            "(grep sed awk jq yq xan sort uniq cut tr find diff tar gzip base64, python3, js-exec, sqlite3 and similar). "
+            "no node/curl/git/apt or other binaries, and no network. use the python or javascript language for numpy-style "
+            "work, or say it can't be done."
         )
     if re.search(r"FileNotFoundError|No such file", text):
         hints.append("hint: the sandbox can't see any files of his or noodle's - the data has to be inside the code. only /out/ is for writing results.")
@@ -1188,7 +1197,19 @@ def _run_code(args: dict, user_id: str | None, origin: dict | None) -> str:
     files = args.get("files")
     if files is not None and not (isinstance(files, dict) and all(isinstance(v, str) for v in files.values())):
         return "files must be an object of {name: text}."
-    result = sandbox.run(language, code, timeout_s, files=files if language == "bash" else None, reset=bool(args.get("reset")))
+    repo_files, repo_note = None, None
+    repo = args.get("repo")
+    if repo:
+        if language != "bash":
+            return "repo only works with the bash language."
+        fetched = repo_fetch.fetch(str(repo))
+        if isinstance(fetched, str):
+            log_tool("run_code", f"repo {str(repo)[:60]}", "failed")
+            return fetched
+        repo_files, repo_note = fetched["files"], fetched["summary"]
+    result = sandbox.run(
+        language, code, timeout_s, files=files if language == "bash" else None, reset=bool(args.get("reset")), repo_files=repo_files
+    )
     if isinstance(result, str):
         log_tool("run_code", f"{language} {len(code)} chars", "failed")
         return result
@@ -1207,7 +1228,7 @@ def _run_code(args: dict, user_id: str | None, origin: dict | None) -> str:
             logger.exception("uploading sandbox file %s failed", f.get("name"))
             failed.append(f["name"])
 
-    parts = []
+    parts = [repo_note] if repo_note else []
     for label, key in (("stdout", "stdout"), ("stderr", "stderr"), ("result (value of the last expression)", "result"), ("error", "error")):
         if result.get(key):
             parts.append(f"{label}:\n{result[key]}")

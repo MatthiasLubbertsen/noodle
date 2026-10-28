@@ -74,6 +74,7 @@ noodle/
     wrapup.py             # end-of-day wrap-up dm
     games.py              # dm games (tictactoe, connect4, hangman, wordle, mastermind)
     sandbox.py            # client for the code sandbox service (run_code tool)
+    repo_fetch.py         # github repo snapshot for the shell's `repo` arg: the ONLY network step, done by our code
     features.py           # which optional features are on: decided only by whether their credentials are set
     prompt.py             # loads the system prompt minus the sections of features that are off
     weekly.py             # weekly journal + music recaps
@@ -229,7 +230,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `public_holidays` | a country's public holidays (default NL), next 12 months or one year, marked day off or not (nager.date, no key) | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
-| `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy), javascript or a simulated bash shell (grep sed awk jq xan tar...; its /work folder persists between runs) in an isolated sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions, text/data wrangling; no network | matthias only, dms only |
+| `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy), javascript or a simulated bash shell (grep sed awk jq xan tar python3 js-exec sqlite3...; its /work folder persists between runs, and a github repo can be snapshotted into it at the start) in an isolated sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions, text/data wrangling; no network | matthias only, dms only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
 | `github` | read-only: his repos, a repo + branches/releases/ci runs, readme, file tree, read any file, commits + one commit, issues/prs + one with comments and changed files, stars + starred, issue/repo/code search, profiles, notifications, commits today | matthias only |
 | `hackatime` | his coding time, whole history: summary/today/projects/project (anyone), days/sessions (matthias only: they show when he codes) | anyone / matthias only |
@@ -989,15 +990,38 @@ pure js, ~100MB RSS and ~0.3s per run (nothing warm to keep around, unlike pytho
   `new Worker`, `process.dlopen` all `ERR_ACCESS_DENIED`) -> killed after one job -> the container
   (no network, no secrets, read-only fs, non-root, caps dropped, memory/pids limits). a bug in
   just-bash would hand an attacker js inside a process that still can't write, spawn or phone home.
+  (with workers on, see the next point, that js can also start more workers - which are bound by the
+  same denials - so the memory watchdog and the container's limits are what bound that.)
   just-bash's own limits are on too (`hardened` profile: command count, call depth, output and
   filesystem size, wall clock, `defenseInDepth`), and server.js adds the hard wall-clock kill + rss
   watchdog.
-- **off on purpose:** network (`curl`), `python3`, `js-exec` and `sqlite3` (the last three run in node
-  workers, which the permission model denies by design; python and javascript already exist as their
-  own languages).
+- **inside the shell: `python3`, `js-exec`, `sqlite3`, no network.** python3 is plain CPython (stdlib
+  only, no numpy: the separate `python` language has pyodide + numpy/pandas), js-exec is QuickJS
+  (`node` just points at it), sqlite3 is sql.js. all three are wasm in node worker threads, and
+  workers need `--allow-worker`, which node itself warns "could invalidate the permission model". so:
+  (1) the flag goes to **bash jobs only**, never to python/javascript jobs; (2) on node 22 workers
+  inherit the fs and child-process denials (verified), but because that is the kind of thing a node
+  update could change, `server.js` runs `workersAreSafe()` at startup: a worker under the exact job flags
+  tries to write a file, read /etc/passwd and spawn a process, and ONLY if all three are denied does
+  `workersOk` turn on (otherwise the flag is dropped and python3/js-exec/sqlite3 just don't exist, one
+  warning in the log); (3) just-bash gets no `network` option, so there is no `curl`, python's sockets
+  fail ("host unreachable") and the container has no route anyway. `node --test sandbox/test.js` checks
+  the same probe from outside.
+- **the one network thing: `repo` (cloning), done by our code, not the model and not the sandbox.**
+  `run_code(language="bash", repo="owner/name[@ref]" | github url)` makes `bot/repo_fetch.py` (in the
+  noodle container, which has internet) download github's tarball of the repo (a snapshot: no git
+  history, and there is no git in the shell anyway) and unpack it **in memory**: regular files only (no
+  symlinks/devices/hardlinks), top folder stripped, paths normalised and kept inside `<name>/`, `.git`
+  skipped, caps of 4000 files / 2MB per file / 25MB total / 40MB packed. only `api.github.com` is
+  contacted (the host is not model-controlled, owner/name are regex-checked, redirects are followed only
+  to `*.github.com`). `GITHUB_TOKEN` is used if set, so his private repos work (the tool is matthias-only
+  anyway); it never enters the sandbox. the files travel to the sandbox as `repo_files`, which
+  `server.js` re-validates (names inside `/work`, count and size caps) and puts in `/work/<name>`,
+  replacing an older copy of the same folder; it then persists in the workspace like anything else, so
+  it is passed once at the start. a failed fetch returns the error to the model and the script is not run.
 - **persistence without leaks.** `/work` is the cwd. after each run the child hands its files back and
   `server.js` keeps them in memory (never on disk) per workspace key (noodle always uses one:
-  `matthias`) and seeds the next job with them: 4 workspaces max, 4MB / 200 files each, 30 idle
+  `matthias`) and seeds the next job with them: 2 workspaces max, 30MB / 4000 files each, 30 idle
   minutes. every job is still a fresh process, so no interpreter state survives, only files. `reset`
   wipes it. a snapshot over the caps is dropped and the previous one stays.
 - **input and output.** `files` (`{name: text}`, max 50 / 1MB, names must stay inside `/work`, enforced
@@ -1005,8 +1029,11 @@ pure js, ~100MB RSS and ~0.3s per run (nothing warm to keep around, unlike pytho
   8MB each) are uploaded to the dm like python's. a non-zero exit code is reported to the model
   (`exit code: N`) so a failed `grep` isn't mistaken for success.
 - **runs with python's concurrency rules, separately:** 2 bash jobs at once, 2 may wait, more get a 429.
-- tested by `node --test sandbox/test.js` (isolation probes, limits, workspace, input validation) and
-  `tests/test_sandbox_tool.py` (the tool's wiring, hints and validation).
+- tested by `node --test sandbox/test.js` (isolation probes, limits, workspace, interpreters, repo seeding,
+  input validation) and `tests/test_sandbox_tool.py` + `tests/test_repo_fetch.py` (wiring, hints, spec
+  parsing, tar hardening, redirect pinning).
+- **`sandbox/node_modules` is not tracked** (it used to be partly committed despite the `.gitignore` entry;
+  the Docker build runs `npm ci`).
 
 ### 7g. the code sandbox (`run_code`)
 python 3.13 (pyodide: numpy, pandas, matplotlib, scipy, sympy) and javascript

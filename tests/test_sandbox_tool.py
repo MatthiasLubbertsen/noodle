@@ -30,7 +30,7 @@ class ShellTool(unittest.TestCase):
     def test_files_and_reset_only_go_to_bash(self):
         ok = {"ok": True, "stdout": "hi", "files": [], "duration_ms": 5}
         _, run = self._call({"language": "bash", "code": "cat a", "files": {"a": "x"}, "reset": True}, ok)
-        run.assert_called_once_with("bash", "cat a", 20, files={"a": "x"}, reset=True)
+        run.assert_called_once_with("bash", "cat a", 20, files={"a": "x"}, reset=True, repo_files=None)
         _, run = self._call({"language": "python", "code": "1", "files": {"a": "x"}}, ok)
         self.assertIsNone(run.call_args.kwargs["files"])
 
@@ -43,6 +43,35 @@ class ShellTool(unittest.TestCase):
         res = {"ok": False, "stdout": "", "stderr": "", "error": "exit code 1", "exit_code": 1, "files": [], "duration_ms": 3}
         out, _ = self._call({"language": "bash", "code": "grep x y"}, res)
         self.assertIn("exit code 1", out)
+
+
+class RepoArg(unittest.TestCase):
+    def _call(self, args, fetched):
+        ok = {"ok": True, "stdout": "x", "files": [], "duration_ms": 1}
+        with mock.patch.object(tools.sandbox, "configured", return_value=True), mock.patch.object(
+            tools.sandbox, "run", return_value=ok
+        ) as run, mock.patch.object(tools.repo_fetch, "fetch", return_value=fetched) as fetch, mock.patch.object(
+            tools, "_is_matthias", return_value=True
+        ):
+            out = tools._run_code(args, "U1", {"is_dm": True, "channel": "D1"})
+        return out, run, fetch
+
+    def test_repo_is_fetched_by_our_code_and_passed_as_files(self):
+        fetched = {"dir": "r", "files": [{"path": "r/a", "data": "eA=="}], "summary": "cloned o/r into /work/r (1 files)"}
+        out, run, fetch = self._call({"language": "bash", "code": "ls r", "repo": "o/r"}, fetched)
+        fetch.assert_called_once_with("o/r")
+        self.assertEqual(run.call_args.kwargs["repo_files"], fetched["files"])
+        self.assertIn("cloned o/r into /work/r", out)
+
+    def test_fetch_failure_stops_before_running(self):
+        out, run, _ = self._call({"language": "bash", "code": "ls", "repo": "o/r"}, "couldn't fetch o/r")
+        self.assertEqual(out, "couldn't fetch o/r")
+        run.assert_not_called()
+
+    def test_repo_is_bash_only(self):
+        out, run, fetch = self._call({"language": "python", "code": "1", "repo": "o/r"}, {})
+        self.assertIn("only works with the bash", out)
+        fetch.assert_not_called()
 
 
 class ClientPayload(unittest.TestCase):
@@ -71,8 +100,12 @@ class ClientPayload(unittest.TestCase):
             self.assertEqual(body["workspace"], "matthias")
             self.assertEqual(body["files"], {"a": "b"})
             self.assertTrue(body["reset"])
-            sandbox.run("python", "1", 5, files={"a": "b"})
-            self.assertNotIn("files", json.loads(captured["body"]))
+            sandbox.run("python", "1", 5, files={"a": "b"}, repo_files=[{"path": "r/a", "data": "eA=="}])
+            body = json.loads(captured["body"])
+            self.assertNotIn("files", body)
+            self.assertNotIn("repo_files", body)
+            sandbox.run("bash", "ls", 5, repo_files=[{"path": "r/a", "data": "eA=="}])
+            self.assertEqual(json.loads(captured["body"])["repo_files"][0]["path"], "r/a")
 
 
 if __name__ == "__main__":
