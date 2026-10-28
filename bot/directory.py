@@ -47,6 +47,18 @@ def lookup_display_name(user_id: str) -> str | None:
     return user.get("display_name") or user.get("real_name") or user.get("name") or None
 
 
+def lookup_channel_name(channel_id: str) -> str | None:
+    """resolve a slack channel id to its name via the public flaron directory (the fallback
+    when slack's own conversations.info fails). returns None if not found - never raises."""
+    if not channel_id:
+        return None
+    data = _get_json(f"/channel/{channel_id}")
+    if not data:
+        return None
+    channel = (data.get("data") or {}).get("channel") or {}
+    return channel.get("name") or None
+
+
 def flaron_query(action: str, id: str | None = None, name: str | None = None,
                  query: str | None = None) -> str:
     """call any public (no-auth) flaron endpoint and return the full json.

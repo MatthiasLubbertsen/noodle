@@ -1,12 +1,16 @@
 import logging
 import re
 
+import datetime
+
 import config
 from bot import state
 from bot.almanac import fun_holidays_today
+from bot.holidays import today_nl
 from bot.news import unread_articles
 from bot.oneshot import complete, remember_facts
 from bot.slack_text import _clean_reply
+from bot.tz import AMSTERDAM_TZ
 from bot.weather import morning_weather_facts
 
 logger = logging.getLogger("noodle")
@@ -22,6 +26,18 @@ def _without_greeting(text: str) -> str:
     return _GREETING_PREFIX.sub("", text, count=1).strip()
 
 
+def _day_part(now: datetime.datetime | None = None) -> str:
+    """morning / afternoon / evening / night, for the hour in amsterdam. the dm can go out
+    whenever matthias first comes online, so it must not assume it's morning."""
+    hour = (now or datetime.datetime.now(AMSTERDAM_TZ)).hour
+    return "night" if hour < 5 else "morning" if hour < 12 else "afternoon" if hour < 18 else "evening"
+
+
+def _greeting_word(now: datetime.datetime | None = None) -> str:
+    part = _day_part(now)
+    return "hey" if part == "night" else f"good {part}"
+
+
 def build_greeting_message() -> str:
     """good morning + today's silly/named day, if any. ONE tiny message - no news."""
     holidays = fun_holidays_today()
@@ -30,11 +46,19 @@ def build_greeting_message() -> str:
         if holidays
         else "no silly/named days today"
     )
+    dutch_holiday = today_nl()
+    if dutch_holiday:
+        facts += "\ndutch holiday today: " + dutch_holiday
+    now = datetime.datetime.now(AMSTERDAM_TZ)
     prompt = (
-        "it's morning, wake matthias up. write ONE short good-morning message "
-        "in your own voice, 1-2 sentences, not a report. just say good morning "
-        "and mention if today has a silly/named day (skip it if there isn't "
-        "one, don't say 'no special day' or anything like that). that's it, "
+        f"it's {now.strftime('%H:%M')} ({_day_part(now)}) and matthias just came online for the "
+        "first time today (or it's his usual time to hear from you). write ONE short greeting "
+        "message in your own voice, 1-2 sentences, not a report, that fits this time of day: "
+        f"say \"{_greeting_word(now)}\" or similar, and NEVER say morning unless it is "
+        "actually morning. mention if today has a silly/named day (skip it if there isn't "
+        "one, don't say 'no special day' or anything like that). a dutch holiday "
+        "matters more than a silly day, so lead with it if there is one, and say "
+        "whether it's a day off. that's it, "
         "nothing else - no news, no extra facts, keep it tiny.\n\n"
         f"facts:\n{facts}"
     )
@@ -49,10 +73,10 @@ def build_greeting_message() -> str:
             max_tokens=120,
         )
         text = _clean_reply(resp.choices[0].message.content or "")
-        return text or "good morning!"
+        return text or f"{_greeting_word()}!"
     except Exception:  # noqa: BLE001
         logger.exception("failed to build morning greeting message")
-        return "good morning! (i had trouble putting today's update together, sorry)"
+        return f"{_greeting_word()}! (i had trouble putting today's update together, sorry)"
 
 
 def build_news_message() -> str | None:

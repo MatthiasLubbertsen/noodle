@@ -1,7 +1,9 @@
+import datetime
 import logging
 
 import config
 from bot.httpjson import get_json
+from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
 
@@ -88,6 +90,36 @@ def forecast_text(location: str, days: int = 1, label: str | None = None) -> str
     for i, day in enumerate(daily["time"]):
         lines.append("  " + _fmt_day("today" if i == 0 else day, daily, i))
     return "\n".join(lines)
+
+
+# the middle of the netherlands, for when no home place is configured (or it can't be found)
+_NL_CENTER = (52.1, 5.3)
+
+
+def home_coords() -> tuple[float, float]:
+    """(lat, lon) of matthias's own place (private - never put it in a message)."""
+    place = config.WEATHER_DEFAULT_LOCATION or next(iter(config.WEATHER_LOCATIONS), "")
+    try:
+        geo = _geocode(place) if place else None
+    except Exception:  # noqa: BLE001
+        logger.exception("geocoding the home place failed")
+        geo = None
+    return (geo[0], geo[1]) if geo else _NL_CENTER
+
+
+def cloud_cover(lat: float, lon: float, start: datetime.datetime, end: datetime.datetime) -> float | None:
+    """mean forecast cloud cover (%) over the hours between two times in the next
+    two days, or None if there's no forecast for them. raises if the request fails."""
+    data = get_json(
+        FORECAST_URL,
+        {"latitude": lat, "longitude": lon, "timezone": "Europe/Amsterdam", "forecast_days": 3, "hourly": "cloud_cover"},
+    )
+    first_hour = start.replace(minute=0, second=0, microsecond=0)
+    values = [
+        cover for t, cover in zip(data["hourly"]["time"], data["hourly"]["cloud_cover"])
+        if cover is not None and first_hour <= datetime.datetime.fromisoformat(t).replace(tzinfo=AMSTERDAM_TZ) <= end
+    ]
+    return sum(values) / len(values) if values else None
 
 
 def morning_weather_facts() -> str | None:

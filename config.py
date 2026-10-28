@@ -62,8 +62,13 @@ UNPROMPTED_COOLDOWN_SECONDS = float(os.getenv("UNPROMPTED_COOLDOWN_SECONDS", "30
 # everything runs in Europe/Amsterdam time - not configurable, matthias lives there.
 # "HH:MM" time noodle DMs USER_ID a reminder to send today's @matthias-day ping
 DAILY_PING_REMINDER = os.getenv("DAILY_PING_REMINDER", "19:00")
-# "HH:MM" time noodle DMs USER_ID the wakey-wakey / special-day / news digest
+# "HH:MM" time noodle DMs USER_ID the wakey-wakey / special-day / news digest.
+# only used without the web session (SLACK_WEB_TOKEN + SLACK_WEB_COOKIE): with it, the morning
+# dm goes out when USER_ID first comes online instead (see bot/wakeup.py), or at
+# MORNING_FALLBACK_DM if he hasn't by then
 DAILY_MORNING_DM = os.getenv("DAILY_MORNING_DM", "08:00")
+# "HH:MM": with presence mode, send the morning dm anyway at this time if he never came online
+MORNING_FALLBACK_DM = os.getenv("MORNING_FALLBACK_DM", "12:00")
 
 # "HH:MM" time noodle DMs a short end-of-day wrap-up (slack messages, commits,
 # tracks played). it never drafts the @matthias-day recap - matthias writes that.
@@ -75,10 +80,13 @@ WEEKLY_JOURNAL = os.getenv("WEEKLY_JOURNAL", "sun 18:00")
 WEEKLY_MUSIC = os.getenv("WEEKLY_MUSIC", "sun 18:30")
 
 # --- proactivity guardrails ---
-# unprompted pings (the github watcher) are held during quiet hours
+# unprompted pings (the github watcher, sky/aurora dms) are held during quiet hours
 # ("HH:MM-HH:MM", may wrap past midnight) and capped per day. fixed-time dms
 # (morning, wrap-up, weekly) are exempt.
 QUIET_HOURS = os.getenv("QUIET_HOURS", "23:00-07:30")
+# the live aurora alert is only useful when it's dark, which is mostly inside quiet hours, so
+# by default it ignores them (it still counts against the daily cap). 0 = respect them
+AURORA_IN_QUIET_HOURS = os.getenv("AURORA_IN_QUIET_HOURS", "1").strip().lower() not in ("0", "false", "no")
 PROACTIVE_DAILY_CAP = int(os.getenv("PROACTIVE_DAILY_CAP", "10"))
 
 # --- weather (open-meteo, no key needed) ---
@@ -103,6 +111,14 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_USER = os.getenv("GITHUB_USER", "MatthiasLubbertsen")
 # how often the watcher checks for new notifications
 GITHUB_POLL_SECONDS = int(os.getenv("GITHUB_POLL_SECONDS", "300"))
+
+# --- hackatime (hack club's wakatime: coding time) ---
+# his hackatime username (or slack id). set = the public `hackatime` tool + the hour
+# milestone posts (every hour in LOGS_CHANNEL_ID, every 5 in MATTHIAS_DAY_CHANNEL_ID).
+# the api key (hackatime settings page) is only needed if his stats aren't public.
+HACKATIME_USERNAME = os.getenv("HACKATIME_USERNAME", "").strip()
+HACKATIME_API_KEY = os.getenv("HACKATIME_API_KEY", "")
+HACKATIME_POLL_SECONDS = int(os.getenv("HACKATIME_POLL_SECONDS", "600"))
 
 # the "@matthias-day" usergroup: pinging it triggers a "messages sent today" recap.
 # matched by id (<!subteam^ID>); the label "matthias-day" is always matched
@@ -175,6 +191,8 @@ NEWS_SEEN_PATH = DATA_DIR / "hackclub_news_seen.json"
 # sqlite, see bot/history_store.py.
 MEMORY_DB_PATH = DATA_DIR / "noodle_memory.db"
 GITHUB_SEEN_PATH = DATA_DIR / "github_seen.json"
+HACKATIME_SEEN_PATH = DATA_DIR / "hackatime_seen.json"
 PROACTIVE_STATE_PATH = DATA_DIR / "proactive_state.json"
+MORNING_STATE_PATH = DATA_DIR / "morning_sent.json"
 GAMES_STATE_PATH = DATA_DIR / "games.json"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

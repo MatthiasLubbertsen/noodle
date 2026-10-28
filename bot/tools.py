@@ -9,11 +9,11 @@ import config
 from bot import reminders, state
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
-from bot import features, games, sandbox, webfetch
+from bot import features, games, hackatime, sandbox, webfetch
 from bot import github as github_api
 from bot import links as links_api
 from bot.channels import with_join
-from bot import lastfm
+from bot import dice, lastfm
 from bot.exa import web_answer
 from bot import freedom_tool
 from bot.freedom_tool import error_message as _freedom_error_message
@@ -25,6 +25,7 @@ from bot.freedom import list_schedules as freedom_list_schedules
 from bot.freedom import list_sessions as freedom_list_sessions
 from bot.freedom import start_session as freedom_start_session
 from bot.history_store import load_kind_between, search_similar
+from bot.holidays import holidays_text
 from bot.netlog import log_tool
 from bot.slack_text import _channel_link, _parse_slack_ref
 from bot.tz import AMSTERDAM_TZ
@@ -443,6 +444,42 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "roll_dice",
+            "description": (
+                "roll dice in standard notation (d20, 2d6+3, 4d8-1; up to 20 dice) with real "
+                "randomness. use only when someone actually asks to roll dice or flip a coin "
+                "(a coin is d2) - never invent a roll yourself."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notation": {"type": "string", "description": "e.g. 'd20' or '2d6+3'"},
+                },
+                "required": ["notation"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "public_holidays",
+            "description": (
+                "public holidays for a country, via nager.date: the next 12 months, or a whole "
+                "year. each one says whether it's a real day off. use when someone asks about a "
+                "holiday or whether a day is a day off ('is monday a holiday?', 'when is koningsdag?')."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "country": {"type": "string", "description": "2-letter country code, e.g. NL, DE, US. default NL"},
+                    "year": {"type": "integer", "description": "a whole calendar year. leave out for the next 12 months"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "now_playing",
             "description": (
                 "what matthias is listening to right now (matthias only; plus the last few "
@@ -542,25 +579,73 @@ TOOLS = [
         "function": {
             "name": "github",
             "description": (
-                "look things up on github with matthias's account (matthias "
-                "only, checked on the server - it can see his private repos). "
-                "actions: repo (repo summary), commits (recent commits of a "
-                "repo), issues / pulls (open ones of a repo; state=closed|all "
-                "for others), search (issue/pr search with github search "
-                "syntax in q), notifications (his unread notifications), today "
-                "(his commit count today). repo may be 'name' (his own) or "
-                "'owner/name'."
+                "look things up on github with matthias's account (matthias only, checked on "
+                "the server - it can see his private repos). read-only. repo may be 'name' (his "
+                "own) or 'owner/name'. actions:\n"
+                "- repos: his repos, most recently pushed first\n"
+                "- repo: one repo's summary; branches; releases (latest 5); actions (latest ci "
+                "workflow runs and whether they passed)\n"
+                "- readme: the repo's readme. tree: every file path in the repo (path = only "
+                "under that folder). file: read one file (path), or list a folder. ref = a branch, "
+                "tag or commit for readme/tree/file\n"
+                "- commits: recent commits (optional path = only that file, ref = branch). commit: "
+                "one commit's message and changed files (ref = the sha)\n"
+                "- issues / pulls: open ones (state=closed|all for others). issue: one issue or pr "
+                "by number, with its description, comments and (for a pr) changed files\n"
+                "- stars: a repo's star count and newest stargazers; no repo = stars across all "
+                "his repos. starred: repos he starred, newest first\n"
+                "- search (issues/prs), search_repos, code_search (code in files, e.g. 'foo "
+                "repo:owner/name'): github search syntax in q\n"
+                "- user: a github profile (q = login, default his own)\n"
+                "- notifications (his unread notifications), today (his commit count today)"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["repo", "commits", "issues", "pulls", "search", "notifications", "today"],
+                        "enum": [
+                            "repos", "repo", "branches", "releases", "actions", "readme", "tree", "file",
+                            "commits", "commit", "issues", "pulls", "issue", "stars", "starred",
+                            "search", "search_repos", "code_search", "user", "notifications", "today",
+                        ],
                     },
-                    "repo": {"type": "string", "description": "for repo/commits/issues/pulls"},
-                    "q": {"type": "string", "description": "for search"},
+                    "repo": {"type": "string", "description": "'name' (his own) or 'owner/name'"},
+                    "path": {"type": "string", "description": "a file or folder path in the repo, for file/tree/commits"},
+                    "ref": {"type": "string", "description": "branch, tag or commit sha (commit: the sha)"},
+                    "number": {"type": "integer", "description": "issue or pr number, for issue"},
+                    "q": {"type": "string", "description": "search query, or a login for user"},
                     "state": {"type": "string", "enum": ["open", "closed", "all"], "description": "for issues/pulls, default open"},
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "hackatime",
+            "description": (
+                "matthias's coding time from hackatime (hack club's coding time tracker), his "
+                "whole history back to the first day. public: anyone may ask. actions: summary "
+                "(total, daily average, streak, top projects and languages; all time, or a "
+                "start_date..end_date range, optionally one project), today (same for today), "
+                "projects (every project ever with its all-time time; query = part of a name to "
+                "search), project (one project: time, first/last day worked on, repo, languages; "
+                "optional range), days (time per day for a range, per month if longer than ~3 "
+                "months, max a year; default last 7 days; optional project) and sessions (when he "
+                "coded on one day: start_date, default today) - those two show his daily "
+                "rhythm, so they are matthias only, checked on the server. dates are "
+                "YYYY-MM-DD, amsterdam days."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["summary", "today", "projects", "project", "days", "sessions"]},
+                    "start_date": {"type": "string", "description": "YYYY-MM-DD, inclusive"},
+                    "end_date": {"type": "string", "description": "YYYY-MM-DD, inclusive"},
+                    "project": {"type": "string", "description": "exact hackatime project name"},
+                    "query": {"type": "string", "description": "for projects: part of a project name"},
                 },
                 "required": ["action"],
             },
@@ -875,8 +960,11 @@ def _github(args: dict, user_id: str | None) -> str:
     if not _is_matthias(user_id):
         return "only matthias can use the github tool"
     action = args.get("action", "")
-    result = github_api.query(action, repo=args.get("repo"), q=args.get("q"), state=args.get("state") or "open")
-    log_tool("github", f"{action} {args.get('repo') or args.get('q') or ''}".strip(), "done")
+    result = github_api.query(
+        action, repo=args.get("repo"), q=args.get("q"), state=args.get("state") or "open",
+        path=args.get("path"), ref=args.get("ref"), number=args.get("number"),
+    )
+    log_tool("github", f"{action} {args.get('repo') or args.get('q') or ''} {args.get('path') or ''}".strip(), "done")
     return result
 
 
@@ -1509,6 +1597,14 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return _cancel_scheduled(args.get("id"), user_id)
     if name == "get_weather":
         return _get_weather(args.get("location"), args.get("days"), origin)
+    if name == "roll_dice":
+        result = dice.roll(args.get("notation", ""))
+        log_tool("roll_dice", args.get("notation", ""), "success")
+        return result
+    if name == "public_holidays":
+        country = args.get("country") or "NL"
+        log_tool("public_holidays", f"{country} {args.get('year') or 'next 12 months'}", "run")
+        return holidays_text(country, args.get("year"))
     if name == "now_playing":
         return _now_playing(user_id)
     if name == "run_code":
@@ -1522,6 +1618,9 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return _github(args, user_id)
     if name == "links":
         return _links(args, user_id)
+    if name == "hackatime":
+        log_tool("hackatime", f"{args.get('action', '')} {args.get('project') or args.get('query') or ''}".strip(), "run")
+        return hackatime.query(args, is_owner=_is_matthias(user_id))
     if name == "get_journal":
         return _get_journal(args.get("start_date"), args.get("end_date"), user_id)
     if name == "summarize_thread":

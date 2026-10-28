@@ -17,6 +17,7 @@ TOOL_FEATURE = {
     "freedom": "freedom",
     "start_freedom_session": "freedom",
     "schedule_freedom_session": "freedom",
+    "hackatime": "hackatime",
 }
 
 
@@ -26,12 +27,17 @@ def enabled(feature: str) -> bool:
         return len(config.SANDBOX_TOKEN) >= 16 and bool(config.SANDBOX_URL)
     if feature == "typing":
         return bool(config.SLACK_WEB_TOKEN and config.SLACK_WEB_COOKIE)
+    if feature == "presence":
+        # the morning dm follows his presence over the same web-client websocket as typing
+        return enabled("typing")
     if feature == "github":
         return bool(config.GITHUB_TOKEN)
     if feature == "lastfm":
         return bool(config.LASTFM_API_KEY and config.LASTFM_USER)
     if feature == "freedom":
         return bool(config.FREEDOM_API_KEY)
+    if feature == "hackatime":
+        return bool(config.HACKATIME_USERNAME)
     if feature == "links":
         return bool(config.LINKS_API_KEY and config.LINKS_API_BASE)
     raise KeyError(feature)

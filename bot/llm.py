@@ -4,7 +4,7 @@ import logging
 import time
 
 import config
-from bot import games, state
+from bot import features, games, state
 from bot.history_store import append_message_async
 from bot.memory import trim_memory
 from bot.netlog import log_hcai
@@ -142,13 +142,20 @@ def _runtime_context(user_id: str | None, location: str | None, last_reply: tupl
             "unless he clearly brings them up."
         )
     lines.append(
-        "things you do on your own, without being asked: every day at "
-        f"{_hhmm(config.DAILY_MORNING_DM)} you dm matthias a good-morning message "
+        "things you do on your own, without being asked: every day "
+        + (
+            "the first time he comes online (or at "
+            f"{_hhmm(config.MORNING_FALLBACK_DM)} if he hasn't by then), so it can be any time of day"
+            if features.enabled("presence")
+            else f"at {_hhmm(config.DAILY_MORNING_DM)}"
+        )
+        + " you dm matthias a greeting that fits the time of day (good morning only when it's morning) "
         "(plus any new hack club news), and every day at "
         f"{_hhmm(config.DAILY_PING_REMINDER)} you dm him a reminder to send his "
         "@matthias-day ping. those messages are yours - if he replies to or asks "
         "about one, own it (\"i sent that\"), it's not from someone else. you also "
-        "send any reminders he scheduled with you."
+        "send any reminders he scheduled with you, a dm at sunset when the night sky "
+        "has something worth seeing, and a dm when the aurora might be up right now."
     )
     return "\n".join(lines)
 
