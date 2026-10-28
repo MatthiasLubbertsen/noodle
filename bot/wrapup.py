@@ -3,7 +3,7 @@ import logging
 import config
 from bot import github, lastfm
 from bot.oneshot import complete, remember_facts
-from bot.stats import messages_sent_today
+from bot.stats import average_fact, messages_sent_today
 
 logger = logging.getLogger("noodle")
 
@@ -16,6 +16,9 @@ def build_wrapup_message() -> str | None:
     sent = messages_sent_today(config.USER_ID)
     if sent >= 0:
         facts.append(f"slack messages sent today: {sent}")
+        avg = average_fact(config.USER_ID)
+        if avg:
+            facts.append(avg)
     if github.configured():
         try:
             count, repos = github.commits_today()

@@ -583,6 +583,11 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   matches via `search_messages(query="from:<@USER_ID> on:<today>")` (using the
   `messages.total` field from the slack search response; "today" is always
   Europe/Amsterdam, `bot/tz.py`).
+- **the average.** `stats.average_per_day()` averages his messages over the last 14 full days
+  (today excluded). finished days are counted once via the same search and cached in
+  `data/message_counts.json`, so the first call costs up to 14 searches and later ones one a day.
+  the recap reply and the end-of-day wrap-up get it as a fact, so noodle can say whether today is
+  above or below his usual.
 - whenever a message pings the `@matthias-day` usergroup (matched by
   `MATTHIAS_DAY_GROUP_ID`, and always by the literal text "matthias-day" as
   a fallback), `handlers.handle_message()` replies with that recap **as a
