@@ -13,7 +13,7 @@ from bot import features, games, hackatime, repo_fetch, sandbox, webfetch
 from bot import github as github_api
 from bot import links as links_api
 from bot.channels import with_join
-from bot import dice, lastfm, stats
+from bot import dice, lastfm
 from bot.exa import web_answer
 from bot import freedom_tool
 from bot.freedom_tool import error_message as _freedom_error_message
@@ -977,6 +977,9 @@ def _now_playing(user_id: str | None) -> str:
 
 
 def _message_stats() -> str:
+    # imported here: stats -> oneshot -> llm -> tools would be a circular import
+    from bot import stats
+
     today = stats.messages_sent_today(config.USER_ID)
     avg = stats.average_fact(config.USER_ID)
     if today < 0 and not avg:
