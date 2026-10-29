@@ -237,6 +237,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `roll_dice` | roll dice in standard notation (d20, 2d6+3, coin = d2), up to 20 dice | anyone |
 | `public_holidays` | a country's public holidays (default NL), next 12 months or one year, marked day off or not (nager.date, no key) | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
+| `message_stats` | his slack messages today + his 14-day daily average (counts only) | anyone |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
 | `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy), javascript or a simulated bash shell (grep sed awk jq xan tar python3 js-exec sqlite3...; its /work folder persists between runs, and a github repo can be snapshotted into it at the start) in an isolated sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions, text/data wrangling; no network | matthias only, dms only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
@@ -593,6 +594,11 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   matches via `search_messages(query="from:<@USER_ID> on:<today>")` (using the
   `messages.total` field from the slack search response; "today" is always
   Europe/Amsterdam, `bot/tz.py`).
+- **the average.** `stats.average_per_day()` averages his messages over the last 14 full days
+  (today excluded). finished days are counted once via the same search and cached in
+  `data/message_counts.json`, so the first call costs up to 14 searches and later ones one a day.
+  the recap reply and the end-of-day wrap-up get it as a fact, so noodle can say whether today is
+  above or below his usual.
 - whenever a message pings the `@matthias-day` usergroup (matched by
   `MATTHIAS_DAY_GROUP_ID`, and always by the literal text "matthias-day" as
   a fallback), `handlers.handle_message()` replies with that recap **as a

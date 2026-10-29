@@ -13,7 +13,7 @@ from bot import features, games, hackatime, repo_fetch, sandbox, webfetch
 from bot import github as github_api
 from bot import links as links_api
 from bot.channels import with_join
-from bot import dice, lastfm
+from bot import dice, lastfm, stats
 from bot.exa import web_answer
 from bot import freedom_tool
 from bot.freedom_tool import error_message as _freedom_error_message
@@ -492,6 +492,18 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "message_stats",
+            "description": (
+                "how many slack messages matthias has sent today and his usual average per "
+                "day over the last 14 days (anyone can ask). use when he asks how chatty he "
+                "is, what his average is, or whether today is busy compared to normal."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_code",
             "description": (
                 "run a python, javascript or bash snippet in an isolated sandbox and get "
@@ -962,6 +974,19 @@ def _now_playing(user_id: str | None) -> str:
     result = lastfm.now_playing()
     log_tool("now_playing", "", "success" if not result.startswith("last.fm") else "failed")
     return result
+
+
+def _message_stats() -> str:
+    today = stats.messages_sent_today(config.USER_ID)
+    avg = stats.average_fact(config.USER_ID)
+    if today < 0 and not avg:
+        log_tool("message_stats", "", "failed")
+        return "couldn't count his messages right now."
+    log_tool("message_stats", "", "success")
+    lines = [f"messages sent today so far: {today}" if today >= 0 else "today's count failed"]
+    if avg:
+        lines.append(avg)
+    return "\n".join(lines)
 
 
 def _music_stats(args: dict, user_id: str | None) -> str:
@@ -1659,6 +1684,8 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
     if name == "play_game":
         log_tool("play_game", args.get("action", ""), "run")
         return games.play(args, user_id, origin)
+    if name == "message_stats":
+        return _message_stats()
     if name == "music_stats":
         return _music_stats(args, user_id)
     if name == "github":

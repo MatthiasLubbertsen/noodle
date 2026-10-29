@@ -3,7 +3,7 @@ import logging
 import config
 from bot import github, lastfm
 from bot.oneshot import complete, remember_facts
-from bot.stats import messages_sent_today
+from bot.stats import average_fact, messages_sent_today
 
 logger = logging.getLogger("noodle")
 
@@ -16,6 +16,9 @@ def build_wrapup_message() -> str | None:
     sent = messages_sent_today(config.USER_ID)
     if sent >= 0:
         facts.append(f"slack messages sent today: {sent}")
+        avg = average_fact(config.USER_ID)
+        if avg:
+            facts.append(avg)
     if github.configured():
         try:
             count, repos = github.commits_today()
@@ -34,7 +37,7 @@ def build_wrapup_message() -> str | None:
     text = complete(
         "it's the end of the day. write ONE short wrap-up message for matthias in "
         "your own voice, 2-3 sentences max, using only the facts below. be warm, "
-        "not a report; mention the actual numbers, but skip any stat that is zero or boring. do NOT mention, "
+        "not a report; mention the actual numbers (his average message count is just context you can use creatively, or ignore), but skip any stat that is zero or boring. do NOT mention, "
         "remind about or draft his @matthias-day recap - he writes that himself.\n\n"
         "facts:\n" + "\n".join(facts),
         max_tokens=200,

@@ -195,4 +195,5 @@ HACKATIME_SEEN_PATH = DATA_DIR / "hackatime_seen.json"
 PROACTIVE_STATE_PATH = DATA_DIR / "proactive_state.json"
 MORNING_STATE_PATH = DATA_DIR / "morning_sent.json"
 GAMES_STATE_PATH = DATA_DIR / "games.json"
+MESSAGE_COUNTS_PATH = DATA_DIR / "message_counts.json"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
