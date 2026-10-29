@@ -466,7 +466,7 @@ TOOLS = [
             "name": "message_stats",
             "description": (
                 "how many slack messages matthias has sent today and his usual average per "
-                "day over the last 14 days (matthias only). use when he asks how chatty he "
+                "day over the last 14 days (anyone can ask). use when he asks how chatty he "
                 "is, what his average is, or whether today is busy compared to normal."
             ),
             "parameters": {"type": "object", "properties": {}},
@@ -908,10 +908,7 @@ def _now_playing(user_id: str | None) -> str:
     return result
 
 
-def _message_stats(user_id: str | None) -> str:
-    if not _is_matthias(user_id):
-        log_tool("message_stats", "", "unauthorized")
-        return "only matthias can see his message stats."
+def _message_stats() -> str:
     today = stats.messages_sent_today(config.USER_ID)
     avg = stats.average_fact(config.USER_ID)
     if today < 0 and not avg:
@@ -1596,7 +1593,7 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         log_tool("play_game", args.get("action", ""), "run")
         return games.play(args, user_id, origin)
     if name == "message_stats":
-        return _message_stats(user_id)
+        return _message_stats()
     if name == "music_stats":
         return _music_stats(args, user_id)
     if name == "github":

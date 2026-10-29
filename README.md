@@ -92,7 +92,7 @@ real slack sender id, so it is safe in public channels too.
 | `roll_dice` | roll dice in standard notation (d20, 2d6+3, coin = d2), up to 20 dice | anyone |
 | `public_holidays` | a country's public holidays (default NL) for the next 12 months or a year, and which are a day off, via nager.date | anyone |
 | `now_playing` | what matthias is listening to, via last.fm scrobbles | matthias only |
-| `message_stats` | his slack messages today + his 14-day daily average | matthias only |
+| `message_stats` | his slack messages today + his 14-day daily average (counts only) | anyone |
 | `music_stats` | his top artists / tracks / albums over a period (7 days to all time), via last.fm | matthias only |
 | `run_code` | run python (numpy, pandas, matplotlib, scipy, sympy) or javascript in an isolated wasm sandbox: calculations, data crunching, plots (sent to the dm as png), file conversions; no network | matthias only, dms only |
 | `play_game` | tictactoe, connect4, hangman, wordle, mastermind in a dm, only when he asks; the engine plays and keeps state, the board is attached automatically | matthias only, dms only |
