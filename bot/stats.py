@@ -6,7 +6,6 @@ from slack_sdk import WebClient
 
 import config
 from bot import state
-from bot.oneshot import complete
 from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
@@ -107,6 +106,8 @@ def build_daily_summary(user_id: str) -> str:
     """the "messages sent today" message, written by the model (never a
     templated line). it is posted publicly in a channel, so it only ever
     contains the number."""
+    from bot.oneshot import complete  # lazy: oneshot -> llm -> tools -> stats would be a cycle
+
     count = messages_sent_today(user_id)
     if count < 0:
         facts = "the search for today's message count failed, so you don't know the number"
