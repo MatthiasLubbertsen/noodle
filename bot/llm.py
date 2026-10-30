@@ -51,6 +51,22 @@ def _strip_leaked_tool_names(text: str) -> str:
     return "\n\n".join(kept)
 
 
+def _strip_group_ping(text: str) -> str:
+    """a normal chat reply must never ping the @matthias-day group. the only
+    things that do are the scheduled reminder and the channel stats reply, which
+    don't go through ask_noodle(). real incident: after a plain "we love github"
+    the model copied the 19:00 reminder from its dm history ("hey matthias, time
+    to write your day. @matthias-day") at 16:15, and the ping went out as real
+    text. drop any paragraph that mentions the group."""
+    if not text:
+        return text
+    markers = ["@matthias-day", "matthias-day"]
+    if config.MATTHIAS_DAY_GROUP_ID:
+        markers.append(f"<!subteam^{config.MATTHIAS_DAY_GROUP_ID}")
+    kept = [p for p in text.split("\n\n") if not any(m in p.lower() for m in markers)]
+    return "\n\n".join(kept)
+
+
 def _call_chat(messages, tools=None, tool_choice=None, detail="", max_tokens=1000):
     kwargs = {
         "model": config.MODEL,
@@ -153,7 +169,10 @@ def _runtime_context(user_id: str | None, location: str | None, last_reply: tupl
         "(plus any new hack club news), and every day at "
         f"{_hhmm(config.DAILY_PING_REMINDER)} you dm him a reminder to send his "
         "@matthias-day ping. those messages are yours - if he replies to or asks "
-        "about one, own it (\"i sent that\"), it's not from someone else. you also "
+        "about one, own it (\"i sent that\"), it's not from someone else. those "
+        "are sent by a separate scheduled job at those times only: NEVER write that "
+        "reminder, or mention/ping @matthias-day, inside a normal reply, even if "
+        "earlier messages in this chat look like it. you also "
         "send any reminders he scheduled with you, a dm at sunset when the night sky "
         "has something worth seeing, and a dm when the aurora might be up right now."
     )
@@ -232,7 +251,7 @@ def ask_noodle(
                     raw_content[:120],
                 )
                 continue
-            final = _strip_leaked_tool_names(_clean_reply(raw_content))
+            final = _strip_group_ping(_strip_leaked_tool_names(_clean_reply(raw_content)))
             if not game_guard_used and games.looks_like_fake_turn(final, user_text, user_id, origin):
                 # it narrated a game turn without running the game: make it call the tool once
                 game_guard_used = True
@@ -277,7 +296,9 @@ def ask_noodle(
 
     # safety net: answer without tools if we hit the round cap
     final_resp = _call_chat(messages, detail=first4)
-    final = _strip_leaked_tool_names(_clean_reply(final_resp.choices[0].message.content or ""))
+    final = _strip_group_ping(
+        _strip_leaked_tool_names(_clean_reply(final_resp.choices[0].message.content or ""))
+    )
     history.append({"role": "assistant", "content": final})
     _remember(conv_key, "assistant", final, persist)
     state.LAST_REPLY[conv_key] = (time.time(), final)
