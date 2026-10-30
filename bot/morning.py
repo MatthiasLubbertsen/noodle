@@ -47,8 +47,7 @@ def build_greeting_message() -> str:
         else "no silly/named days today"
     )
     dutch_holiday = today_nl()
-    if dutch_holiday:
-        facts += "\ndutch holiday today: " + dutch_holiday
+    facts += "\ndutch holiday today: " + (dutch_holiday or "none")
     now = datetime.datetime.now(AMSTERDAM_TZ)
     prompt = (
         f"it's {now.strftime('%H:%M')} ({_day_part(now)}) and matthias just came online for the "
@@ -57,8 +56,9 @@ def build_greeting_message() -> str:
         f"say \"{_greeting_word(now)}\" or similar, and NEVER say morning unless it is "
         "actually morning. mention if today has a silly/named day (skip it if there isn't "
         "one, don't say 'no special day' or anything like that). a dutch holiday "
-        "matters more than a silly day, so lead with it if there is one, and say "
-        "whether it's a day off. that's it, "
+        "matters more than a silly day, so lead with it if the facts list one, and say "
+        "whether it's a day off. NEVER mention a holiday or special day that isn't in "
+        "the facts below, and never invent or guess one from the date. that's it, "
         "nothing else - no news, no extra facts, keep it tiny.\n\n"
         f"facts:\n{facts}"
     )
