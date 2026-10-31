@@ -2,14 +2,14 @@
 # node process per job. runs with NO network, NO secrets and a read-only filesystem
 # (see docker-compose.yml). build stage has network to fetch pyodide's packages,
 # the final image never needs it.
-FROM node:22-slim AS build
+FROM node:25-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY fetch-packages.js ./
 RUN node fetch-packages.js
 
-FROM node:22-slim
+FROM node:25-slim
 WORKDIR /app
 ENV NODE_ENV=production HOME=/tmp
 COPY --from=build /app/node_modules ./node_modules
