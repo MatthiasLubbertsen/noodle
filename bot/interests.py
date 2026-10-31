@@ -9,11 +9,19 @@ AVOIDED_TERMS = (
     "halloween", "hallowe'en", "all hallows", "samhain", "trick or treat",
     "day of the dead", "dia de los muertos", "día de los muertos", "all souls",
     # remembering the dead
-    "dodenherdenking", "memorial day", "remembrance", "funeral", "cemetery",
+    "memorial day", "funeral", "cemetery",
     "graveyard", "grave", "death", "dead", "dying", "murder", "suicide",
     # spooky/horror themes
     "ghost", "zombie", "vampire", "skeleton", "witch", "witches", "haunted",
     "horror", "grim reaper", "friday the 13th", "walpurgis", "obon",
+)
+
+# important days that are always allowed, even though they contain an avoided word
+# (e.g. "remembrance of the dead")
+ALLOWED_TERMS = ("dodenherdenking", "remembrance of the dead", "national remembrance")
+
+_ALLOWED = re.compile(
+    r"(?<!\w)(?:" + "|".join(re.escape(t) for t in ALLOWED_TERMS) + r")(?!\w)", re.IGNORECASE
 )
 
 _AVOIDED = re.compile(
@@ -24,4 +32,5 @@ _AVOIDED = re.compile(
 
 def is_avoided(text: str) -> bool:
     """True if the text is about something matthias doesn't want to hear about."""
-    return bool(_AVOIDED.search(text or ""))
+    text = text or ""
+    return not _ALLOWED.search(text) and bool(_AVOIDED.search(text))

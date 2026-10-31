@@ -13,6 +13,10 @@ class AvoidedTests(unittest.TestCase):
         for text in ("Halloween", "happy HALLOWEEN!", "Day of the Dead", "All Souls' Day", "Memorial Day"):
             self.assertTrue(is_avoided(text), text)
 
+    def test_dodenherdenking_is_allowed(self):
+        for text in ("Dodenherdenking", "Remembrance of the Dead (Dodenherdenking)", "National Remembrance Day"):
+            self.assertFalse(is_avoided(text), text)
+
     def test_no_false_positives(self):
         for text in ("Roald Dahl Day", "Watermelon Day", "deadline day", "Pizza Day"):
             self.assertFalse(is_avoided(text), text)

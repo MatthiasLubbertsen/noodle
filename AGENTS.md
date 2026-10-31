@@ -778,7 +778,7 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
 
 ### 7a. things matthias avoids, weekend weather
 - matthias doesn't do halloween (it's about death). `bot/interests.py` holds `AVOIDED_TERMS` (halloween,
-  day of the dead, all souls, remembrance days, ghosts/zombies/horror, ...): `almanac.fun_holidays_today()`
+  day of the dead, all souls, ghosts/zombies/horror, ...; `ALLOWED_TERMS` overrides it for dodenherdenking): `almanac.fun_holidays_today()`
   and `holidays.today_nl()` drop matching days, the greeting prompt and `prompts/system_prompt.md` forbid the
   topic, and `morning.build_greeting_message()` falls back to a plain greeting if the model mentions one anyway.
 - on saturday/sunday the morning weather covers only his primary place (`weather.morning_places()`:
