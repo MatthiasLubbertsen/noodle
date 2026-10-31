@@ -50,6 +50,7 @@ noodle/
     wakeup.py             # morning dm when matthias first comes online (presence over rtm.py)
     stats.py              # "messages sent today" recap (via slack search)
     almanac.py            # silly/named days today (wikipedia)
+    interests.py          # topics matthias avoids (halloween, death themes): filtered from days, holidays, greetings
     news.py               # hack club news rss + persisted "seen" state
     morning.py            # builds the tiny morning wakeup message
     scheduler.py          # daily background jobs (ping reminder, morning dm)
@@ -90,6 +91,7 @@ noodle/
   .github/                # workflows: docker.yml (gates on tests.yml, then builds/pushes images), tests.yml (python tests, lint, sandbox syntax, compose check), dependabot.yml
   scripts/
     backfill_matthias_day.py  # one-time: backfill historical pings into memory
+    purge_morning.py      # delete a noodle message from slack + memory, optionally resend the morning dm
   sandbox/                # the code sandbox: its OWN container (node + wasm + simulated shell), see 7g
     test.js               # `node --test sandbox/test.js`: shell tier, isolation + limits
     server.js             # http runner: pool, timeouts, memory watchdog, auth
@@ -773,6 +775,15 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
     message listing new hack club news articles, returning `None` when
     there's nothing new - in which case `_send_morning_dm()` sends only the
     greeting and skips the news message entirely.
+
+### 7a. things matthias avoids, weekend weather
+- matthias doesn't do halloween (it's about death). `bot/interests.py` holds `AVOIDED_TERMS` (halloween,
+  day of the dead, all souls, remembrance days, ghosts/zombies/horror, ...): `almanac.fun_holidays_today()`
+  and `holidays.today_nl()` drop matching days, the greeting prompt and `prompts/system_prompt.md` forbid the
+  topic, and `morning.build_greeting_message()` falls back to a plain greeting if the model mentions one anyway.
+- on saturday/sunday the morning weather covers only his primary place (`weather.morning_places()`:
+  `WEEKEND_WEATHER_LOCATIONS`, else `WEATHER_DEFAULT_LOCATION`, else the first of `WEATHER_LOCATIONS`).
+- `python -m scripts.purge_morning --ts CHANNEL:TS --like TEXT --resend` forgets a message (slack + memory rows).
 
 ### 7b. scheduled reminders + freedom sessions, and who/when awareness
 - `schedule_reminder` (`bot/tools.py`, store in `bot/reminders.py`) lets

@@ -125,6 +125,21 @@ def delete_kind(kind: str) -> int:
         conn.close()
 
 
+def delete_containing(text: str) -> int:
+    """delete every row whose content contains `text` (case-insensitive), returning how
+    many were removed - used by scripts/purge_morning.py to forget a message."""
+    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    conn = sqlite3.connect(config.MEMORY_DB_PATH)
+    try:
+        cur = conn.execute(
+            "DELETE FROM messages WHERE content LIKE ? ESCAPE '\\'", (f"%{escaped}%",)
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 def append_message_async(
     conv_key: str, kind: str, role: str, content: str, user_id: str | None = None
 ) -> None:

@@ -97,6 +97,11 @@ WEATHER_DEFAULT_LOCATION = os.getenv("WEATHER_DEFAULT_LOCATION", "").strip()
 WEATHER_LOCATIONS = [
     n.strip() for n in os.getenv("WEATHER_LOCATIONS", "").split(",") if n.strip()
 ]
+# places for the morning dm on saturdays and sundays (just his primary place). unset =
+# WEATHER_DEFAULT_LOCATION, else the first of WEATHER_LOCATIONS
+WEEKEND_WEATHER_LOCATIONS = [
+    n.strip() for n in os.getenv("WEEKEND_WEATHER_LOCATIONS", "").split(",") if n.strip()
+]
 
 # --- last.fm (now playing; spotify can scrobble to it, no oauth app needed) ---
 # both optional - unset just disables the now_playing tool / wrap-up line
