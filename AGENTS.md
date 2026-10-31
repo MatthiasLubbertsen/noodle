@@ -1081,7 +1081,10 @@ dm with `files_upload_v2` (needs the `files:write` scope on noodle's token).
   exist; `child.js` also blocks `import js` best-effort, but that is a
   speed bump, not the wall. a python job costs a ~7s (up to ~15s on a slow
   host) warm-up for the NEXT job because a fresh interpreter loads in the
-  background after every run, so two python runs in a row wait. scipy is
+  background after every run, so two python runs in a row wait. **idle = almost nothing:** no interpreter is
+  warmed at startup, and a warm one is killed after `SANDBOX_PYTHON_IDLE_S` (default 120) seconds without a
+  job, so a quiet sandbox holds no pyodide (hundreds of MB, cpu while loading); the first run after a quiet
+  spell pays the warm-up itself. the docker healthcheck runs every 2 minutes for the same reason. scipy is
   loaded on demand when imported (it's on disk, no network); anything not
   bundled raises a normal `ModuleNotFoundError`. wasm32 caps a python process
   at ~2GB. javascript has no `require`/`fetch`/timers. installing packages

@@ -125,14 +125,29 @@ function rssMb(pid) {
   }
 }
 
-// ---- python: one warm, pristine interpreter; each job consumes it and a fresh one warms up behind it
+// ---- python: one warm, pristine interpreter; each job consumes it and a fresh one warms up behind it.
+// pyodide idles at hundreds of MB and burns cpu while loading, so nothing is warmed at startup and a
+// warm interpreter is retired after IDLE_MS without a job: an idle sandbox holds no python at all, and
+// the first run after a quiet spell just pays the warm-up itself.
+const IDLE_MS = parseInt(process.env.SANDBOX_PYTHON_IDLE_S || "120", 10) * 1000;
 let warmPython = null;
+let idleTimer = null;
 function warmUp() {
-  warmPython = spawnChild("python");
-  warmPython.ready.catch((e) => {
+  clearTimeout(idleTimer);
+  const child = spawnChild("python");
+  warmPython = child;
+  child.ready.catch((e) => {
     console.error("python warm-up failed:", e.message);
-    setTimeout(warmUp, 5000);
+    kill(child);
+    if (warmPython === child) warmPython = null; // the next job warms a fresh one
   });
+  idleTimer = setTimeout(() => {
+    if (warmPython === child) {
+      kill(child);
+      warmPython = null;
+    }
+  }, IDLE_MS);
+  idleTimer.unref();
 }
 
 // at most `max` jobs of a kind run at once, `maxWaiting` more may queue, the rest get a 429
@@ -192,11 +207,11 @@ async function runPython(code, timeoutMs) {
     if (!warmPython) warmUp();
     const child = warmPython;
     warmPython = null;
+    clearTimeout(idleTimer);
     try {
       await child.ready;
     } catch (e) {
       kill(child);
-      warmUp();
       return failure(`python isn't available right now (${e.message})`);
     }
     try {
@@ -367,7 +382,6 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, "0.0.0.0", () => console.log(`sandbox listening on :${PORT}`));
 if (!DISABLED) {
-  warmUp();
   workersAreSafe().then((ok) => {
     workersOk = ok;
     console.log(ok ? "shell workers enabled (python3, js-exec, sqlite3): probe denied fs + spawn" : "WARNING: worker probe was not fully denied, shell python3/js-exec/sqlite3 stay off");
