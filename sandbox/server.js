@@ -125,9 +125,30 @@ function rssMb(pid) {
   }
 }
 
-// ---- python: a fresh pristine interpreter per job, started on demand and killed right after it.
-// nothing is kept warm: pyodide idles at hundreds of MB and burns cpu while loading, so an idle
-// sandbox holds no interpreter at all and every python run pays the ~7s load itself.
+// ---- python: one warm, pristine interpreter; each job consumes it and a fresh one warms up behind it.
+// pyodide idles at hundreds of MB and burns cpu while loading, so nothing is warmed at startup and a
+// warm interpreter is retired after IDLE_MS without a job: an idle sandbox holds no python at all, and
+// the first run after a quiet spell just pays the warm-up itself.
+const IDLE_MS = parseInt(process.env.SANDBOX_PYTHON_IDLE_S || "120", 10) * 1000;
+let warmPython = null;
+let idleTimer = null;
+function warmUp() {
+  clearTimeout(idleTimer);
+  const child = spawnChild("python");
+  warmPython = child;
+  child.ready.catch((e) => {
+    console.error("python warm-up failed:", e.message);
+    kill(child);
+    if (warmPython === child) warmPython = null; // the next job warms a fresh one
+  });
+  idleTimer = setTimeout(() => {
+    if (warmPython === child) {
+      kill(child);
+      warmPython = null;
+    }
+  }, IDLE_MS);
+  idleTimer.unref();
+}
 
 // at most `max` jobs of a kind run at once, `maxWaiting` more may queue, the rest get a 429
 function makeLimiter(max, maxWaiting) {
@@ -183,14 +204,22 @@ async function execute(child, job, timeoutMs, graceMs = 0) {
 
 async function runPython(code, timeoutMs) {
   return withPythonLock(async () => {
-    const child = spawnChild("python");
+    if (!warmPython) warmUp();
+    const child = warmPython;
+    warmPython = null;
+    clearTimeout(idleTimer);
     try {
       await child.ready;
     } catch (e) {
       kill(child);
       return failure(`python isn't available right now (${e.message})`);
     }
-    return execute(child, { code }, timeoutMs);
+    try {
+      return await execute(child, { code }, timeoutMs);
+    } finally {
+      kill(child);
+      warmUp(); // fresh interpreter for the next job, so nothing leaks between runs
+    }
   });
 }
 
@@ -318,7 +347,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/health") {
       if (DISABLED) return send(res, 200, { ok: true, disabled: true });
-      return send(res, 200, { ok: true });
+      return send(res, 200, { ok: true, python_ready: !!warmPython && !!warmPython.isReady && !warmPython.exited });
     }
     if (req.method !== "POST" || req.url !== "/run") return send(res, 404, { error: "not found" });
     if (DISABLED) return send(res, 503, { error: "the sandbox is disabled (no SANDBOX_TOKEN set)" });
@@ -360,6 +389,7 @@ if (!DISABLED) {
 }
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, () => {
+    kill(warmPython);
     process.exit(0);
   });
 }
