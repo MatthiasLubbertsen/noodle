@@ -1262,7 +1262,12 @@ the web session is used ONLY for the websocket (ping + typing): every message no
 `ids=[USER_ID]`; `presence_change` events, single `user` or batched `users`, see vs.izie.top/redocumented). the first
 `active` of each amsterdam day calls `wakeup.on_online()` (quiet hours are deliberately NOT used), which sends the
 morning dm and persists the day in `data/morning_sent.json` (marked before sending, so a restart or crash can't repeat it). on every
-(re)connect noodle also asks `users.getPresence` once, since no event fires for being online before connecting.
+(re)connect noodle also asks `users.getPresence` once, since no event fires for being online before connecting, and
+`wakeup.poll_presence()` (started by the scheduler) repeats that check every 5 minutes until today's dm is out, because an
+event only fires on a *change* (a status that stays active all night never triggers one). the state file is written
+atomically (temp + fsync + rename) and an unreadable one logs a warning; before, a 0-byte file left by a reboot silently
+disabled the once-a-day guard (real incident: a second "good evening" gm on oct 31, 22:42, after the fixed-time
+07:00 job of the older image, which wrote no marker, had already sent that day's).
 `features.enabled("presence")` is the same credential check as typing; without it the scheduler keeps the fixed
 `DAILY_MORNING_DM` time. if he hasn't been seen by `MORNING_FALLBACK_DM` (default 12:00) the scheduler calls `wakeup.send_fallback()` and
 it goes out anyway (first of the two wins, same persisted day). since it can go out at any hour, `morning.build_greeting_message()`

@@ -331,6 +331,7 @@ def start_daily_scheduler() -> None:
         # ...with a cutoff in case he never shows up (or the socket is down)
         from bot import wakeup
 
+        threading.Thread(target=wakeup.poll_presence, daemon=True).start()
         fb_hour, fb_minute = _parse_hhmm(config.MORNING_FALLBACK_DM, (12, 0))
         threading.Thread(
             target=_run_daily, args=(fb_hour, fb_minute, wakeup.send_fallback), daemon=True

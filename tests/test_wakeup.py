@@ -80,3 +80,46 @@ class DayPartTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateFileTests(unittest.TestCase):
+    def patched(self, path: Path):
+        return mock.patch.object(config, "MORNING_STATE_PATH", path), mock.patch.object(config, "DATA_DIR", path.parent)
+
+    def test_empty_file_is_not_sent_and_is_rewritten_whole(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "sent.json"
+            path.write_text("")
+            a, b = self.patched(path)
+            with a, b:
+                self.assertFalse(wakeup._sent_today())
+                wakeup._mark_sent()
+                self.assertTrue(wakeup._sent_today())
+                self.assertEqual(json.loads(path.read_text())["day"], wakeup._today())
+                self.assertFalse(path.with_name("sent.json.tmp").exists())
+
+    def test_check_presence_sends_when_active_and_skips_when_sent(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "sent.json"
+            a, b = self.patched(path)
+            client = mock.Mock()
+            client.users_getPresence.return_value = {"presence": "active"}
+            send = mock.Mock()
+            with a, b, mock.patch("bot.state.app", mock.Mock(client=client)), \
+                    mock.patch("bot.scheduler._send_morning_dm", send):
+                wakeup.check_presence()
+                wakeup.check_presence()
+            self.assertEqual(send.call_count, 1)
+            self.assertEqual(client.users_getPresence.call_count, 1)
+
+    def test_check_presence_away_sends_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "sent.json"
+            a, b = self.patched(path)
+            client = mock.Mock()
+            client.users_getPresence.return_value = {"presence": "away"}
+            send = mock.Mock()
+            with a, b, mock.patch("bot.state.app", mock.Mock(client=client)), \
+                    mock.patch("bot.scheduler._send_morning_dm", send):
+                wakeup.check_presence()
+            send.assert_not_called()
