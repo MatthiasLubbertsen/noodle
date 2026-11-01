@@ -123,3 +123,19 @@ class StateFileTests(unittest.TestCase):
                     mock.patch("bot.scheduler._send_morning_dm", send):
                 wakeup.check_presence()
             send.assert_not_called()
+
+
+class PresenceLoggingTests(unittest.TestCase):
+    def test_online_is_logged_without_the_user_id_and_poll_is_30s(self):
+        self.assertEqual(wakeup.PRESENCE_POLL_SECONDS, 30)
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "sent.json"
+            with mock.patch.object(config, "MORNING_STATE_PATH", path), \
+                    mock.patch.object(config, "DATA_DIR", path.parent), \
+                    mock.patch.object(config, "USER_ID", "U1SECRET"), \
+                    mock.patch("bot.scheduler._send_morning_dm"), \
+                    self.assertLogs("noodle", level="INFO") as logs:
+                wakeup.on_online()
+        text = "\n".join(logs.output)
+        self.assertIn("matthias came online (presence)", text)
+        self.assertNotIn("U1SECRET", text)

@@ -1259,11 +1259,12 @@ thread_ts)` is a context manager sending `{"type":"typing"}` every 2.5s while it
 `handlers._process_locked()` wraps `ask_noodle()` in it, so it shows during slow tool calls.
 the web session is used ONLY for the websocket (ping + typing): every message noodle sends still goes through the normal bolt token. if `getWebSocketURL` or the handshake fails with an auth error (`invalid_auth`, `token_expired`, 401/403...), `_report_expired()` dms matthias once per outage (persona-written, via `_post_dm`), then retries every 5 minutes; a successful connect resets the flag. without the credentials (`features.enabled("typing")`) everything is a silent no-op.
 **presence-triggered morning dm:** the same socket subscribes to matthias's presence (`presence_sub` with
-`ids=[USER_ID]`; `presence_change` events, single `user` or batched `users`, see vs.izie.top/redocumented). the first
+`ids=[USER_ID]`; `presence_change` events, single `user` or batched `users`, see vs.izie.top/redocumented). every
+`active` event for him is logged (`matthias came online (presence)`, only him, never other users; it also shows whether slack delivers events at all) and the first
 `active` of each amsterdam day calls `wakeup.on_online()` (quiet hours are deliberately NOT used), which sends the
 morning dm and persists the day in `data/morning_sent.json` (marked before sending, so a restart or crash can't repeat it). on every
 (re)connect noodle also asks `users.getPresence` once, since no event fires for being online before connecting, and
-`wakeup.poll_presence()` (started by the scheduler) repeats that check every 5 minutes until today's dm is out, because an
+`wakeup.poll_presence()` (started by the scheduler) repeats that check every 30 seconds until today's dm is out, because an
 event only fires on a *change* (a status that stays active all night never triggers one). the state file is written
 atomically (temp + fsync + rename) and an unreadable one logs a warning; before, a 0-byte file left by a reboot silently
 disabled the once-a-day guard (real incident: a second "good evening" gm on oct 31, 22:42, after the fixed-time
