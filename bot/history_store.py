@@ -140,6 +140,23 @@ def delete_containing(text: str) -> int:
         conn.close()
 
 
+def replace_content(old: str, new: str) -> int:
+    """rewrite the rows whose content is exactly `old` to `new` and re-embed them (the old
+    embedding describes the old text), returning how many were changed - used by
+    scripts/purge_morning.py --edit to fix a message in memory instead of deleting it."""
+    embedding = embed_text(new)
+    conn = sqlite3.connect(config.MEMORY_DB_PATH)
+    try:
+        cur = conn.execute(
+            "UPDATE messages SET content = ?, embedding = ? WHERE content = ?",
+            (new, json.dumps(embedding) if embedding else None, old),
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 def append_message_async(
     conv_key: str, kind: str, role: str, content: str, user_id: str | None = None
 ) -> None:

@@ -783,7 +783,7 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   topic, and `morning.build_greeting_message()` falls back to a plain greeting if the model mentions one anyway.
 - on saturday/sunday the morning weather covers only his primary place (`weather.morning_places()`:
   `WEEKEND_WEATHER_LOCATIONS`, else `WEATHER_DEFAULT_LOCATION`, else the first of `WEATHER_LOCATIONS`).
-- `python -m scripts.purge_morning --ts CHANNEL:TS --like TEXT --resend` forgets a message (slack + memory rows).
+- `python -m scripts.purge_morning --edit "CHANNEL:TS=new text"` rewrites one of noodle's messages in place (slack + its memory row, re-embedded); `--ts`/`--like`/`--resend` delete or resend instead.
 
 ### 7b. scheduled reminders + freedom sessions, and who/when awareness
 - `schedule_reminder` (`bot/tools.py`, store in `bot/reminders.py`) lets
