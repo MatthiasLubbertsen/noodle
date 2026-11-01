@@ -23,7 +23,7 @@ logger = logging.getLogger("noodle")
 _lock = threading.Lock()
 # presence events only fire on a change, so a status that never flips (online all night, a
 # reconnect that missed it) would never trigger the dm: also look every few minutes until it is out
-PRESENCE_POLL_SECONDS = 300
+PRESENCE_POLL_SECONDS = 30
 
 
 def _today() -> str:
@@ -73,6 +73,7 @@ def _send_once(reason: str) -> None:
 
 def on_online() -> None:
     """matthias just turned active: send today's morning dm if it hasn't gone out yet."""
+    logger.info("matthias came online (presence)")
     _send_once("matthias came online")
 
 
