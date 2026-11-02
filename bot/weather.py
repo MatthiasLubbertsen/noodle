@@ -122,12 +122,25 @@ def cloud_cover(lat: float, lon: float, start: datetime.datetime, end: datetime.
     return sum(values) / len(values) if values else None
 
 
+def morning_places(now: datetime.datetime | None = None) -> list[str]:
+    """the places the morning dm covers: all of WEATHER_LOCATIONS on weekdays, only his
+    primary place on saturday and sunday."""
+    now = now or datetime.datetime.now(AMSTERDAM_TZ)
+    if now.weekday() < 5:
+        return list(config.WEATHER_LOCATIONS)
+    if config.WEEKEND_WEATHER_LOCATIONS:
+        return list(config.WEEKEND_WEATHER_LOCATIONS)
+    if config.WEATHER_DEFAULT_LOCATION:
+        return [config.WEATHER_DEFAULT_LOCATION]
+    return config.WEATHER_LOCATIONS[:1]
+
+
 def morning_weather_facts() -> str | None:
     """plain-text forecast lines for every configured location (the facts the
     morning dm's weather message is written from), or None if nothing could
     be fetched."""
     lines = []
-    for place in config.WEATHER_LOCATIONS:
+    for place in morning_places():
         try:
             geo = _geocode(place)
             if not geo:

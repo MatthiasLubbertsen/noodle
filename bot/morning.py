@@ -7,6 +7,7 @@ import config
 from bot import state
 from bot.almanac import fun_holidays_today
 from bot.holidays import today_nl
+from bot.interests import is_avoided
 from bot.news import unread_articles
 from bot.oneshot import complete, remember_facts
 from bot.slack_text import _clean_reply
@@ -58,7 +59,9 @@ def build_greeting_message() -> str:
         "one, don't say 'no special day' or anything like that). a dutch holiday "
         "matters more than a silly day, so lead with it if the facts list one, and say "
         "whether it's a day off. NEVER mention a holiday or special day that isn't in "
-        "the facts below, and never invent or guess one from the date. that's it, "
+        "the facts below, and never invent or guess one from the date. matthias does "
+        "not do halloween or anything about death or spooky stuff: never mention "
+        "halloween, even if it's the date. that's it, "
         "nothing else - no news, no extra facts, keep it tiny.\n\n"
         f"facts:\n{facts}"
     )
@@ -73,6 +76,9 @@ def build_greeting_message() -> str:
             max_tokens=120,
         )
         text = _clean_reply(resp.choices[0].message.content or "")
+        if is_avoided(text):  # safety net: the model mentioned something he avoids anyway
+            logger.warning("greeting mentioned an avoided topic, using the plain greeting")
+            return f"{_greeting_word()}!"
         return text or f"{_greeting_word()}!"
     except Exception:  # noqa: BLE001
         logger.exception("failed to build morning greeting message")

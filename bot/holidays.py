@@ -2,6 +2,7 @@ import datetime
 import logging
 
 from bot.httpjson import get_json
+from bot.interests import is_avoided
 from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
@@ -42,7 +43,13 @@ def today_nl() -> str | None:
     except Exception:  # noqa: BLE001
         logger.exception("failed to fetch dutch holidays")
         return None
-    return next((describe(h) for h in days if h["date"] == today.isoformat()), None)
+    return next(
+        (
+            describe(h) for h in days
+            if h["date"] == today.isoformat() and not is_avoided(f"{h['name']} {h.get('localName', '')}")
+        ),
+        None,
+    )
 
 
 def holidays_text(country: str = "NL", year: int | None = None) -> str:

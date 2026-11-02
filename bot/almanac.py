@@ -4,6 +4,7 @@ import logging
 import urllib.error
 import urllib.request
 
+from bot.interests import is_avoided
 from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
@@ -39,6 +40,9 @@ def fun_holidays_today() -> list[str]:
     for entry in data.get("holidays", []):
         text = (entry.get("text") or "").strip()
         if not text or text.lower().startswith("christian feast day"):
+            continue
+        # matthias doesn't do halloween / death-themed days (bot/interests.py)
+        if is_avoided(text):
             continue
         # some entries are "label:\nname" - keep just the name
         names.append(text.splitlines()[-1].strip())
