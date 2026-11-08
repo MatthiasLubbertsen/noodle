@@ -58,7 +58,8 @@ def format_facts(items: list[dict]) -> str:
         repo = n["repository"]["full_name"]
         url = github.html_url(n["subject"].get("url"), repo)
         reason = n["reason"].replace("_", " ")
-        lines.append(f"- {repo}: {n['subject']['title']} ({reason}) {url}")
+        detail = github.subject_detail(n)
+        lines.append(f"- {repo}: {n['subject']['title']} ({reason}{'; now ' + detail if detail else ''}) {url}")
     if len(items) > MAX_LINES:
         lines.append(f"...and {len(items) - MAX_LINES} more")
     return "\n".join(lines)
@@ -72,7 +73,9 @@ def compose_message(items: list[dict]) -> str:
     text = complete(
         "new github notifications just came in for matthias. tell him about them in "
         "your own voice, short and casual: what each one is and why it matters "
-        "(review requested, ci failed, mention...). keep every link exactly as given. "
+        "(review requested, ci failed, mention...). be concrete about what happened: say "
+        "'merged' or 'closed' when the facts say so, never a vague 'something changed'. "
+        "keep every link exactly as given. "
         "use ONLY these facts.\n\nfacts:\n" + facts,
         max_tokens=350,
     )

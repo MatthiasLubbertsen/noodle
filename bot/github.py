@@ -52,6 +52,33 @@ def notifications() -> list[dict]:
     return _get("/notifications", {"all": "false", "per_page": 50})
 
 
+def subject_detail(n: dict) -> str:
+    """what actually happened behind a notification, so the dm can say "pr merged" instead of
+    "something changed": the pr/issue state and its newest comment. best effort, "" on any failure."""
+    subject = n.get("subject") or {}
+    parts = []
+    try:
+        if subject.get("url") and subject.get("type") in ("PullRequest", "Issue"):
+            s = _get(subject["url"].removeprefix(API))
+            if s.get("merged") or s.get("merged_at"):
+                parts.append("merged")
+            elif s.get("state") == "closed":
+                parts.append("closed (not merged)" if subject["type"] == "PullRequest" else "closed")
+            elif s.get("draft"):
+                parts.append("open, draft")
+            else:
+                parts.append(s.get("state") or "")
+        latest = subject.get("latest_comment_url")
+        if latest and latest != subject.get("url"):
+            c = _get(latest.removeprefix(API))
+            body = " ".join((c.get("body") or "").split())[:200]
+            if body:
+                parts.append(f"latest comment by {(c.get('user') or {}).get('login', 'someone')}: {body}")
+    except Exception:  # noqa: BLE001
+        logger.debug("couldn't read the detail of a github notification", exc_info=True)
+    return "; ".join(p for p in parts if p)
+
+
 def commits_today() -> tuple[int, list[str]]:
     """(commit count, repos) for matthias's commits today, via commit search."""
     today = datetime.datetime.now(AMSTERDAM_TZ).strftime("%Y-%m-%d")
