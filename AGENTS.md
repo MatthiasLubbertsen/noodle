@@ -879,7 +879,9 @@ skips that piece, never breaks startup or a dm).
   readme or issue comment could try to steer the model. same trust model as `fetch_slack_message`;
   only some tools have a code-level guard beyond the sender id (reminders need `_REMINDER_ASK`), so don't point the bot at repos you don't trust.
 - **github watcher** (`github_watch.py`, started only if `GITHUB_TOKEN` is
-  set): polls `/notifications` every `GITHUB_POLL_SECONDS`, DMs one message
+  set): each notification's facts also carry what actually happened (`github.subject_detail()`:
+  pr/issue state, merged/closed, newest comment; best effort) so a pr you're subscribed to says
+  "merged" instead of "something changed". polls `/notifications` every `GITHUB_POLL_SECONDS`, DMs one message
   per poll for notifications not yet reported (ignores `subscribed`), state in
   `data/github_seen.json`. first run ever baselines what is already unread and
   reports nothing. needs a CLASSIC token (`repo` + `notifications`); fine-
@@ -1280,6 +1282,9 @@ event only fires on a *change* (a status that stays active all night never trigg
 atomically (temp + fsync + rename) and an unreadable one logs a warning; before, a 0-byte file left by a reboot silently
 disabled the once-a-day guard (real incident: a second "good evening" gm on oct 31, 22:42, after the fixed-time
 07:00 job of the older image, which wrote no marker, had already sent that day's).
+**not before `MORNING_EARLIEST_DM` (default 06:00):** slack presence can flicker `active` at night without him being
+around (real incident: a morning dm at 03:00), so `wakeup._too_early()` makes `on_online()` and `check_presence()` do nothing
+until then; the 30s poll picks him up once it's time. the fallback time is unaffected.
 `features.enabled("presence")` is the same credential check as typing; without it the scheduler keeps the fixed
 `DAILY_MORNING_DM` time. if he hasn't been seen by `MORNING_FALLBACK_DM` (default 12:00) the scheduler calls `wakeup.send_fallback()` and
 it goes out anyway (first of the two wins, same persisted day). since it can go out at any hour, `morning.build_greeting_message()`
@@ -1316,6 +1321,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `UNPROMPTED_COOLDOWN_SECONDS` | min gap between unprompted replies in one channel |
 | `DAILY_PING_REMINDER` | `HH:MM`, when the `@matthias-day` reminder dm goes out |
 | `MORNING_FALLBACK_DM` | `HH:MM` (default `12:00`): with the web session, send the morning dm at this time if matthias never came online |
+| `MORNING_EARLIEST_DM` | `HH:MM` (default `06:00`): presence mode never sends the morning dm before this |
 | `DAILY_MORNING_DM` | `HH:MM`, when the morning wakeup dm goes out; only used without `SLACK_WEB_TOKEN`/`SLACK_WEB_COOKIE` (with them it goes out when matthias first comes online) |
 | `MATTHIAS_DAY_GROUP_ID` | usergroup id for `@matthias-day` (defaults to the real id, `S0AK8LYJ8FR`) |
 | `MATTHIAS_DAY_CHANNEL_ID` | channel the daily recap pings are posted in (defaults to `#matthias`, `C0A9NJT2BCJ`) |

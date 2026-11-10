@@ -28,6 +28,11 @@ class OnlineEventTests(unittest.TestCase):
 
 
 class OnceADayTests(unittest.TestCase):
+    def setUp(self):
+        p = mock.patch("bot.wakeup._too_early", return_value=False)
+        p.start()
+        self.addCleanup(p.stop)
+
     def run_it(self, fn_name: str, state_path: Path) -> mock.Mock:
         send = mock.Mock()
         with mock.patch.object(config, "MORNING_STATE_PATH", state_path), \
@@ -83,6 +88,11 @@ if __name__ == "__main__":
 
 
 class StateFileTests(unittest.TestCase):
+    def setUp(self):
+        p = mock.patch("bot.wakeup._too_early", return_value=False)
+        p.start()
+        self.addCleanup(p.stop)
+
     def patched(self, path: Path):
         return mock.patch.object(config, "MORNING_STATE_PATH", path), mock.patch.object(config, "DATA_DIR", path.parent)
 
@@ -126,6 +136,11 @@ class StateFileTests(unittest.TestCase):
 
 
 class PresenceLoggingTests(unittest.TestCase):
+    def setUp(self):
+        p = mock.patch("bot.wakeup._too_early", return_value=False)
+        p.start()
+        self.addCleanup(p.stop)
+
     def test_online_is_logged_without_the_user_id_and_poll_is_30s(self):
         self.assertEqual(wakeup.PRESENCE_POLL_SECONDS, 30)
         with tempfile.TemporaryDirectory() as d:
@@ -139,3 +154,33 @@ class PresenceLoggingTests(unittest.TestCase):
         text = "\n".join(logs.output)
         self.assertIn("matthias came online (presence)", text)
         self.assertNotIn("U1SECRET", text)
+
+
+class TooEarlyTests(unittest.TestCase):
+    def at(self, h, m=0):
+        fake = datetime.datetime(2026, 11, 8, h, m, tzinfo=wakeup.AMSTERDAM_TZ)
+        dt = mock.Mock(wraps=datetime.datetime)
+        dt.now.return_value = fake
+        return mock.patch("bot.wakeup.datetime.datetime", dt)
+
+    def test_night_is_too_early_morning_is_not(self):
+        with mock.patch.object(config, "MORNING_EARLIEST_DM", "06:00"):
+            with self.at(3):
+                self.assertTrue(wakeup._too_early())
+            with self.at(5, 59):
+                self.assertTrue(wakeup._too_early())
+            with self.at(6):
+                self.assertFalse(wakeup._too_early())
+
+    def test_3am_online_blip_sends_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "sent.json"
+            send = mock.Mock()
+            with mock.patch.object(config, "MORNING_STATE_PATH", path), \
+                    mock.patch.object(config, "DATA_DIR", path.parent), \
+                    mock.patch("bot.wakeup._too_early", return_value=True), \
+                    mock.patch("bot.scheduler._send_morning_dm", send):
+                wakeup.on_online()
+                wakeup.check_presence()
+            send.assert_not_called()
+            self.assertFalse(path.exists())

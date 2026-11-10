@@ -71,9 +71,22 @@ def _send_once(reason: str) -> None:
     _send_morning_dm()
 
 
+def _too_early() -> bool:
+    """before MORNING_EARLIEST_DM: a night-time "active" blip must not wake him with a dm."""
+    from bot.scheduler import _parse_hhmm  # avoid a circular import
+
+    hour, minute = _parse_hhmm(config.MORNING_EARLIEST_DM, (6, 0))
+    now = datetime.datetime.now(AMSTERDAM_TZ)
+    return (now.hour, now.minute) < (hour, minute)
+
+
 def on_online() -> None:
-    """matthias just turned active: send today's morning dm if it hasn't gone out yet."""
+    """matthias just turned active: send today's morning dm if it hasn't gone out yet
+    (not before MORNING_EARLIEST_DM; the 30s presence poll catches him once it's time)."""
     logger.info("matthias came online (presence)")
+    if _too_early():
+        logger.info("too early for the morning dm, waiting until %s", config.MORNING_EARLIEST_DM)
+        return
     _send_once("matthias came online")
 
 
@@ -84,7 +97,7 @@ def send_fallback() -> None:
 
 def check_presence() -> None:
     """ask slack whether matthias is online right now, and send today's dm if so. no-op once sent."""
-    if _sent_today():
+    if _sent_today() or _too_early():
         return
     try:
         from bot import state

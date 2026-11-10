@@ -69,6 +69,9 @@ DAILY_PING_REMINDER = os.getenv("DAILY_PING_REMINDER", "19:00")
 DAILY_MORNING_DM = os.getenv("DAILY_MORNING_DM", "08:00")
 # "HH:MM": with presence mode, send the morning dm anyway at this time if he never came online
 MORNING_FALLBACK_DM = os.getenv("MORNING_FALLBACK_DM", "12:00")
+# "HH:MM": presence mode never sends the morning dm before this (slack presence can flicker "active"
+# in the middle of the night without him being around, real incident: a dm at 03:00)
+MORNING_EARLIEST_DM = os.getenv("MORNING_EARLIEST_DM", "06:00")
 
 # "HH:MM" time noodle DMs a short end-of-day wrap-up (slack messages, commits,
 # tracks played). it never drafts the @matthias-day recap - matthias writes that.
