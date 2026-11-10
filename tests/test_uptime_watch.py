@@ -192,7 +192,7 @@ class PollTests(unittest.TestCase):
         with mock.patch("bot.uptime_watch.complete", return_value="something broke"), \
              mock.patch("bot.uptime_watch.remember_facts"):
             msg = u.compose_message(d, up)
-        self.assertIn("DOWN blog", msg)  # the model dropped the monitor name -> plain facts
+        self.assertIn("blog (http, https://blog.example.com) went down", msg)  # the model dropped the monitor name -> plain facts
 
 
 if __name__ == "__main__":
