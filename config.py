@@ -125,6 +125,9 @@ HACKATIME_USERNAME = os.getenv("HACKATIME_USERNAME", "").strip()
 HACKATIME_API_KEY = os.getenv("HACKATIME_API_KEY", "")
 HACKATIME_POLL_SECONDS = int(os.getenv("HACKATIME_POLL_SECONDS", "600"))
 
+# how often to check whether matthias got promoted to workspace admin (bot/admin_watch.py)
+ADMIN_POLL_SECONDS = int(os.getenv("ADMIN_POLL_SECONDS", "300"))
+
 # the "@matthias-day" usergroup: pinging it triggers a "messages sent today" recap.
 # matched by id (<!subteam^ID>); the label "matthias-day" is always matched
 # too as a fallback (catches a plain, unexpanded "@matthias-day" typed as
@@ -197,6 +200,7 @@ NEWS_SEEN_PATH = DATA_DIR / "hackclub_news_seen.json"
 MEMORY_DB_PATH = DATA_DIR / "noodle_memory.db"
 GITHUB_SEEN_PATH = DATA_DIR / "github_seen.json"
 HACKATIME_SEEN_PATH = DATA_DIR / "hackatime_seen.json"
+ADMIN_SEEN_PATH = DATA_DIR / "admin_seen.json"
 PROACTIVE_STATE_PATH = DATA_DIR / "proactive_state.json"
 MORNING_STATE_PATH = DATA_DIR / "morning_sent.json"
 GAMES_STATE_PATH = DATA_DIR / "games.json"

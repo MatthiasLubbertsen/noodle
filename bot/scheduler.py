@@ -4,7 +4,7 @@ import threading
 import time
 
 import config
-from bot import features, github, github_watch, hackatime, hackatime_watch, proactive, reminders, sky, state, watch
+from bot import admin_watch, features, github, github_watch, hackatime, hackatime_watch, proactive, reminders, sky, state, watch
 from bot.chunk import chunk_response
 from bot.history_store import append_message_async
 from bot.llm import _kind_for
@@ -193,6 +193,20 @@ def _run_hackatime_watcher() -> None:
         time.sleep(config.HACKATIME_POLL_SECONDS)
 
 
+def _run_admin_watcher() -> None:
+    """dm him when his slack role goes up (member -> admin...). rare and one-off, so it skips the
+    proactive guardrails. check() has already saved the new role, so a failed dm is not retried."""
+    while True:
+        try:
+            change = admin_watch.check()
+            if change:
+                _post_dm(admin_watch.compose_message(*change))
+                logger.info("admin watcher: matthias went from %s to %s, dm sent", *change)
+        except Exception:  # noqa: BLE001
+            logger.exception("admin watcher poll failed")
+        time.sleep(config.ADMIN_POLL_SECONDS)
+
+
 # the night an aurora dm (forecast at sunset, or live) already went out: one per night
 _aurora_night = None
 
@@ -355,6 +369,7 @@ def start_daily_scheduler() -> None:
         threading.Thread(target=_run_github_watcher, daemon=True).start()
     if hackatime.configured():
         threading.Thread(target=_run_hackatime_watcher, daemon=True).start()
+    threading.Thread(target=_run_admin_watcher, daemon=True).start()
     threading.Thread(target=_run_reminder_poller, daemon=True).start()
     threading.Thread(target=_run_sky_tonight, daemon=True).start()
     threading.Thread(target=_run_aurora_watch, daemon=True).start()
