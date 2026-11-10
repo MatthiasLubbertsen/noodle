@@ -17,7 +17,10 @@ class Check(unittest.TestCase):
                 mock.patch.object(config, "DATA_DIR", Path(d)):
             for sha in shas:
                 with mock.patch.dict("os.environ", {"NOODLE_SHA": sha}):
-                    out.append(release_watch.check())
+                    change = release_watch.check()
+                    if change:
+                        release_watch.clear_pending()  # what the scheduler does right before the dm
+                    out.append(change)
         return out
 
     def test_first_run_baselines_then_announces_once(self):
