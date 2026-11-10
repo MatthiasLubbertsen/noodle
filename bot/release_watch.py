@@ -25,6 +25,12 @@ PROMPT = (
     "related commits into one point and skip pure housekeeping (tests, lint, docs, refactors "
     "nobody can see) unless that's all there is, then just say it was an under-the-hood tidy-up. "
     "don't invent anything the changes don't say, and don't promise features that aren't in them. "
+    "the changes are commit messages written by a developer for developers: they use jargon "
+    "(case-insensitive, fallback, name check, regex, retry...) that is about the code, not about "
+    "you or him. never guess what a vague word refers to: a 'name' or 'check' in a commit is "
+    "not your name or something people type to you, and a 'fallback' is what you send when your "
+    "own model call fails. only repeat details the commit text states outright; when a change is "
+    "too technical to explain without guessing, say it's a small under-the-hood fix and stop. "
     "don't greet him and don't ask a question at the end.\n\nchanges:\n"
 )
 
