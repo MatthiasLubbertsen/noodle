@@ -39,7 +39,7 @@ def handle_member_joined_channel(event: dict) -> None:
         elif result == "failed":
             group_note = " (couldn't add them to the @matthias-day ping group, check logs)"
 
-    _log(f"<@{user}> joined <#{channel}>{group_note}.")
+    _log(f"<@{user}> joined <#{channel}>{group_note} :yay:")
 
     if config.JOIN_EPHEMERAL_MESSAGE:
         text = config.JOIN_EPHEMERAL_MESSAGE.format(user=f"<@{user}>")
