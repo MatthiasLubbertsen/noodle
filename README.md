@@ -49,7 +49,8 @@ speaks in a warm, casual, lowercase style, like a good friend texting.
   no matter what.
 - watch one channel (`WATCHED_CHANNEL_ID`) for people joining/leaving: on
   join it adds them to the `@matthias-day` usergroup, logs it (one message,
-  channel join + group add together) to `LOGS_CHANNEL_ID`, and welcomes them
+  channel join + group add together) to `LOGS_CHANNEL_ID` (only if set; matthias's
+  old workflow bot already logs joins in his own workspace), and welcomes them
   with an ephemeral message (visible only to them) mentioning them
   (`JOIN_EPHEMERAL_MESSAGE`). on leave it removes them from the usergroup if
   they were in it and logs that too, again as one message.
