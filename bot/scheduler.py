@@ -209,13 +209,17 @@ def _run_admin_watcher() -> None:
 
 def _send_release_notes() -> None:
     """once per deploy: when this container runs a build it hasn't announced, dm him what changed.
-    check() has already saved the sha, so a failed dm is not retried. a one-off, so no guardrails."""
+    held until quiet hours end (the pending build is persisted, so a restart doesn't lose it);
+    cleared right before sending, so a failed dm is not retried. no daily cap: it's one-off."""
     try:
         time.sleep(15)  # let slack connect first
         change = release_watch.check()
         if not change:
             return
+        while proactive.in_quiet_hours():
+            time.sleep(60)
         text = release_watch.compose_message(*change)
+        release_watch.clear_pending()
         if text:
             _post_dm(text)
             logger.info("release notes dm sent (%s -> %s)", change[0][:7], change[1][:7])

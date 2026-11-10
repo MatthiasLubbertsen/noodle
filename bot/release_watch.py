@@ -44,37 +44,47 @@ def _get(path: str):
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _load() -> str | None:
+def _load() -> dict:
+    """{"sha": last build seen, "pending": the sha before it while its note is still unsent}."""
     try:
-        sha = json.loads(config.RELEASE_SEEN_PATH.read_text(encoding="utf-8")).get("sha")
+        data = json.loads(config.RELEASE_SEEN_PATH.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return None
+        return {}
     except Exception:
         logger.exception("failed to load release seen-state, starting fresh")
-        return None
-    return sha if isinstance(sha, str) and sha else None
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
-def _save(sha: str) -> None:
+def _save(data: dict) -> None:
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    config.RELEASE_SEEN_PATH.write_text(json.dumps({"sha": sha}), encoding="utf-8")
+    config.RELEASE_SEEN_PATH.write_text(json.dumps(data), encoding="utf-8")
 
 
 def check() -> tuple[str, str] | None:
-    """(old sha, new sha) when this container runs a build it hasn't announced, else None. the
-    new sha is saved first (like the other watchers), so a crash never announces it twice. the
-    very first run only baselines."""
+    """(old sha, new sha) when a build hasn't been announced yet, else None. the new sha is saved
+    first, with the old one as `pending` until clear_pending(), so a restart while the note is held
+    for quiet hours still sends it, and a crash after clear_pending() never sends it twice. the very
+    first run only baselines."""
     sha = build_sha()
     if not sha:
         return None
-    seen = _load()
-    if seen == sha:
-        return None
-    _save(sha)
-    if seen is None:
-        logger.info("release watch: baselined at %s", sha[:7])
-        return None
-    return seen, sha
+    data = _load()
+    seen = data.get("sha")
+    if seen != sha:
+        if not seen:
+            _save({"sha": sha})
+            logger.info("release watch: baselined at %s", sha[:7])
+            return None
+        data = {"sha": sha, "pending": seen}
+        _save(data)
+    pending = data.get("pending")
+    return (pending, sha) if pending else None
+
+
+def clear_pending() -> None:
+    """called right before the dm goes out: from here on the note counts as sent."""
+    _save({"sha": _load().get("sha", build_sha())})
 
 
 def _format(commits: list[dict], files: list[dict]) -> str:

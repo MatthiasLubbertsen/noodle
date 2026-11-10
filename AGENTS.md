@@ -1259,14 +1259,15 @@ from `_run_code` if that should change). it needs no credential, so it is always
   announced yet is, by construction, one whose image was built, pulled and `docker compose up -d`'ed.
   a plain restart keeps the sha (nothing), a local `up --build` has no sha (nothing), a tag on an
   already-announced commit is the same sha (nothing).
-- state in `data/release_seen.json`, saved BEFORE the dm (a crash drops a note instead of repeating
-  it). first run ever only baselines, so the deploy that introduces this feature is silent.
+- state in `data/release_seen.json`: the new sha is saved with the old one as `pending`, and `pending` is
+  cleared right BEFORE the dm (a crash drops a note instead of repeating it). first run ever only baselines, so the deploy that introduces this feature is silent.
 - the changes come from github's compare api (`GITHUB_REPO`, default `MatthiasLubbertsen/noodle`;
   `GITHUB_TOKEN` used if set, public repo works without): commit messages (newest 15, 500 chars each)
   + touched file names, falling back to the newest commit alone if the old sha is unknown (force
   push). nothing readable = no dm. the `PROMPT` in `release_watch.py` asks for one short persona
   message about behaviour he'll notice, no hashes/files/pr numbers, no invented features. facts are
-  saved to memory like the other watchers. a one-off, so it skips quiet hours and the daily cap.
+  saved to memory like the other watchers. the dm is HELD during `QUIET_HOURS` (the thread waits; `pending` is persisted so a restart still sends it);
+  it skips the daily cap, being a one-off.
 
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`

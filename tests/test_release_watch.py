@@ -23,6 +23,20 @@ class Check(unittest.TestCase):
     def test_first_run_baselines_then_announces_once(self):
         self.assertEqual(self.run_seq([A, A, B, B, B, C]), [None, None, (A, B), None, None, (B, C)])
 
+    def test_held_note_survives_a_restart_until_cleared(self):
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(config, "RELEASE_SEEN_PATH", Path(d) / "seen.json"), \
+                mock.patch.object(config, "DATA_DIR", Path(d)):
+            def at(sha):
+                with mock.patch.dict("os.environ", {"NOODLE_SHA": sha}):
+                    return release_watch.check()
+            self.assertIsNone(at(A))
+            self.assertEqual(at(B), (A, B))
+            self.assertEqual(at(B), (A, B))  # restarted while held
+            with mock.patch.dict("os.environ", {"NOODLE_SHA": B}):
+                release_watch.clear_pending()
+            self.assertIsNone(at(B))
+
     def test_no_sha_never_announces(self):
         self.assertEqual(self.run_seq(["", "unknown", ""]), [None, None, None])
 
