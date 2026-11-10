@@ -1,10 +1,8 @@
-import concurrent.futures
+import base64
 import datetime
 import json
 import logging
-import socket
-import ssl
-import urllib.error
+import re
 import urllib.request
 
 import config
@@ -14,39 +12,39 @@ from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
 
-# pings every url in UPTIME_URLS. a url is "down" after UPTIME_FAILS failed probes in a row (5xx, timeout,
-# dns/tls error; a 404 or 401 still means something answered). state per url in data/uptime_state.json:
+# reads uptime kuma's prometheus /metrics (basic auth: empty user, the api key as password) and
+# announces monitors that go down or come back. a monitor is "down" after UPTIME_FAILS polls in a row
+# (kuma retries on its own, so 1). state per monitor name in data/uptime_state.json:
 #   {"fails": n, "down_since": iso|None, "reason": str, "alerted": bool, "recovered_at": iso|None}
 # an outage nobody was told about (it ended while held back by quiet hours) is dropped silently.
-TIMEOUT = 10
+# kuma status codes: 0 down, 1 up, 2 pending, 3 maintenance. pending/maintenance change nothing.
+TIMEOUT = 15
+_LINE = re.compile(r"^monitor_status\{(?P<labels>.*)\}\s+(?P<value>-?\d+)\s*$")
+_LABEL = re.compile(r'(\w+)="((?:[^"\\]|\\.)*)"')
 
 
-def targets() -> list[str]:
-    return [u if "://" in u else f"https://{u}" for u in config.UPTIME_URLS]
+def parse_metrics(text: str) -> dict[str, tuple[int, str]]:
+    """{monitor name: (kuma status code, url or "")} from the /metrics text."""
+    out = {}
+    for line in text.splitlines():
+        m = _LINE.match(line)
+        if not m:
+            continue
+        labels = dict(_LABEL.findall(m["labels"]))
+        name = labels.get("monitor_name")
+        if name:
+            url = labels.get("monitor_url", "")
+            out[name] = (int(m["value"]), "" if url in ("", "null") else url)
+    return out
 
 
-def probe(url: str) -> str:
-    """"" if the url answers, else a short reason it is down."""
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            resp.read(1)
-        return ""
-    except urllib.error.HTTPError as e:
-        return f"http {e.code}" if e.code >= 500 else ""
-    except urllib.error.URLError as e:
-        reason = e.reason
-        if isinstance(reason, ssl.SSLCertVerificationError):
-            return "certificate error"
-        if isinstance(reason, (socket.timeout, TimeoutError)):
-            return "timed out"
-        if isinstance(reason, socket.gaierror):
-            return "dns lookup failed"
-        return str(reason)[:80] or "unreachable"
-    except (socket.timeout, TimeoutError):
-        return "timed out"
-    except Exception as e:  # noqa: BLE001
-        return type(e).__name__
+def fetch() -> dict[str, tuple[int, str]]:
+    auth = base64.b64encode(f":{config.KUMA_API_KEY}".encode()).decode()
+    req = urllib.request.Request(
+        config.KUMA_URL + "/metrics", headers={"Authorization": f"Basic {auth}", "User-Agent": USER_AGENT}
+    )
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        return parse_metrics(resp.read().decode("utf-8", "replace"))
 
 
 def _load() -> dict:
@@ -65,9 +63,13 @@ def _save(state: dict) -> None:
 
 
 def update(state: dict, results: dict[str, str], now: datetime.datetime) -> dict:
-    """fold one round of probe results ({url: "" or reason}) into the state."""
+    """fold one round of results ({monitor: "" up, reason down, None unknown}) into the state."""
     out = {}
     for url, reason in results.items():
+        if reason is None:  # pending / maintenance: keep whatever we knew
+            if url in state:
+                out[url] = state[url]
+            continue
         st = dict(state.get(url) or {"fails": 0, "down_since": None, "reason": "", "alerted": False, "recovered_at": None})
         if reason:
             st["fails"] += 1
@@ -94,11 +96,14 @@ def pending(state: dict) -> tuple[list[str], list[str]]:
 
 
 def poll() -> tuple[list[str], list[str]]:
-    """probe everything, save the state, return what is still to be announced."""
-    urls = targets()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        results = dict(zip(urls, pool.map(probe, urls)))
+    """read kuma, save the state, return what is still to be announced. a kuma that can't be reached
+    raises (the scheduler logs it) and changes nothing, so it never looks like every site went down."""
+    metrics = fetch()
+    results = {name: ("" if code == 1 else "down in uptime kuma" if code == 0 else None) for name, (code, _) in metrics.items()}
     state = update(_load(), results, datetime.datetime.now(datetime.timezone.utc))
+    for name, (_, url) in metrics.items():
+        if name in state:
+            state[name]["url"] = url
     _save(state)
     return pending(state)
 
@@ -119,16 +124,20 @@ def _span(start: str, end: datetime.datetime) -> str:
     return f"{mins // 60}h {mins % 60}m" if mins >= 60 else f"{mins}m"
 
 
+def _url(st: dict) -> str:
+    return f" ({st['url']})" if st.get("url") else ""
+
+
 def format_facts(down: list[str], up: list[str]) -> str:
     state, lines = _load(), []
     for u in down:
         s = state.get(u, {})
         since = datetime.datetime.fromisoformat(s["down_since"]).astimezone(AMSTERDAM_TZ).strftime("%H:%M")
-        lines.append(f"- DOWN {u}: since {since} ({s.get('reason') or 'unreachable'})")
+        lines.append(f"- DOWN {u}{_url(s)}: since {since} ({s.get('reason') or 'unreachable'})")
     for u in up:
         s = state.get(u, {})
         end = datetime.datetime.fromisoformat(s["recovered_at"])
-        lines.append(f"- BACK UP {u}: was down {_span(s['down_since'], end)}")
+        lines.append(f"- BACK UP {u}{_url(s)}: was down {_span(s['down_since'], end)}")
     return "\n".join(lines)
 
 
@@ -136,9 +145,9 @@ def compose_message(down: list[str], up: list[str]) -> str:
     facts = format_facts(down, up)
     remember_facts("uptime", facts)
     text = complete(
-        "matthias's sites changed state. tell him in your own voice, short and casual: what is down "
+        "some of matthias's sites changed state (from his uptime kuma). tell him in your own voice, short and casual: what is down "
         "(and why, since when) and what came back (and how long it was down). if several are down at "
-        "once, say so in one go, it is probably one cause. keep every url exactly as given. "
+        "once, say so in one go, it is probably one cause. keep every monitor name and url exactly as given. "
         "use ONLY these facts.\n\nfacts:\n" + facts,
         max_tokens=300,
     )

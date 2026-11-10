@@ -8,9 +8,7 @@ from bot.oneshot import complete, remember_facts
 logger = logging.getLogger("noodle")
 
 # "subscribed" = merely watching a repo; far too noisy to dm about
-# "ci_activity" = a failed workflow run: bot/ci_watch.py reports those itself, with the failed
-# step, so the bare notification would be a second, poorer dm about the same thing
-IGNORED_REASONS = {"subscribed", "ci_activity"}
+IGNORED_REASONS = {"subscribed"}
 MAX_LINES = 8
 
 

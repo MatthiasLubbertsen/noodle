@@ -79,31 +79,6 @@ def subject_detail(n: dict) -> str:
     return "; ".join(p for p in parts if p)
 
 
-def recent_repos(limit: int = 15) -> list[str]:
-    """his own (non-fork, non-archived) repos, most recently pushed first."""
-    items = _get("/user/repos", {"affiliation": "owner", "sort": "pushed", "per_page": 50})
-    return [r["full_name"] for r in items if not r.get("fork") and not r.get("archived")][:limit]
-
-
-def failed_runs(repo: str) -> list[dict]:
-    """recently finished workflow runs of one repo that failed or timed out (any branch)."""
-    runs = _get(f"/repos/{repo}/actions/runs", {"status": "completed", "per_page": 10}).get("workflow_runs", [])
-    return [r for r in runs if r.get("conclusion") in ("failure", "timed_out")]
-
-
-def failed_step(repo: str, run_id: int) -> str:
-    """'job "test", step "Run pytest"' for the first failed job of a run. best effort, "" on failure."""
-    try:
-        jobs = _get(f"/repos/{repo}/actions/runs/{run_id}/jobs", {"per_page": 30}).get("jobs", [])
-        for job in jobs:
-            if job.get("conclusion") in ("failure", "timed_out"):
-                step = next((s["name"] for s in job.get("steps", []) if s.get("conclusion") == "failure"), "")
-                return f'job "{job["name"]}"' + (f', step "{step}"' if step else "")
-    except Exception:  # noqa: BLE001
-        logger.debug("couldn't read the failed job of a workflow run", exc_info=True)
-    return ""
-
-
 def commits_today() -> tuple[int, list[str]]:
     """(commit count, repos) for matthias's commits today, via commit search."""
     today = datetime.datetime.now(AMSTERDAM_TZ).strftime("%Y-%m-%d")

@@ -70,8 +70,7 @@ noodle/
     github.py             # github rest calls (github tool, commit count)
     links.py              # link shortener api calls (links tool)
     github_watch.py       # new-notification diffing + persisted "seen" state
-    ci_watch.py           # failed github actions runs on his repos, with the failed step, see 7o
-    uptime_watch.py       # pings the urls in UPTIME_URLS, dms when one goes down / comes back, see 7o
+    uptime_watch.py       # reads his uptime kuma, dms when a monitor goes down / comes back, see 7o
     hackatime.py          # hackatime api calls (hackatime tool, project totals)
     hackatime_watch.py    # hour milestones per project + persisted "seen" state
     admin_watch.py        # dm when matthias's slack role goes up (member -> admin), see 7m
@@ -1271,26 +1270,24 @@ from `_run_code` if that should change). it needs no credential, so it is always
   saved to memory like the other watchers. the dm is HELD during `QUIET_HOURS` (the thread waits; `pending` is persisted so a restart still sends it);
   it skips the daily cap, being a one-off.
 
-### 7o. ci failure watcher + uptime watcher
-- **ci watcher** (`bot/ci_watch.py`, `scheduler._check_ci()`, runs in the github watcher's loop every
-  `GITHUB_POLL_SECONDS`, so it needs only `GITHUB_TOKEN`): lists his 15 most recently pushed own repos
-  (`github.recent_repos()`, no forks/archived), reads each one's finished runs and reports every
-  `failure`/`timed_out` run once, any branch, skipping bot actors (dependabot) and runs older than 24h.
-  the facts carry repo, workflow, branch, commit, who pushed and the first failed job + step
-  (`github.failed_step()`, best effort). state: run ids in `data/ci_seen.json`; first run ever only baselines.
-  same guardrails as the notification dm (quiet hours, daily cap; held failures stay unreported).
-- **why `github_watch` ignores `ci_activity`:** github's own notification for a failed run is the same
-  event with no detail, and only exists if his github notification settings send it. the ci watcher
-  replaces it (`IGNORED_REASONS`), so there is never a second dm about one failure.
-- **uptime watcher** (`bot/uptime_watch.py`, `scheduler._check_uptime()`, only when `UPTIME_URLS` is set,
-  every `UPTIME_POLL_SECONDS`, default 120): GETs each url in parallel (10s timeout). a 5xx, timeout,
-  dns or tls error is a failed probe; a 401/403/404 means something answered, so it is up. a url is down
-  after `UPTIME_FAILS` (2) failed probes in a row. one dm per poll covers everything that went down or
-  came back (a dead server is one message, not twenty), persona-written, with since-when and downtime.
-- state per url in `data/uptime_state.json` (`alerted`, `recovered_at`): a dm held back by quiet hours or the
-  daily cap stays pending and goes out later; an outage that ended before anyone was told is dropped
-  silently; a flap inside an outage stays one outage. no recovery dm for something never announced.
-  not built: tls certificate expiry warnings, a status page, alerting through a channel other than a dm.
+### 7o. uptime watcher (uptime kuma)
+- `bot/uptime_watch.py` + `scheduler._check_uptime()` (every `UPTIME_POLL_SECONDS`, default 60, only when
+  `KUMA_URL` and `KUMA_API_KEY` are both set): noodle probes NOTHING itself, his uptime kuma does the
+  checking. it reads kuma's prometheus `GET <KUMA_URL>/metrics` (basic auth: empty user, an api key from
+  kuma's settings > api keys as the password) and takes `monitor_status{monitor_name=..,monitor_url=..}`
+  per monitor: 0 down, 1 up, 2 pending, 3 maintenance. pending/maintenance change nothing. kuma has no
+  push to noodle (noodle has no public http server, it is socket mode), hence polling.
+- a monitor is down after `UPTIME_FAILS` polls in a row (default 1: kuma retries before it says down). one
+  dm per poll covers everything that went down or came back (a dead server is one message, not twenty),
+  persona-written, with since-when and downtime; the reason is only "down in uptime kuma" (metrics don't
+  carry kuma's message).
+- state per monitor name in `data/uptime_state.json` (`alerted`, `recovered_at`): a dm held back by quiet
+  hours or the daily cap stays pending and goes out later; an outage that ended before anyone was told
+  is dropped silently; a flap inside an outage stays one outage. a kuma that can't be reached raises,
+  is logged and changes nothing (so it never reads as "everything is down"). not built: telling him
+  when kuma itself is unreachable, certificate expiry (kuma can alert on that itself).
+- **github ci failures are NOT a separate watcher:** the notification watcher (7c) already dms them, via
+  github's own `ci_activity` notifications (a failed workflow run shows up like any other notification).
 
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
@@ -1397,7 +1394,8 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `WATCHED_CHANNEL_ID` | channel watched for joins/leaves; empty disables it |
 | `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
 | `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |
-| `UPTIME_URLS` / `UPTIME_POLL_SECONDS` / `UPTIME_FAILS` | comma separated urls to watch (bare host = https), unset = off; poll interval (120), failed checks in a row before "down" (2), see 7o |
+| `KUMA_URL` / `KUMA_API_KEY` | his uptime kuma base url + an api key (settings > api keys); both set = the uptime watcher is on, see 7o |
+| `UPTIME_POLL_SECONDS` / `UPTIME_FAILS` | how often to read kuma (60), polls in a row before "down" (1, kuma retries itself) |
 | `ADMIN_POLL_SECONDS` | seconds between checks of matthias's slack role (default 300), see 7m |
 | `LOG_LEVEL` | optional, default `INFO` |
 

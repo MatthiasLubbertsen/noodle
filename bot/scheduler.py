@@ -4,7 +4,7 @@ import threading
 import time
 
 import config
-from bot import admin_watch, ci_watch, features, github, github_watch, hackatime, hackatime_watch, proactive, release_watch, reminders, sky, state, uptime_watch, watch
+from bot import admin_watch, features, github, github_watch, hackatime, hackatime_watch, proactive, release_watch, reminders, sky, state, uptime_watch, watch
 from bot.chunk import chunk_response
 from bot.history_store import append_message_async
 from bot.llm import _kind_for
@@ -159,26 +159,12 @@ def _check_github() -> None:
     logger.info("sent github watcher dm (%d notification(s))", len(items))
 
 
-def _check_ci() -> None:
-    """dm about failed github actions runs on his repos (same guardrails as the notification dm)."""
-    if not proactive.can_send():
-        return
-    items = ci_watch.new_failures()
-    if not items:
-        return
-    _post_dm(ci_watch.compose_message(items))
-    ci_watch.mark_seen(items)
-    proactive.record_sent()
-    logger.info("sent ci watcher dm (%d failed run(s))", len(items))
-
-
 def _run_github_watcher() -> None:
     while True:
-        for name, check in (("github watcher", _check_github), ("ci watcher", _check_ci)):
-            try:
-                check()
-            except Exception:  # noqa: BLE001
-                logger.exception("%s poll failed", name)
+        try:
+            _check_github()
+        except Exception:  # noqa: BLE001
+            logger.exception("github watcher poll failed")
         time.sleep(config.GITHUB_POLL_SECONDS)
 
 
