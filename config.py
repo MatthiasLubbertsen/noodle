@@ -120,6 +120,18 @@ GITHUB_USER = os.getenv("GITHUB_USER", "MatthiasLubbertsen")
 # how often the watcher checks for new notifications
 GITHUB_POLL_SECONDS = int(os.getenv("GITHUB_POLL_SECONDS", "300"))
 
+# --- uptime watcher (bot/uptime_watch.py) ---
+# reads matthias's uptime kuma over its socket.io feed, nothing is probed by noodle itself. KUMA_URL = a base url
+# noodle can reach kuma on directly (an internal address like http://uptime-kuma:3001 is best: a login proxy in
+# front of the public url would block noodle too). set = on. kuma with auth disabled needs nothing else; with auth
+# on, KUMA_USERNAME + KUMA_PASSWORD (no 2fa). kuma already retries before it calls a monitor down, so
+# UPTIME_FAILS defaults to 1.
+KUMA_URL = os.getenv("KUMA_URL", "").strip().rstrip("/")
+KUMA_USERNAME = os.getenv("KUMA_USERNAME", "").strip()
+KUMA_PASSWORD = os.getenv("KUMA_PASSWORD", "")
+UPTIME_POLL_SECONDS = max(30, int(os.getenv("UPTIME_POLL_SECONDS", "60")))
+UPTIME_FAILS = max(1, int(os.getenv("UPTIME_FAILS", "1")))
+
 # --- hackatime (hack club's wakatime: coding time) ---
 # his hackatime username (or slack id). set = the public `hackatime` tool + the hour
 # milestone posts (every hour in LOGS_CHANNEL_ID, every 5 in MATTHIAS_DAY_CHANNEL_ID).
@@ -206,6 +218,7 @@ NEWS_SEEN_PATH = DATA_DIR / "hackclub_news_seen.json"
 # sqlite, see bot/history_store.py.
 MEMORY_DB_PATH = DATA_DIR / "noodle_memory.db"
 GITHUB_SEEN_PATH = DATA_DIR / "github_seen.json"
+UPTIME_STATE_PATH = DATA_DIR / "uptime_state.json"
 HACKATIME_SEEN_PATH = DATA_DIR / "hackatime_seen.json"
 ADMIN_SEEN_PATH = DATA_DIR / "admin_seen.json"
 RELEASE_SEEN_PATH = DATA_DIR / "release_seen.json"

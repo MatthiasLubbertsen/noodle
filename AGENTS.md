@@ -70,6 +70,7 @@ noodle/
     github.py             # github rest calls (github tool, commit count)
     links.py              # link shortener api calls (links tool)
     github_watch.py       # new-notification diffing + persisted "seen" state
+    uptime_watch.py       # reads his uptime kuma, dms when a monitor goes down / comes back, see 7o
     hackatime.py          # hackatime api calls (hackatime tool, project totals)
     hackatime_watch.py    # hour milestones per project + persisted "seen" state
     admin_watch.py        # dm when matthias's slack role goes up (member -> admin), see 7m
@@ -1269,6 +1270,38 @@ from `_run_code` if that should change). it needs no credential, so it is always
   saved to memory like the other watchers. the dm is HELD during `QUIET_HOURS` (the thread waits; `pending` is persisted so a restart still sends it);
   it skips the daily cap, being a one-off.
 
+### 7o. uptime watcher (uptime kuma)
+- `bot/uptime_watch.py` + `scheduler._check_uptime()` (every `UPTIME_POLL_SECONDS`, default 60, only when
+  `KUMA_URL` is set): noodle probes NOTHING itself, his uptime kuma does the checking. noodle reads kuma's
+  **socket.io feed** (the one its own dashboard uses, `python-socketio` client): `monitorList` (name, type, url or
+  host:port, active) + one `heartbeatList` per monitor, whose newest beat has the status and the real error
+  `msg` ("Request failed with status code 502", "certificate has expired"...). status: 0 down, 1 up,
+  2 pending, 3 maintenance; pending/maintenance change nothing; paused monitors and monitors without a
+  heartbeat are skipped. a connection lasts a second or two and is closed again each poll.
+- **why not /metrics, the status page or a key:** kuma's rest endpoints carry no error message (the public
+  status page blanks `msg`), and his kuma has authentication DISABLED, which also disables api keys (its
+  settings page says so). with auth disabled the socket feed needs no login at all; with auth on, set
+  `KUMA_USERNAME` + `KUMA_PASSWORD` (no 2fa) and noodle sends kuma's own `login` event. auth on without
+  credentials fails with a message saying so. kuma has no push to noodle (noodle has no public http server, it is
+  socket mode), hence polling.
+- **`KUMA_URL` must be an address noodle can reach kuma on directly**, ideally an internal one
+  (`http://uptime-kuma:3001`). with auth off the public `status.matthiaz.dev` sat behind something that answers
+  401 (a login proxy), and that would block noodle too.
+- a monitor is down after `UPTIME_FAILS` polls in a row (default 1: kuma retries before it says down). one
+  dm per poll covers everything that went down or came back (a dead server is one message, not twenty),
+  persona-written. the facts say exactly what is down (name, type + url/host:port, the error, since when),
+  what came back (and how long it was down), and what is STILL down from earlier, so the dm can always answer
+  "what is down right now".
+- state per monitor name in `data/uptime_state.json` (`alerted`, `recovered_at`, `type`, `target`): a dm held
+  back by quiet hours or the daily cap stays pending and goes out later; an outage that ended before anyone was
+  told is dropped silently; a flap inside an outage stays one outage. a kuma that can't be reached (or logs
+  noodle out) raises, is logged and changes nothing, so it never reads as "everything is down". not built:
+  telling him when kuma itself is unreachable, certificate expiry (kuma can alert on that itself).
+- tested against a real socket.io server that behaves like kuma (`tests/fake_kuma.py`: pushes the lists on
+  connect, or after a good `login`), not only mocks. not yet run against his real kuma.
+- **github ci failures are NOT a separate watcher:** the notification watcher (7c) already dms them, via
+  github's own `ci_activity` notifications (a failed workflow run shows up like any other notification).
+
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
   (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore
@@ -1374,6 +1407,9 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `WATCHED_CHANNEL_ID` | channel watched for joins/leaves; empty disables it |
 | `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
 | `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |
+| `KUMA_URL` | his uptime kuma, a base url noodle can reach directly (internal address best); set = the uptime watcher is on, see 7o |
+| `KUMA_USERNAME` / `KUMA_PASSWORD` | only if kuma has authentication on (his has it off): a login without 2fa |
+| `UPTIME_POLL_SECONDS` / `UPTIME_FAILS` | how often to read kuma (60), polls in a row before "down" (1, kuma retries itself) |
 | `ADMIN_POLL_SECONDS` | seconds between checks of matthias's slack role (default 300), see 7m |
 | `LOG_LEVEL` | optional, default `INFO` |
 
