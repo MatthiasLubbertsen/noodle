@@ -72,6 +72,7 @@ noodle/
     github_watch.py       # new-notification diffing + persisted "seen" state
     hackatime.py          # hackatime api calls (hackatime tool, project totals)
     hackatime_watch.py    # hour milestones per project + persisted "seen" state
+    admin_watch.py        # dm when matthias's slack role goes up (member -> admin), see 7m
     proactive.py          # quiet hours + daily cap for unprompted pings
     oneshot.py            # one-off persona completion for scheduled messages
     wrapup.py             # end-of-day wrap-up dm
@@ -1237,6 +1238,17 @@ from `_run_code` if that should change). it needs no credential, so it is always
 - **size.** default 15000 characters, max 40000 (`max_chars`); a longer page says which `start`
   value reads on.
 
+### 7m. admin promotion watcher
+- `bot/admin_watch.py` + `scheduler._run_admin_watcher()` (every `ADMIN_POLL_SECONDS`, default 300):
+  `users.info` on `USER_ID` with noodle's own token, role = member / admin / owner / primary_owner
+  from `is_admin` / `is_owner` / `is_primary_owner`. a role going UP dms matthias one persona-written
+  message (plain fallback if the model call fails). no new credential: always on, and needs only
+  `users:read`, which noodle already uses for display names (`handlers`, `tools` call `users_info`).
+- state in `data/admin_seen.json`, saved BEFORE the dm (a crash drops a message instead of repeating
+  it). first run ever only baselines (if he is already admin nothing is sent); a demotion is recorded
+  silently, so a later re-promotion fires again. rare one-off event, so it skips the proactive
+  guardrails (quiet hours, daily cap). the facts are saved to memory like the other watchers.
+
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
   (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore
@@ -1342,6 +1354,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `WATCHED_CHANNEL_ID` | channel watched for joins/leaves; empty disables it |
 | `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
 | `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |
+| `ADMIN_POLL_SECONDS` | seconds between checks of matthias's slack role (default 300), see 7m |
 | `LOG_LEVEL` | optional, default `INFO` |
 
 everything time-based (both daily dms, "today" in the stats/news checks)
