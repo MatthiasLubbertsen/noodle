@@ -4,7 +4,7 @@ import threading
 import time
 
 import config
-from bot import admin_watch, features, github, github_watch, hackatime, hackatime_watch, proactive, release_watch, reminders, sky, state, watch
+from bot import admin_watch, ci_watch, features, github, github_watch, hackatime, hackatime_watch, proactive, release_watch, reminders, sky, state, uptime_watch, watch
 from bot.chunk import chunk_response
 from bot.history_store import append_message_async
 from bot.llm import _kind_for
@@ -159,13 +159,48 @@ def _check_github() -> None:
     logger.info("sent github watcher dm (%d notification(s))", len(items))
 
 
+def _check_ci() -> None:
+    """dm about failed github actions runs on his repos (same guardrails as the notification dm)."""
+    if not proactive.can_send():
+        return
+    items = ci_watch.new_failures()
+    if not items:
+        return
+    _post_dm(ci_watch.compose_message(items))
+    ci_watch.mark_seen(items)
+    proactive.record_sent()
+    logger.info("sent ci watcher dm (%d failed run(s))", len(items))
+
+
 def _run_github_watcher() -> None:
     while True:
-        try:
-            _check_github()
-        except Exception:  # noqa: BLE001
-            logger.exception("github watcher poll failed")
+        for name, check in (("github watcher", _check_github), ("ci watcher", _check_ci)):
+            try:
+                check()
+            except Exception:  # noqa: BLE001
+                logger.exception("%s poll failed", name)
         time.sleep(config.GITHUB_POLL_SECONDS)
+
+
+def _check_uptime() -> None:
+    """one dm per poll for every site that went down or came back, held during quiet hours and past
+    the daily cap (the state keeps it pending, so it goes out in the next allowed poll)."""
+    down, up = uptime_watch.poll()
+    if not (down or up) or not proactive.can_send():
+        return
+    _post_dm(uptime_watch.compose_message(down, up))
+    uptime_watch.mark_sent(down, up)
+    proactive.record_sent()
+    logger.info("sent uptime dm (%d down, %d back)", len(down), len(up))
+
+
+def _run_uptime_watcher() -> None:
+    while True:
+        try:
+            _check_uptime()
+        except Exception:  # noqa: BLE001
+            logger.exception("uptime watcher poll failed")
+        time.sleep(config.UPTIME_POLL_SECONDS)
 
 
 def _check_hackatime() -> None:
@@ -387,6 +422,8 @@ def start_daily_scheduler() -> None:
         threading.Thread(target=_run_weekly, args=(weekday, hour, minute, job), daemon=True).start()
     if github.configured():
         threading.Thread(target=_run_github_watcher, daemon=True).start()
+    if features.enabled("uptime"):
+        threading.Thread(target=_run_uptime_watcher, daemon=True).start()
     if hackatime.configured():
         threading.Thread(target=_run_hackatime_watcher, daemon=True).start()
     threading.Thread(target=_run_admin_watcher, daemon=True).start()

@@ -164,6 +164,8 @@ noodle/
     links.py           # link shortener api calls (links tool)
     github_watch.py    # new-notification diffing + persisted "seen" state
     hackatime.py       # hackatime api calls (hackatime tool, project totals)
+    ci_watch.py        # failed github actions runs on your repos, with the failed step
+    uptime_watch.py    # watches the urls in UPTIME_URLS, dms when one goes down or comes back
     hackatime_watch.py # hour milestones per project + persisted "seen" state
     admin_watch.py     # dm when matthias's slack role goes up (member -> admin)
     release_watch.py   # dm what changed after a new image is deployed (once per build)
@@ -263,6 +265,7 @@ logs go to the console either way; the code also tries to write
 | `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`) / max per day (default 10) |
 | `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | private, set in `.env` only: morning dm places (comma separated) / default place for `get_weather` |
 | `LASTFM_API_KEY` / `LASTFM_USER` | optional, enables `now_playing` |
+| `UPTIME_URLS` / `UPTIME_POLL_SECONDS` / `UPTIME_FAILS` | optional: comma separated urls to watch; noodle dms when one is down (after 2 failed checks in a row) and when it is back, with the downtime. unset = off |
 | `HACKATIME_USERNAME` / `HACKATIME_API_KEY` | optional: enables the public `hackatime` tool and hour milestones (every hour on a project in `LOGS_CHANNEL_ID`, every 5 in `MATTHIAS_DAY_CHANNEL_ID`); the key is only needed if your stats aren't public |
 | `GITHUB_TOKEN` / `GITHUB_USER` / `GITHUB_POLL_SECONDS` | optional classic token (`repo`, `notifications`): enables the `github` tool and the notification watcher |
 | `LINKS_API_BASE` / `LINKS_API_KEY` | link shortener api base url (e.g. `https://go.example.com/api/v1`, no default) + its `lnk_...` key; both optional, but the `links` tool is only offered when both are set |

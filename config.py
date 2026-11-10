@@ -120,6 +120,13 @@ GITHUB_USER = os.getenv("GITHUB_USER", "MatthiasLubbertsen")
 # how often the watcher checks for new notifications
 GITHUB_POLL_SECONDS = int(os.getenv("GITHUB_POLL_SECONDS", "300"))
 
+# --- uptime watcher (bot/uptime_watch.py) ---
+# comma separated urls to check (a bare host gets https://). unset = off. a url counts as down after
+# UPTIME_FAILS failed checks in a row (a 5xx, a timeout, a dns/tls error), so one blip doesn't ping him.
+UPTIME_URLS = [u.strip() for u in os.getenv("UPTIME_URLS", "").split(",") if u.strip()]
+UPTIME_POLL_SECONDS = max(30, int(os.getenv("UPTIME_POLL_SECONDS", "120")))
+UPTIME_FAILS = max(1, int(os.getenv("UPTIME_FAILS", "2")))
+
 # --- hackatime (hack club's wakatime: coding time) ---
 # his hackatime username (or slack id). set = the public `hackatime` tool + the hour
 # milestone posts (every hour in LOGS_CHANNEL_ID, every 5 in MATTHIAS_DAY_CHANNEL_ID).
@@ -206,6 +213,8 @@ NEWS_SEEN_PATH = DATA_DIR / "hackclub_news_seen.json"
 # sqlite, see bot/history_store.py.
 MEMORY_DB_PATH = DATA_DIR / "noodle_memory.db"
 GITHUB_SEEN_PATH = DATA_DIR / "github_seen.json"
+CI_SEEN_PATH = DATA_DIR / "ci_seen.json"
+UPTIME_STATE_PATH = DATA_DIR / "uptime_state.json"
 HACKATIME_SEEN_PATH = DATA_DIR / "hackatime_seen.json"
 ADMIN_SEEN_PATH = DATA_DIR / "admin_seen.json"
 RELEASE_SEEN_PATH = DATA_DIR / "release_seen.json"

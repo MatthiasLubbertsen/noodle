@@ -70,6 +70,8 @@ noodle/
     github.py             # github rest calls (github tool, commit count)
     links.py              # link shortener api calls (links tool)
     github_watch.py       # new-notification diffing + persisted "seen" state
+    ci_watch.py           # failed github actions runs on his repos, with the failed step, see 7o
+    uptime_watch.py       # pings the urls in UPTIME_URLS, dms when one goes down / comes back, see 7o
     hackatime.py          # hackatime api calls (hackatime tool, project totals)
     hackatime_watch.py    # hour milestones per project + persisted "seen" state
     admin_watch.py        # dm when matthias's slack role goes up (member -> admin), see 7m
@@ -1269,6 +1271,27 @@ from `_run_code` if that should change). it needs no credential, so it is always
   saved to memory like the other watchers. the dm is HELD during `QUIET_HOURS` (the thread waits; `pending` is persisted so a restart still sends it);
   it skips the daily cap, being a one-off.
 
+### 7o. ci failure watcher + uptime watcher
+- **ci watcher** (`bot/ci_watch.py`, `scheduler._check_ci()`, runs in the github watcher's loop every
+  `GITHUB_POLL_SECONDS`, so it needs only `GITHUB_TOKEN`): lists his 15 most recently pushed own repos
+  (`github.recent_repos()`, no forks/archived), reads each one's finished runs and reports every
+  `failure`/`timed_out` run once, any branch, skipping bot actors (dependabot) and runs older than 24h.
+  the facts carry repo, workflow, branch, commit, who pushed and the first failed job + step
+  (`github.failed_step()`, best effort). state: run ids in `data/ci_seen.json`; first run ever only baselines.
+  same guardrails as the notification dm (quiet hours, daily cap; held failures stay unreported).
+- **why `github_watch` ignores `ci_activity`:** github's own notification for a failed run is the same
+  event with no detail, and only exists if his github notification settings send it. the ci watcher
+  replaces it (`IGNORED_REASONS`), so there is never a second dm about one failure.
+- **uptime watcher** (`bot/uptime_watch.py`, `scheduler._check_uptime()`, only when `UPTIME_URLS` is set,
+  every `UPTIME_POLL_SECONDS`, default 120): GETs each url in parallel (10s timeout). a 5xx, timeout,
+  dns or tls error is a failed probe; a 401/403/404 means something answered, so it is up. a url is down
+  after `UPTIME_FAILS` (2) failed probes in a row. one dm per poll covers everything that went down or
+  came back (a dead server is one message, not twenty), persona-written, with since-when and downtime.
+- state per url in `data/uptime_state.json` (`alerted`, `recovered_at`): a dm held back by quiet hours or the
+  daily cap stays pending and goes out later; an outage that ended before anyone was told is dropped
+  silently; a flap inside an outage stays one outage. no recovery dm for something never announced.
+  not built: tls certificate expiry warnings, a status page, alerting through a channel other than a dm.
+
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
   (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore
@@ -1374,6 +1397,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `WATCHED_CHANNEL_ID` | channel watched for joins/leaves; empty disables it |
 | `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
 | `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |
+| `UPTIME_URLS` / `UPTIME_POLL_SECONDS` / `UPTIME_FAILS` | comma separated urls to watch (bare host = https), unset = off; poll interval (120), failed checks in a row before "down" (2), see 7o |
 | `ADMIN_POLL_SECONDS` | seconds between checks of matthias's slack role (default 300), see 7m |
 | `LOG_LEVEL` | optional, default `INFO` |
 
