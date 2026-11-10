@@ -3,5 +3,6 @@ slack-sdk>=3.27.0
 python-dotenv>=1.0.0
 openai>=1.30.0
 websocket-client>=1.7.0
+python-socketio[client]>=5.11.0,<6  # uptime watcher: uptime kuma speaks socket.io
 astronomy-engine>=2.1.19
 websockets>=12.0  # tests only: tests/fake_slack.py

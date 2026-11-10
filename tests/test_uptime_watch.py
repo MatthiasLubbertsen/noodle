@@ -6,34 +6,96 @@ from unittest import mock
 
 import config
 from bot import uptime_watch as u
+from tests.fake_kuma import FakeKuma
 
 T0 = datetime.datetime(2026, 11, 10, 12, 0, tzinfo=datetime.timezone.utc)
 NAME = "blog"
-
-METRICS = '''# HELP monitor_status Monitor Status (1 = UP, 0= DOWN, 2= PENDING, 3= MAINTENANCE)
-# TYPE monitor_status gauge
-monitor_status{monitor_name="blog",monitor_type="http",monitor_url="https://blog.example.com",monitor_hostname="null",monitor_port="null"} 1
-monitor_status{monitor_name="my \\"api\\"",monitor_type="http",monitor_url="https://api.example.com",monitor_hostname="null",monitor_port="null"} 0
-monitor_status{monitor_name="db",monitor_type="port",monitor_url="https://",monitor_hostname="db.example.com",monitor_port="5432"} 2
-monitor_response_time{monitor_name="blog",monitor_type="http",monitor_url="https://blog.example.com"} 123
-'''
-
 
 def step(state, reason, minutes):
     return u.update(state, {NAME: reason}, T0 + datetime.timedelta(minutes=minutes))
 
 
-class ParseTests(unittest.TestCase):
-    def test_reads_status_lines_only(self):
-        got = u.parse_metrics(METRICS)
-        self.assertEqual(got["blog"], (1, "https://blog.example.com"))
-        self.assertEqual(got['my \\"api\\"'][0], 0)
-        self.assertEqual(got["db"][0], 2)
-        self.assertEqual(len(got), 3)
+MONITORS = {
+    1: {"id": 1, "name": "blog", "type": "http", "url": "https://blog.example.com", "hostname": None, "port": None, "active": True},
+    2: {"id": 2, "name": "db", "type": "port", "url": "https://", "hostname": "db.example.com", "port": 5432, "active": True},
+    3: {"id": 3, "name": "old", "type": "http", "url": "https://old.example.com", "active": False},
+    4: {"id": 4, "name": "ping", "type": "ping", "url": "https://", "hostname": "1.1.1.1", "active": True},
+}
+BEATS = {
+    1: [{"status": 1, "msg": "200 - OK"}, {"status": 0, "msg": "Request failed with  status code 502"}],
+    2: [{"status": 1, "msg": ""}],
+    3: [{"status": 0, "msg": "paused one"}],
+    # monitor 4 has no heartbeat yet
+}
 
-    def test_null_url_is_empty(self):
-        got = u.parse_metrics('monitor_status{monitor_name="x",monitor_url="null"} 1\n')
-        self.assertEqual(got["x"], (1, ""))
+
+class SnapshotTests(unittest.TestCase):
+    def test_newest_beat_and_target_per_type(self):
+        got = u.snapshot(MONITORS, {i: b[-1] for i, b in BEATS.items()})
+        self.assertEqual(set(got), {"blog", "db"})  # paused and beat-less monitors are skipped
+        self.assertEqual(got["blog"], {"status": 0, "type": "http", "target": "https://blog.example.com",
+                                       "msg": "Request failed with status code 502"})
+        self.assertEqual(got["db"]["target"], "db.example.com:5432")
+
+    def test_duplicate_names_do_not_overwrite(self):
+        mons = {1: {"name": "x", "type": "http", "url": "https://a"}, 2: {"name": "x", "type": "http", "url": "https://b"}}
+        got = u.snapshot(mons, {1: {"status": 1}, 2: {"status": 0}})
+        self.assertEqual(set(got), {"x", "x #2"})
+
+    def test_message_is_flattened_and_capped(self):
+        got = u.snapshot({1: {"name": "x"}}, {1: {"status": 0, "msg": "a\n\nb " + "c" * 500}})
+        self.assertNotIn("\n", got["x"]["msg"])
+        self.assertLessEqual(len(got["x"]["msg"]), 160)
+
+
+class FetchTests(unittest.TestCase):
+    """the real client against a socket.io server that talks like kuma."""
+
+    def setUp(self):
+        p = mock.patch.multiple(config, KUMA_USERNAME="", KUMA_PASSWORD="")
+        p.start()
+        self.addCleanup(p.stop)
+        p = mock.patch.object(u, "TIMEOUT", 2)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _kuma(self, **kw):
+        k = FakeKuma(MONITORS, BEATS, **kw)
+        self.addCleanup(k.close)
+        return k
+
+    def _fetch(self, k):
+        with mock.patch.object(config, "KUMA_URL", k.url):
+            return u.fetch(transports=["polling"])
+
+    def test_auth_disabled_needs_no_login(self):
+        got = self._fetch(self._kuma())
+        self.assertEqual(got["blog"]["status"], 0)
+        self.assertEqual(got["blog"]["msg"], "Request failed with status code 502")
+        self.assertEqual(got["db"]["status"], 1)
+
+    def test_login_when_auth_is_on(self):
+        k = self._kuma(login=("me", "pw"))
+        with mock.patch.multiple(config, KUMA_USERNAME="me", KUMA_PASSWORD="pw"):
+            self.assertIn("blog", self._fetch(k))
+
+    def test_wrong_password_raises(self):
+        k = self._kuma(login=("me", "pw"))
+        with mock.patch.multiple(config, KUMA_USERNAME="me", KUMA_PASSWORD="nope"):
+            with self.assertRaisesRegex(RuntimeError, "login failed"):
+                self._fetch(k)
+
+    def test_auth_on_without_credentials_says_so(self):
+        k = self._kuma(login=("me", "pw"))
+        with self.assertRaisesRegex(RuntimeError, "KUMA_USERNAME"):
+            self._fetch(k)
+
+    def test_unreachable_kuma_raises(self):
+        k = FakeKuma({}, {})
+        url = k.url
+        k.close()
+        with mock.patch.object(config, "KUMA_URL", url), self.assertRaises(Exception):
+            u.fetch(transports=["polling"])
 
 
 class StateTests(unittest.TestCase):
@@ -75,48 +137,62 @@ class StateTests(unittest.TestCase):
         self.assertEqual(u.pending(s), ([NAME], []))
 
 
+def _mon(status, msg="", type="http", target="https://blog.example.com"):
+    return {"status": status, "type": type, "target": target, "msg": msg}
+
+
 class PollTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         p = mock.patch.multiple(config, DATA_DIR=Path(tmp.name), UPTIME_STATE_PATH=Path(tmp.name) / "u.json",
-                                UPTIME_FAILS=1, KUMA_URL="https://k.example.com", KUMA_API_KEY="uk1_x")
+                                UPTIME_FAILS=1, KUMA_URL="http://k")
         p.start()
         self.addCleanup(p.stop)
 
-    def test_poll_announces_once_then_recovery(self):
-        down = {"blog": (0, "https://blog.example.com")}
-        with mock.patch("bot.uptime_watch.fetch", return_value=down):
+    def test_poll_announces_once_with_the_real_error_then_recovery(self):
+        with mock.patch("bot.uptime_watch.fetch", return_value={"blog": _mon(0, "Request failed with status code 502")}):
             d, up = u.poll()
             self.assertEqual((d, up), (["blog"], []))
-            self.assertIn("https://blog.example.com", u.format_facts(d, up))
+            facts = u.format_facts(d, up)
+            self.assertIn("DOWN blog (http, https://blog.example.com)", facts)
+            self.assertIn("error: Request failed with status code 502", facts)
             u.mark_sent(d, up)
-            self.assertEqual(u.poll(), ([], []))
-        with mock.patch("bot.uptime_watch.fetch", return_value={"blog": (1, "https://blog.example.com")}):
+            self.assertEqual(u.poll(), ([], []))  # already announced
+        with mock.patch("bot.uptime_watch.fetch", return_value={"blog": _mon(1)}):
             d, up = u.poll()
             self.assertEqual((d, up), ([], ["blog"]))
             self.assertIn("was down", u.format_facts(d, up))
 
+    def test_the_dm_always_says_what_is_still_down(self):
+        with mock.patch("bot.uptime_watch.fetch", return_value={
+                "blog": _mon(0, "502"), "db": _mon(1, type="port", target="db.example.com:5432")}):
+            d, up = u.poll()
+            u.mark_sent(d, up)
+        with mock.patch("bot.uptime_watch.fetch", return_value={
+                "blog": _mon(0, "502"), "db": _mon(0, "connect ECONNREFUSED", "port", "db.example.com:5432")}):
+            d, up = u.poll()
+            self.assertEqual(d, ["db"])
+            facts = u.format_facts(d, up)
+        self.assertIn("DOWN db (port, db.example.com:5432)", facts)
+        self.assertIn("STILL DOWN blog", facts)
+
     def test_unreachable_kuma_raises_and_changes_nothing(self):
-        with mock.patch("bot.uptime_watch.fetch", return_value={"blog": (0, "")}):
+        with mock.patch("bot.uptime_watch.fetch", return_value={"blog": _mon(0, "502")}):
             u.poll()
         with mock.patch("bot.uptime_watch.fetch", side_effect=OSError("kuma down")):
             with self.assertRaises(OSError):
                 u.poll()
-        with mock.patch("bot.uptime_watch.fetch", return_value={"blog": (0, "")}):
+        with mock.patch("bot.uptime_watch.fetch", return_value={"blog": _mon(0, "502")}):
             self.assertEqual(u.poll(), (["blog"], []))
 
-    def test_fetch_uses_basic_auth_with_the_key(self):
-        class R:
-            def read(self): return b"monitor_status{monitor_name=\"a\",monitor_url=\"https://a\"} 1\n"
-            def __enter__(self): return self
-            def __exit__(self, *a): return False
-        with mock.patch("urllib.request.urlopen", return_value=R()) as op:
-            self.assertEqual(u.fetch(), {"a": (1, "https://a")})
-        req = op.call_args[0][0]
-        self.assertEqual(req.full_url, "https://k.example.com/metrics")
-        import base64
-        self.assertEqual(base64.b64decode(req.get_header("Authorization").split()[1]), b":uk1_x")
+    def test_message_names_monitors_or_falls_back_to_the_facts(self):
+        with mock.patch("bot.uptime_watch.fetch", return_value={"blog": _mon(0, "502")}):
+            d, up = u.poll()
+        with mock.patch("bot.uptime_watch.complete", return_value="something broke"), \
+             mock.patch("bot.uptime_watch.remember_facts"):
+            msg = u.compose_message(d, up)
+        self.assertIn("DOWN blog", msg)  # the model dropped the monitor name -> plain facts
 
 
 if __name__ == "__main__":

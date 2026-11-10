@@ -41,7 +41,7 @@ def enabled(feature: str) -> bool:
     if feature == "links":
         return bool(config.LINKS_API_KEY and config.LINKS_API_BASE)
     if feature == "uptime":
-        return bool(config.KUMA_URL and config.KUMA_API_KEY)
+        return bool(config.KUMA_URL)
     raise KeyError(feature)
 
 

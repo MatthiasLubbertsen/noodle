@@ -121,11 +121,14 @@ GITHUB_USER = os.getenv("GITHUB_USER", "MatthiasLubbertsen")
 GITHUB_POLL_SECONDS = int(os.getenv("GITHUB_POLL_SECONDS", "300"))
 
 # --- uptime watcher (bot/uptime_watch.py) ---
-# reads matthias's uptime kuma instance, nothing is probed by noodle itself. KUMA_URL = its base url,
-# KUMA_API_KEY = a key from kuma's settings > api keys (used as the basic-auth password on /metrics).
-# both set = on. kuma already retries before it calls a monitor down, so UPTIME_FAILS defaults to 1.
+# reads matthias's uptime kuma over its socket.io feed, nothing is probed by noodle itself. KUMA_URL = a base url
+# noodle can reach kuma on directly (an internal address like http://uptime-kuma:3001 is best: a login proxy in
+# front of the public url would block noodle too). set = on. kuma with auth disabled needs nothing else; with auth
+# on, KUMA_USERNAME + KUMA_PASSWORD (no 2fa). kuma already retries before it calls a monitor down, so
+# UPTIME_FAILS defaults to 1.
 KUMA_URL = os.getenv("KUMA_URL", "").strip().rstrip("/")
-KUMA_API_KEY = os.getenv("KUMA_API_KEY", "").strip()
+KUMA_USERNAME = os.getenv("KUMA_USERNAME", "").strip()
+KUMA_PASSWORD = os.getenv("KUMA_PASSWORD", "")
 UPTIME_POLL_SECONDS = max(30, int(os.getenv("UPTIME_POLL_SECONDS", "60")))
 UPTIME_FAILS = max(1, int(os.getenv("UPTIME_FAILS", "1")))
 

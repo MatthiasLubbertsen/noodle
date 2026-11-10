@@ -264,7 +264,7 @@ logs go to the console either way; the code also tries to write
 | `QUIET_HOURS` / `PROACTIVE_DAILY_CAP` | no unprompted pings in `HH:MM-HH:MM` (default `23:00-07:30`) / max per day (default 10) |
 | `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | private, set in `.env` only: morning dm places (comma separated) / default place for `get_weather` |
 | `LASTFM_API_KEY` / `LASTFM_USER` | optional, enables `now_playing` |
-| `KUMA_URL` / `KUMA_API_KEY` | optional: your uptime kuma base url + an api key (settings > api keys). noodle reads its `/metrics` and dms when a monitor goes down and when it is back, with the downtime. both unset = off |
+| `KUMA_URL` / `KUMA_USERNAME` / `KUMA_PASSWORD` | optional: your uptime kuma base url (an address noodle can reach directly, e.g. `http://uptime-kuma:3001`). noodle dms what went down (with kuma's real error message), what came back and what is still down. username/password only if kuma has authentication on. unset = off |
 | `HACKATIME_USERNAME` / `HACKATIME_API_KEY` | optional: enables the public `hackatime` tool and hour milestones (every hour on a project in `LOGS_CHANNEL_ID`, every 5 in `MATTHIAS_DAY_CHANNEL_ID`); the key is only needed if your stats aren't public |
 | `GITHUB_TOKEN` / `GITHUB_USER` / `GITHUB_POLL_SECONDS` | optional classic token (`repo`, `notifications`): enables the `github` tool and the notification watcher |
 | `LINKS_API_BASE` / `LINKS_API_KEY` | link shortener api base url (e.g. `https://go.example.com/api/v1`, no default) + its `lnk_...` key; both optional, but the `links` tool is only offered when both are set |
