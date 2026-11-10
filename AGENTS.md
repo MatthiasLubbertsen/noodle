@@ -933,12 +933,9 @@ or id (so "block only mopa5m with the social blocklist" works),
   `bot/tools.py` against the real sender id (memory holds his dms with noodle).
   `github` and `freedom` already were.
 - **joining channels** (`bot/channels.py`, nothing is ever posted): at startup
-  `ensure_joined()` checks the configured channels (`MATTHIAS_DAY_CHANNEL_ID`,
-  `WATCHED_CHANNEL_ID`, `LOGS_CHANNEL_ID`, explicit `ALLOWED_CHANNELS` ids; not
-  `*`) with `conversations.info` and only joins public ones it isn't in.
-  `conversations.join` is refused for every private channel
-  (`method_not_supported_for_channel_type`) even for members, so private ones are
-  never joined: already a member = info line, not a member = one warning to invite it. also, `fetch_slack_message` and
+  `ensure_joined()` joins the configured channels it isn't in
+  (`MATTHIAS_DAY_CHANNEL_ID`, `WATCHED_CHANNEL_ID`, `LOGS_CHANNEL_ID`, explicit
+  `ALLOWED_CHANNELS` ids; not `*`). also, `fetch_slack_message` and
   `summarize_thread` auto-join a public channel they can't read yet and retry,
   but only when matthias asked. needs the `channels:join` scope; private
   channels still need an invite (logged as a warning). slack itself shows a
@@ -1273,10 +1270,6 @@ from `_run_code` if that should change). it needs no credential, so it is always
   it skips the daily cap, being a one-off.
 
 ### 8. channel join/leave analytics
-> **reality check:** in matthias's workspace the join lines in `#matthias-logs` (the logs
-> channel) are posted by his old **workflow bot** ("Matthias Logs"), and the hackatime hour
-> lines by "Sailor's Log", not by noodle. noodle's `watch._log()` only posts if
-> `LOGS_CHANNEL_ID` is set; keep it unset there or every join is logged twice.
 - `application.event("member_joined_channel")` / `"member_left_channel")`
   (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore
   everything outside `WATCHED_CHANNEL_ID` and ignore noodle's own
