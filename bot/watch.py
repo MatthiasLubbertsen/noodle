@@ -33,7 +33,7 @@ def handle_member_joined_channel(event: dict) -> None:
     if config.MATTHIAS_DAY_GROUP_ID:
         result = ensure_member(config.MATTHIAS_DAY_GROUP_ID, user)
         if result == "added":
-            group_note = " and got added to the @matthias-day ping group"
+            group_note = " and got added to the ping group"
         elif result == "already":
             group_note = " (already in the @matthias-day ping group)"
         elif result == "failed":
