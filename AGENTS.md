@@ -73,6 +73,7 @@ noodle/
     hackatime.py          # hackatime api calls (hackatime tool, project totals)
     hackatime_watch.py    # hour milestones per project + persisted "seen" state
     admin_watch.py        # dm when matthias's slack role goes up (member -> admin), see 7m
+    release_watch.py      # release notes dm after a new image is deployed, see 7n
     proactive.py          # quiet hours + daily cap for unprompted pings
     oneshot.py            # one-off persona completion for scheduled messages
     wrapup.py             # end-of-day wrap-up dm
@@ -1248,6 +1249,25 @@ from `_run_code` if that should change). it needs no credential, so it is always
   it). first run ever only baselines (if he is already admin nothing is sent); a demotion is recorded
   silently, so a later re-promotion fires again. rare one-off event, so it skips the proactive
   guardrails (quiet hours, daily cap). the facts are saved to memory like the other watchers.
+
+### 7n. release notes
+- `bot/release_watch.py` + `scheduler._send_release_notes()` (one thread at startup): a persona dm
+  telling matthias what changed in noodle, once per deployed build.
+- **how "deployed" is detected without ever polling github.** `docker.yml` builds + pushes the images
+  only for a push to main (a merged pr is one) or a `v*` tag, and passes `GIT_SHA=${{ github.sha }}`;
+  the `Dockerfile` bakes it into `NOODLE_SHA`. so a container that starts with a sha it hasn't
+  announced yet is, by construction, one whose image was built, pulled and `docker compose up -d`'ed.
+  a plain restart keeps the sha (nothing), a local `up --build` has no sha (nothing), a tag on an
+  already-announced commit is the same sha (nothing).
+- state in `data/release_seen.json`: the new sha is saved with the old one as `pending`, and `pending` is
+  cleared right BEFORE the dm (a crash drops a note instead of repeating it). first run ever only baselines, so the deploy that introduces this feature is silent.
+- the changes come from github's compare api (`GITHUB_REPO`, default `MatthiasLubbertsen/noodle`;
+  `GITHUB_TOKEN` used if set, public repo works without): commit messages (newest 15, 500 chars each)
+  + touched file names, falling back to the newest commit alone if the old sha is unknown (force
+  push). nothing readable = no dm. the `PROMPT` in `release_watch.py` asks for one short persona
+  message about behaviour he'll notice, no hashes/files/pr numbers, no invented features. facts are
+  saved to memory like the other watchers. the dm is HELD during `QUIET_HOURS` (the thread waits; `pending` is persisted so a restart still sends it);
+  it skips the daily cap, being a one-off.
 
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`

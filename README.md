@@ -166,6 +166,7 @@ noodle/
     hackatime.py       # hackatime api calls (hackatime tool, project totals)
     hackatime_watch.py # hour milestones per project + persisted "seen" state
     admin_watch.py     # dm when matthias's slack role goes up (member -> admin)
+    release_watch.py   # dm what changed after a new image is deployed (once per build)
     proactive.py       # quiet hours + daily cap for unprompted pings
     oneshot.py         # one-off persona completion + daily-facts memory rows
     wrapup.py          # end-of-day wrap-up dm
