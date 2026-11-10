@@ -4,7 +4,7 @@ import threading
 import time
 
 import config
-from bot import admin_watch, features, github, github_watch, hackatime, hackatime_watch, proactive, reminders, sky, state, watch
+from bot import admin_watch, features, github, github_watch, hackatime, hackatime_watch, proactive, release_watch, reminders, sky, state, watch
 from bot.chunk import chunk_response
 from bot.history_store import append_message_async
 from bot.llm import _kind_for
@@ -207,6 +207,22 @@ def _run_admin_watcher() -> None:
         time.sleep(config.ADMIN_POLL_SECONDS)
 
 
+def _send_release_notes() -> None:
+    """once per deploy: when this container runs a build it hasn't announced, dm him what changed.
+    check() has already saved the sha, so a failed dm is not retried. a one-off, so no guardrails."""
+    try:
+        time.sleep(15)  # let slack connect first
+        change = release_watch.check()
+        if not change:
+            return
+        text = release_watch.compose_message(*change)
+        if text:
+            _post_dm(text)
+            logger.info("release notes dm sent (%s -> %s)", change[0][:7], change[1][:7])
+    except Exception:  # noqa: BLE001
+        logger.exception("release notes failed")
+
+
 # the night an aurora dm (forecast at sunset, or live) already went out: one per night
 _aurora_night = None
 
@@ -370,6 +386,7 @@ def start_daily_scheduler() -> None:
     if hackatime.configured():
         threading.Thread(target=_run_hackatime_watcher, daemon=True).start()
     threading.Thread(target=_run_admin_watcher, daemon=True).start()
+    threading.Thread(target=_send_release_notes, daemon=True).start()
     threading.Thread(target=_run_reminder_poller, daemon=True).start()
     threading.Thread(target=_run_sky_tonight, daemon=True).start()
     threading.Thread(target=_run_aurora_watch, daemon=True).start()

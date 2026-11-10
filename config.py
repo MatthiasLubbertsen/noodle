@@ -128,6 +128,10 @@ HACKATIME_USERNAME = os.getenv("HACKATIME_USERNAME", "").strip()
 HACKATIME_API_KEY = os.getenv("HACKATIME_API_KEY", "")
 HACKATIME_POLL_SECONDS = int(os.getenv("HACKATIME_POLL_SECONDS", "600"))
 
+# repo the release notes read their changes from (bot/release_watch.py); the commit this image
+# was built from comes from the GIT_SHA build arg, there is no env var for it
+GITHUB_REPO = os.getenv("GITHUB_REPO", "MatthiasLubbertsen/noodle")
+
 # how often to check whether matthias got promoted to workspace admin (bot/admin_watch.py)
 ADMIN_POLL_SECONDS = int(os.getenv("ADMIN_POLL_SECONDS", "300"))
 
@@ -204,6 +208,7 @@ MEMORY_DB_PATH = DATA_DIR / "noodle_memory.db"
 GITHUB_SEEN_PATH = DATA_DIR / "github_seen.json"
 HACKATIME_SEEN_PATH = DATA_DIR / "hackatime_seen.json"
 ADMIN_SEEN_PATH = DATA_DIR / "admin_seen.json"
+RELEASE_SEEN_PATH = DATA_DIR / "release_seen.json"
 PROACTIVE_STATE_PATH = DATA_DIR / "proactive_state.json"
 MORNING_STATE_PATH = DATA_DIR / "morning_sent.json"
 GAMES_STATE_PATH = DATA_DIR / "games.json"
