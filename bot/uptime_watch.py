@@ -1,6 +1,7 @@
 import datetime
 import json
 import logging
+import re
 import threading
 import time
 
@@ -214,6 +215,35 @@ def compose_message(down: list[str], up: list[str]) -> str:
         "use ONLY these facts.\n\nfacts:\n" + facts,
         max_tokens=300,
     )
-    if text and all(u in text for u in down + up):
+    # names are compared case-insensitively: the persona writes in lowercase ("beszel" for "Beszel")
+    if text and all(u.lower() in text.lower() for u in down + up):
         return text
-    return "uptime:\n" + facts
+    return _plain_message(down, up)
+
+
+def _plain_error(reason: str | None) -> str:
+    """openssl/node errors come with hex ids and source paths; keep the readable part."""
+    r = (reason or "").strip()
+    m = re.search(r"SSL routines:[^:]*:([^:]+)", r)
+    if m:
+        r = "tls error: " + m.group(1).strip()
+    if len(r) > 120:
+        r = r[:120].rsplit(" ", 1)[0] + "..."
+    return r or "unknown error"
+
+
+def _plain_message(down: list[str], up: list[str]) -> str:
+    """lowercase, human fallback for when the model call fails (no raw fact dump)."""
+    state, parts = _load(), []
+    for u in down:
+        s = state.get(u, {})
+        since = datetime.datetime.fromisoformat(s["down_since"]).astimezone(AMSTERDAM_TZ).strftime("%H:%M")
+        parts.append(f"{u}{_what(s)} went down at {since}: {_plain_error(s.get('reason'))}")
+    for u in up:
+        s = state.get(u, {})
+        end = datetime.datetime.fromisoformat(s["recovered_at"])
+        parts.append(f"{u}{_what(s)} is back up after {_span(s['down_since'], end)}")
+    still = [u for u, s in state.items() if s.get("down_since") and not s.get("recovered_at") and u not in down]
+    if still:
+        parts.append("still down: " + ", ".join(still))
+    return "\n\n".join(parts)
