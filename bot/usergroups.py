@@ -5,16 +5,17 @@ from bot import state
 logger = logging.getLogger("noodle")
 
 
-def get_members(group_id: str) -> list[str]:
+def get_members(group_id: str) -> list[str] | None:
+    """current members, or None if the lookup failed (never guess an empty list)."""
     try:
         resp = state.app.client.usergroups_users_list(usergroup=group_id)
         if not resp.get("ok"):
             logger.warning("usergroups_users_list failed: %s", resp.get("error"))
-            return []
+            return None
         return resp.get("users", [])
     except Exception:  # noqa: BLE001
         logger.exception("usergroups_users_list failed")
-        return []
+        return None
 
 
 def _set_members(group_id: str, members: list[str]) -> bool:
@@ -37,6 +38,9 @@ def ensure_member(group_id: str, user_id: str) -> str:
     returns "added", "already", or "failed".
     """
     members = get_members(group_id)
+    if members is None:
+        # usergroups.users.update replaces the whole list, so never write without the real one
+        return "failed"
     if user_id in members:
         return "already"
     return "added" if _set_members(group_id, members + [user_id]) else "failed"
@@ -48,6 +52,8 @@ def ensure_not_member(group_id: str, user_id: str) -> str:
     returns "removed", "not_member", or "failed".
     """
     members = get_members(group_id)
+    if members is None:
+        return "failed"
     if user_id not in members:
         return "not_member"
     remaining = [m for m in members if m != user_id]
