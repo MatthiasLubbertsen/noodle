@@ -62,13 +62,40 @@ def configured_channel_ids() -> list[str]:
     return seen
 
 
+def _membership(channel_id: str) -> tuple[bool | None, bool]:
+    """(is_member, is_private) from conversations.info. is_member is None when
+    slack won't say (e.g. a private channel noodle isn't in reports
+    channel_not_found, or the scope is missing)."""
+    try:
+        info = state.app.client.conversations_info(channel=channel_id)
+        chan = info.get("channel") or {}
+        return bool(chan.get("is_member")), bool(chan.get("is_private"))
+    except SlackApiError:
+        return None, False
+    except Exception:  # noqa: BLE001
+        logger.exception("conversations_info failed for %s", channel_id)
+        return None, False
+
+
 def ensure_joined() -> None:
-    """join every configured channel noodle isn't in yet. sends no messages.
-    conversations.join is a no-op for a channel it's already in. failures
-    (private channel, missing scope) are just logged."""
+    """join every configured public channel noodle isn't in yet. sends no
+    messages. conversations.join is refused outright for private channels
+    (method_not_supported_for_channel_type) even when noodle is a member, so
+    membership is checked first and a private channel is never joined: noodle
+    is either already in it (fine) or needs an invite (warning)."""
     for cid in configured_channel_ids():
+        is_member, is_private = _membership(cid)
+        if is_member:
+            logger.info("channel %s: noodle is in it", cid)
+            continue
+        if is_private:
+            logger.warning("channel %s is private and noodle isn't in it: invite it", cid)
+            continue
         result = join(cid)
         if result == "joined":
-            logger.info("channel %s: noodle is in (or just joined)", cid)
+            logger.info("channel %s: noodle just joined", cid)
+        elif result == "method_not_supported_for_channel_type":
+            # info couldn't see it (private channel noodle may or may not be in)
+            logger.info("channel %s looks private, can't join it by api: invite noodle if it isn't in", cid)
         else:
             logger.warning("couldn't join channel %s: %s", cid, result)

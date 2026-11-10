@@ -9,16 +9,19 @@ logger = logging.getLogger("noodle")
 
 def _log(text: str) -> None:
     if not config.LOGS_CHANNEL_ID:
+        logger.warning("not logging %r: LOGS_CHANNEL_ID is empty", text)
         return
     try:
         state.app.client.chat_postMessage(channel=config.LOGS_CHANNEL_ID, text=text)
+        logger.info("logged to %s: %s", config.LOGS_CHANNEL_ID, text)
     except Exception:  # noqa: BLE001
-        logger.exception("failed to post to logs channel")
+        logger.exception("failed to post to logs channel %s", config.LOGS_CHANNEL_ID)
 
 
 def handle_member_joined_channel(event: dict) -> None:
     channel = event.get("channel")
     user = event.get("user")
+    logger.info("member_joined_channel event: user=%s channel=%s watched=%s", user, channel, config.WATCHED_CHANNEL_ID or "(unset)")
     if not config.WATCHED_CHANNEL_ID or channel != config.WATCHED_CHANNEL_ID:
         return
     if not user or user == state.AUTH_USER_ID:
@@ -49,6 +52,7 @@ def handle_member_joined_channel(event: dict) -> None:
 def handle_member_left_channel(event: dict) -> None:
     channel = event.get("channel")
     user = event.get("user")
+    logger.info("member_left_channel event: user=%s channel=%s watched=%s", user, channel, config.WATCHED_CHANNEL_ID or "(unset)")
     if not config.WATCHED_CHANNEL_ID or channel != config.WATCHED_CHANNEL_ID:
         return
     if not user or user == state.AUTH_USER_ID:
