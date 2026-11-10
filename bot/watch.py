@@ -21,9 +21,11 @@ def _log(text: str) -> None:
 def handle_member_joined_channel(event: dict) -> None:
     channel = event.get("channel")
     user = event.get("user")
-    logger.info("member_joined_channel event: user=%s channel=%s watched=%s", user, channel, config.WATCHED_CHANNEL_ID or "(unset)")
     if not config.WATCHED_CHANNEL_ID or channel != config.WATCHED_CHANNEL_ID:
+        # slack delivers these for every channel the user token can see; ignore the rest quietly
+        logger.debug("ignoring member_joined_channel for unwatched channel %s", channel)
         return
+    logger.info("member_joined_channel event: user=%s channel=%s", user, channel)
     if not user or user == state.AUTH_USER_ID:
         return
 
@@ -52,9 +54,11 @@ def handle_member_joined_channel(event: dict) -> None:
 def handle_member_left_channel(event: dict) -> None:
     channel = event.get("channel")
     user = event.get("user")
-    logger.info("member_left_channel event: user=%s channel=%s watched=%s", user, channel, config.WATCHED_CHANNEL_ID or "(unset)")
     if not config.WATCHED_CHANNEL_ID or channel != config.WATCHED_CHANNEL_ID:
+        # slack delivers these for every channel the user token can see; ignore the rest quietly
+        logger.debug("ignoring member_left_channel for unwatched channel %s", channel)
         return
+    logger.info("member_left_channel event: user=%s channel=%s", user, channel)
     if not user or user == state.AUTH_USER_ID:
         return
 
