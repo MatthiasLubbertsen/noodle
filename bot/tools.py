@@ -700,9 +700,11 @@ TOOLS = [
                 "(monday to friday of the week of date, default this week), next (what he has "
                 "right now, what comes next and in how long, when school is out today), changes "
                 "(everything that dropped out, moved or changed room in the next days, default "
-                "7), exams (tests coming up in the next days, default 60) and stats (lessons "
-                "planned and dropped out per subject; start_date..end_date, default this school "
-                "year so far). subjects come back with their real dutch names. only call it when "
+                "7), exams (tests coming up in the next days, default 60) and stats (for "
+                "start_date..end_date, default this school year so far: lessons planned, each "
+                "one's share of all lessons, how many dropped out and the hours that went on, "
+                "grouped `by` subject (default), week, weekday or hour of the day; for one week "
+                "give that week's monday and friday as the dates). subjects come back with their real dutch names. only call it when "
                 "he asks about school, lessons, his timetable, free hours or tests."
             ),
             "parameters": {
@@ -713,6 +715,7 @@ TOOLS = [
                     "days": {"type": "integer", "description": "for changes/exams: how many days ahead"},
                     "start_date": {"type": "string", "description": "for stats: YYYY-MM-DD, inclusive"},
                     "end_date": {"type": "string", "description": "for stats: YYYY-MM-DD, inclusive"},
+                    "by": {"type": "string", "enum": list(zermelo.STATS_BY), "description": "for stats: what to group by"},
                 },
                 "required": ["action"],
             },

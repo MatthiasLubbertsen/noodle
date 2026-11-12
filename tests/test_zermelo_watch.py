@@ -169,8 +169,21 @@ class TimetableTool(unittest.TestCase):
 
     def test_stats_per_subject(self):
         lines = self.ask({"action": "stats", "start_date": "2026-11-16", "end_date": "2026-11-16"}, at(20, 12)).splitlines()
-        self.assertEqual(lines[0], "2026-11-16 to 2026-11-16: 4 lessons planned, 2 dropped out (50%), 2 hours of lessons that went on")
-        self.assertIn("- duits: 1 planned, 1 dropped out (100%), 0h on", lines)
+        self.assertEqual(lines[0], "2026-11-16 to 2026-11-16, per subject: 4 lessons planned, 2 dropped out (50%), "
+                                   "1.7h of lessons that went on")
+        self.assertIn("- duits: 1 planned (25% of all lessons), 1 dropped out (100%), 0h on", lines)
+
+    def test_stats_per_week_weekday_and_hour(self):
+        rows = MONDAY + [lesson(5, at(24, 8, 15), "wi", 1), lesson(6, at(25, 9, 5), "wi", 2)]
+        ask = lambda by: self.ask({"action": "stats", "start_date": "2026-11-16", "end_date": "2026-11-27", "by": by},  # noqa: E731
+                                  at(28, 12), rows).splitlines()[1:]
+        self.assertEqual(ask("week"), [
+            "- week 47 (from 16 nov): 4 planned (67% of all lessons), 2 dropped out (50%), 1.7h on",
+            "- week 48 (from 23 nov): 2 planned (33% of all lessons), 0 dropped out (0%), 1.7h on",
+        ])
+        self.assertEqual([line.split(":")[0] for line in ask("weekday")], ["- monday", "- tuesday", "- wednesday"])
+        self.assertEqual(ask("hour")[0], "- hour 1: 2 planned (33% of all lessons), 1 dropped out (50%), 0.8h on")
+        self.assertIn("unknown `by`", self.ask({"action": "stats", "by": "teacher"}, at(28, 12), rows))
 
     def test_bad_input_and_dead_api_are_plain_sentences(self):
         self.assertIn("YYYY-MM-DD", self.ask({"action": "day", "date": "friday"}, at(15, 12)))

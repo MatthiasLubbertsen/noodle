@@ -1368,8 +1368,9 @@ from `_run_code` if that should change). it needs no credential, so it is always
   YYYY-MM-DD / today / tomorrow), `week` (monday-friday of the week of `date`), `next` (what is on now, what
   is next and in how long, when school is out today; looks 10 days ahead), `changes` (dropped out, moved or
   another room in the next `days`, default 7, max 60), `exams` (type `exam` plus `tts` activities, next `days`,
-  default 60) and `stats` (lessons planned / dropped out / hours per subject; default this school year so far,
-  from 1 august). bad input and a dead api come back as a plain sentence. teacher codes are the school's
+  default 60) and `stats` (for a date range, default this school year so far from 1 august: lessons planned,
+  their share of all lessons, how many dropped out, hours that went on; grouped `by` subject, week, weekday or
+  hour of the day; only rows of type `lesson`, so exams and activities are not counted). bad input and a dead api come back as a plain sentence. teacher codes are the school's
   abbreviations, zermelo gives a student token no names.
 - not yet seen running in the deployed container; the logic was run against his real timetable without slack.
 

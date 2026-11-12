@@ -250,7 +250,8 @@ def _exams(args: dict, now: datetime.datetime) -> str:
 
 
 def _stats(args: dict, now: datetime.datetime) -> str:
-    """lessons planned / dropped out per subject. default: this school year so far."""
+    """lessons planned (and their share of all lessons), dropped out and hours that went on, grouped
+    per subject, week, weekday or hour of the day. default: per subject, this school year so far."""
     year_start = datetime.date(now.year if now.month >= 8 else now.year - 1, 8, 1)
     start = _date(args.get("start_date"), now) if args.get("start_date") else year_start
     end = _date(args.get("end_date"), now)
@@ -260,20 +261,48 @@ def _stats(args: dict, now: datetime.datetime) -> str:
             if r.get("valid") and not r.get("hidden") and r.get("type") == "lesson"]
     if not rows:
         return f"no lessons between {start} and {end}"
-    per: dict = {}
+    by = str(args.get("by") or "subject").strip().lower()
+    if by not in STATS_BY:
+        return f"unknown `by`, use one of: {', '.join(STATS_BY)}"
+    per: dict = {}  # sort key -> [label, planned, dropped out, hours that went on]
     for r in rows:
-        entry = per.setdefault(subjects_label(r), [0, 0, 0.0])
-        entry[0] += 1
-        if r.get("cancelled"):
-            entry[1] += 1
+        when = _local(r["start"])
+        if by == "week":
+            monday = when.date() - datetime.timedelta(days=when.weekday())
+            key, label = monday, f"week {monday.isocalendar().week} (from {monday:%d %b})".lower()
+        elif by == "weekday":
+            key, label = when.weekday(), f"{when:%A}".lower()
+        elif by == "hour":
+            key, label = r.get("startTimeSlot") or 0, f"hour {r.get('startTimeSlot') or '?'}"
         else:
-            entry[2] += (r["end"] - r["start"]) / 3600
-    total, dropped = len(rows), sum(e[1] for e in per.values())
-    lines = [f"{start} to {end}: {total} lessons planned, {dropped} dropped out ({dropped * 100 // total}%), "
-             f"{sum(e[2] for e in per.values()):.0f} hours of lessons that went on"]
-    for name, (planned, gone, hours) in sorted(per.items(), key=lambda kv: (-kv[1][1], kv[0])):
-        lines.append(f"- {name}: {planned} planned, {gone} dropped out ({gone * 100 // planned}%), {hours:.0f}h on")
+            key = label = subjects_label(r)
+        entry = per.setdefault(key, [label, 0, 0, 0.0])
+        entry[1] += 1
+        if r.get("cancelled"):
+            entry[2] += 1
+        else:
+            entry[3] += (r["end"] - r["start"]) / 3600
+    total, dropped = len(rows), sum(e[2] for e in per.values())
+    lines = [f"{start} to {end}, per {by}: {total} lessons planned, {dropped} dropped out "
+             f"({_pct(dropped, total)}), {_hours(sum(e[3] for e in per.values()))} of lessons that went on"]
+    # subjects: biggest first. weeks, weekdays and hours: in their own order
+    order = sorted(per, key=lambda k: (-per[k][1], k)) if by == "subject" else sorted(per)
+    for key in order:
+        label, planned, gone, hours = per[key]
+        lines.append(f"- {label}: {planned} planned ({_pct(planned, total)} of all lessons), "
+                     f"{gone} dropped out ({_pct(gone, planned)}), {_hours(hours)} on")
     return "\n".join(lines)
+
+
+STATS_BY = ("subject", "week", "weekday", "hour")
+
+
+def _pct(part: float, whole: float) -> str:
+    return f"{round(part * 100 / whole)}%" if whole else "0%"
+
+
+def _hours(hours: float) -> str:
+    return f"{hours:.1f}".rstrip("0").rstrip(".") + "h"
 
 
 def query(args: dict, now: datetime.datetime | None = None) -> str:
