@@ -16,11 +16,14 @@ logger = logging.getLogger("noodle")
 # the socket feed does: every monitor (name, type, url/host) plus its newest heartbeat (status + msg, e.g.
 # "Request failed with status code 502"). with auth disabled in kuma (settings > api keys says so) no login is
 # needed; with auth on, set KUMA_USERNAME + KUMA_PASSWORD (no 2fa). kuma status: 0 down, 1 up, 2 pending,
-# 3 maintenance; pending/maintenance change nothing. a monitor is "down" after UPTIME_FAILS polls in a row
-# (kuma retries on its own, so 1). state per monitor name in data/uptime_state.json:
-#   {"fails": n, "down_since": iso|None, "reason": str, "alerted": bool, "recovered_at": iso|None,
-#    "type": str, "target": str}
-# an outage nobody was told about (it ended while held back by quiet hours) is dropped silently.
+# 3 maintenance; pending/maintenance change nothing. a monitor only counts as "down" (and gets a dm) once
+# every poll has seen it down for UPTIME_DOWN_MINUTES in a row (default 5): a restart or a one-minute blip
+# is never announced, in either direction. state per monitor name in data/uptime_state.json:
+#   {"fails": n, "first_fail": iso|None, "down_since": iso|None, "reason": str, "alerted": bool,
+#    "recovered_at": iso|None, "type": str, "target": str}
+# first_fail = when the current run of failed polls began; down_since = the same moment, set only once the
+# run has lasted long enough. an outage nobody was told about (too short, or it ended while held back by
+# quiet hours) is dropped silently.
 TIMEOUT = 15
 SETTLE = 1.5  # seconds without a new heartbeat list before the snapshot counts as complete
 _WEB_TYPES = ("http", "keyword", "json-query", "real-browser")
@@ -101,6 +104,10 @@ def fetch(transports: list[str] | None = None) -> dict[str, dict]:
     return snapshot(monitors, beats)
 
 
+def _fresh() -> dict:
+    return {"fails": 0, "first_fail": None, "down_since": None, "reason": "", "alerted": False, "recovered_at": None}
+
+
 def _load() -> dict:
     try:
         return json.loads(config.UPTIME_STATE_PATH.read_text(encoding="utf-8"))
@@ -124,20 +131,25 @@ def update(state: dict, results: dict[str, str], now: datetime.datetime) -> dict
             if url in state:
                 out[url] = state[url]
             continue
-        st = dict(state.get(url) or {"fails": 0, "down_since": None, "reason": "", "alerted": False, "recovered_at": None})
+        st = dict(state.get(url) or _fresh())
         if reason:
             st["fails"] += 1
             st["reason"] = reason
             st["recovered_at"] = None  # flapping inside one outage stays one outage
-            if st["fails"] >= config.UPTIME_FAILS and not st["down_since"]:
-                st["down_since"] = now.isoformat()
+            if not st["down_since"]:
+                first = st.get("first_fail") or now.isoformat()
+                st["first_fail"] = first
+                waited = (now - datetime.datetime.fromisoformat(first)).total_seconds()
+                if waited >= config.UPTIME_DOWN_MINUTES * 60:
+                    st["down_since"] = first  # the real start, not the moment we decided to tell him
         else:
             st["fails"] = 0
+            st["first_fail"] = None
             if st["down_since"] and not st["recovered_at"]:
                 if st["alerted"]:
                     st["recovered_at"] = now.isoformat()
                 else:
-                    st = {"fails": 0, "down_since": None, "reason": "", "alerted": False, "recovered_at": None}
+                    st = _fresh()
         out[url] = st
     return out
 
@@ -170,7 +182,7 @@ def mark_sent(down: list[str], up: list[str]) -> None:
             state[u]["alerted"] = True
     for u in up:
         if u in state:
-            state[u] = {"fails": 0, "down_since": None, "reason": "", "alerted": False, "recovered_at": None}
+            state[u] = _fresh()
     _save(state)
 
 
@@ -217,7 +229,7 @@ def compose_message(down: list[str], up: list[str]) -> str:
     )
     # names are compared case-insensitively: the persona writes in lowercase ("beszel" for "Beszel")
     if text and all(u.lower() in text.lower() for u in down + up):
-        return text
+        return re.sub(r"\n\s*\n", "\n", text)  # one slack message: a blank line would start a new one
     return _plain_message(down, up)
 
 
@@ -233,7 +245,9 @@ def _plain_error(reason: str | None) -> str:
 
 
 def _plain_message(down: list[str], up: list[str]) -> str:
-    """lowercase, human fallback for when the model call fails (no raw fact dump)."""
+    """lowercase, human fallback for when the model call fails (no raw fact dump). one line per
+    monitor and no blank lines, so it stays ONE slack message (real incident: four sites coming back
+    arrived as four dms)."""
     state, parts = _load(), []
     for u in down:
         s = state.get(u, {})
@@ -246,4 +260,4 @@ def _plain_message(down: list[str], up: list[str]) -> str:
     still = [u for u, s in state.items() if s.get("down_since") and not s.get("recovered_at") and u not in down]
     if still:
         parts.append("still down: " + ", ".join(still))
-    return "\n\n".join(parts)
+    return "\n".join(parts)
