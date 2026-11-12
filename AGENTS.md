@@ -74,7 +74,7 @@ noodle/
     hackatime.py          # hackatime api calls (hackatime tool, project totals)
     hackatime_watch.py    # hour milestones per project + persisted "seen" state
     admin_watch.py        # dm when matthias's slack role goes up (member -> admin), see 7m
-    zermelo.py            # zermelo (school timetable) api call + the subject code -> real name map
+    zermelo.py            # zermelo (school timetable): api call, subject code -> real name map, the `timetable` tool
     zermelo_watch.py      # dm when a lesson of today or tomorrow drops out, see 7p
     release_watch.py      # release notes dm after a new image is deployed, see 7n
     proactive.py          # quiet hours + daily cap for unprompted pings
@@ -252,6 +252,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `github` | read-only: his repos, a repo + branches/releases/ci runs, readme, file tree, read any file, commits + one commit, issues/prs + one with comments and changed files, stars + starred, issue/repo/code search, profiles, notifications, commits today | matthias only |
 | `hackatime` | his coding time, whole history: summary/today/projects/project (anyone), days/sessions (matthias only: they show when he codes) | anyone / matthias only |
 | `links` | create/list/get/update/delete his short links + click stats (link shortener api) | matthias only |
+| `timetable` | his school timetable, live from zermelo: a day or week in full, now/next, changes, tests coming up, dropout stats per subject | matthias only |
 | `get_journal` | his `@matthias-day` recaps for a date range (plain date filter, not vector search) | matthias only |
 | `summarize_thread` | reads a whole thread (link or current thread) so the model can tl;dr it; same auto-join rule as `fetch_slack_message` | anyone |
 | `freedom` | the full freedom.to toolbox: devices, blocklists, sessions, schedules, history (13 actions); only ever touches matthias's own devices | matthias only |
@@ -261,7 +262,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `list_scheduled` | list scheduled reminders and freedom sessions | matthias only |
 | `cancel_scheduled` | cancel one reminder or freedom session by id | matthias only |
 
-**no credential, no tool.** nine of these need a credential, and without it they are
+**no credential, no tool.** ten of these need a credential, and without it they are
 not just broken but absent: `bot/features.py` decides from the env alone, `tools.available_tools()`
 drops them from the list the model is sent, `prompt.load_prompt()` removes their sections of the
 system prompt (wrapped in `<!-- if:NAME -->...<!-- endif:NAME -->` in `prompts/system_prompt.md`)
@@ -271,6 +272,7 @@ jobs that need them don't start. so the model never offers or promises something
 - `LASTFM_API_KEY` + `LASTFM_USER` -> `now_playing`, `music_stats`
 - `FREEDOM_API_KEY` -> `freedom`, `start_freedom_session`, `schedule_freedom_session`
 - `LINKS_API_BASE` + `LINKS_API_KEY` (both) -> `links`
+- `ZERMELO_SCHOOL` + `ZERMELO_TOKEN` (both) -> `timetable` (and the dropout watcher)
 - `HACKATIME_USERNAME` -> `hackatime` (and the milestone watcher); `HACKATIME_API_KEY` only if his stats aren't public
 - `SANDBOX_TOKEN` (16+ chars) -> `run_code`
 everything else (search, flaron, memory, weather, journal, threads, reminders, games, web search)
@@ -1336,7 +1338,7 @@ from `_run_code` if that should change). it needs no credential, so it is always
 ### 7p. school timetable watcher (zermelo)
 - `bot/zermelo.py` + `bot/zermelo_watch.py` + `scheduler._check_zermelo()` (every `ZERMELO_POLL_SECONDS`,
   default 300, only when `ZERMELO_SCHOOL` and `ZERMELO_TOKEN` are both set): dms matthias when a lesson, exam
-  or activity of **today or tomorrow** drops out. no tool for the model, only the watcher.
+  or activity of **today or tomorrow** drops out.
 - **the school is private, like his location.** `ZERMELO_SCHOOL` (the portal name, the part before
   `.zportal.nl`) is only ever in `.env`: never in code, tests, docs or logs, and the prompt tells the model not
   to name it. the token is his own student token (all extra permissions 0, read-only use), made once by
@@ -1356,10 +1358,19 @@ from `_run_code` if that should change). it needs no credential, so it is always
   unprompted ping: goes through `proactive.can_send()`/`record_sent()`; while held nothing is marked, so it
   goes out on the next allowed poll. marked reported right before the dm (a crash drops one, never repeats).
   facts are saved to memory like the other watchers. a failed api call raises and changes nothing.
-- **subject names.** zermelo only has the school's abbreviations; `zermelo.SUBJECTS` maps the ones in his
-  timetable to real names (`ak` geography, `sk` chemistry, `oo` O&O...), `subject_name()` is case-insensitive
-  and keeps an unknown code as it is. not mapped because their meaning isn't known: `LU`, and the `tts` prefix
-  (`ttswi` becomes "maths (tts)").
+- **subject names, in dutch (his choice).** zermelo only has the school's abbreviations; `zermelo.SUBJECTS`
+  maps the ones in his timetable to real names (`ak` aardrijkskunde, `sk` scheikunde, `bo` bewegingsonderwijs,
+  `LU` leesuur...), `subject_name()` is case-insensitive, turns a `tts` prefix into a test (`ttswi` = "toets
+  wiskunde") and keeps an unknown code as it is. `mt` = "mentoruur" is a guess.
+- **the `timetable` tool** (`zermelo.query()`, matthias only, checked in `tools._timetable()` against the real
+  sender id; not dm-only). actions: `day` (one day in full: hour, times, subject, room, teacher code, what
+  dropped out/changed with zermelo's own sentence, start/end of the day, free hours in between; `date` =
+  YYYY-MM-DD / today / tomorrow), `week` (monday-friday of the week of `date`), `next` (what is on now, what
+  is next and in how long, when school is out today; looks 10 days ahead), `changes` (dropped out, moved or
+  another room in the next `days`, default 7, max 60), `exams` (type `exam` plus `tts` activities, next `days`,
+  default 60) and `stats` (lessons planned / dropped out / hours per subject; default this school year so far,
+  from 1 august). bad input and a dead api come back as a plain sentence. teacher codes are the school's
+  abbreviations, zermelo gives a student token no names.
 - not yet seen running in the deployed container; the logic was run against his real timetable without slack.
 
 ### 8. channel join/leave analytics

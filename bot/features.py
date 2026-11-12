@@ -18,6 +18,7 @@ TOOL_FEATURE = {
     "start_freedom_session": "freedom",
     "schedule_freedom_session": "freedom",
     "hackatime": "hackatime",
+    "timetable": "zermelo",
 }
 
 
