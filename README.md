@@ -274,7 +274,7 @@ logs go to the console either way; the code also tries to write
 | `WATCHED_CHANNEL_ID` | channel to watch for joins/leaves; empty disables the feature |
 | `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
 | `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |
-| `LOG_LEVEL` | optional, default `INFO` |
+| `LOG_LEVEL` | optional, default `INFO`; `DEBUG` also logs full python tracebacks (otherwise a failure is one line) |
 
 every scheduled/dated thing noodle does runs in Europe/Amsterdam time,
 hardcoded (not an env var).

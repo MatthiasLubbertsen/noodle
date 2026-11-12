@@ -550,6 +550,19 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   history. different conv_keys still run fully in parallel.
 
 ### 4f. logging
+- **one line per failure.** `log._CompactFormatter` (on every handler) replaces the 20-30 line python
+  traceback that `logger.exception()` / `exc_info=True` used to append with
+  `message  [ExceptionType: text] at file.py:123 in func` (the deepest frame in noodle's own code if
+  there is one, else the deepest frame; the error text is not repeated if the message already has it).
+  `LOG_LEVEL=DEBUG` brings full tracebacks back. real log before: a dropped rtm websocket or one 502
+  from the embeddings endpoint each took a screen.
+- **slack socket reconnects are two lines at most, never hidden.** slack closes the socket mode
+  connection every few hours and bolt reconnects by itself, logging 6-8 INFO lines, plus the same
+  `Failed to check the state of sock ... Broken pipe` ERROR every 10 seconds while the old socket is
+  dead. `log._SlackSocketFilter` turns that into `slack socket lost (BrokenPipeError: Broken pipe),
+  reconnecting` (once per dead session, WARNING) and `slack socket connected (session 5e14f54d)`.
+  every other slack_bolt line passes untouched. the filter sits on both handlers, so its verdict is
+  stored on the record (`_noodle_keep`) to keep console and file identical.
 - `bot/log.py`'s `setup_logging()` attaches a `_QuietLibraryFilter` to every
   log handler, dropping any sub-`WARNING` record whose logger name starts
   with `httpx`, `httpcore`, or `openai` - this is what actually silences
@@ -1415,7 +1428,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `KUMA_USERNAME` / `KUMA_PASSWORD` | only if kuma has authentication on (his has it off): a login without 2fa |
 | `UPTIME_POLL_SECONDS` / `UPTIME_DOWN_MINUTES` | how often to read kuma (60), minutes a monitor must stay down before the dm (5) |
 | `ADMIN_POLL_SECONDS` | seconds between checks of matthias's slack role (default 300), see 7m |
-| `LOG_LEVEL` | optional, default `INFO` |
+| `LOG_LEVEL` | optional, default `INFO`; `DEBUG` also logs full python tracebacks (otherwise a failure is one line) |
 
 everything time-based (both daily dms, "today" in the stats/news checks)
 runs in `Europe/Amsterdam` — hardcoded in `bot/tz.py`, not an env var. only
