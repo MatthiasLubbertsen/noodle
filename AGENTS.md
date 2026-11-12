@@ -84,6 +84,7 @@ noodle/
     features.py           # which optional features are on: decided only by whether their credentials are set
     prompt.py             # loads the system prompt minus the sections of features that are off
     weekly.py             # weekly journal + music recaps
+    socket_guard.py       # drops the half-received message slack's socket client passes on at a reconnect, see 4f
     log.py                # logging setup
     netlog.py             # concise "called hcai .../called tool ..." log lines
   tests/                  # unittest suite (`python -m unittest discover -s tests -t .`, needs requirements.txt + `websockets`)
@@ -563,6 +564,17 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   reconnecting` (once per dead session, WARNING) and `slack socket connected (session 5e14f54d)`.
   every other slack_bolt line passes untouched. the filter sits on both handlers, so its verdict is
   stored on the record (`_noodle_keep`) to keep console and file identical.
+- **the cut-off message at every reconnect is dropped, not an error.** slack_sdk's built-in socket client
+  reads 1024 bytes at a time, and when the old connection is closed while a longer message is only partly in,
+  it passes the partial text on; bolt then logged `Failed to process a message: Unterminated string starting
+  at: line 1 column 1012` (65 times in a month, always in the same millisecond as a reconnect, always cut just
+  under 1024 characters). `bot/socket_guard.py`'s `drop_half_messages()` (applied to the handler's client in
+  `app.start_bot()`) wraps the client's `enqueue_message` and drops text that starts with `{` but isn't
+  complete json, logging `slack socket: dropped a half-received message (1020 chars) from a closing
+  connection`. the rest of that message is gone with the connection and slack got no acknowledgement for it.
+  **bolt's `websocket-client` adapter was tried and rejected:** against a local fake slack it had no json
+  error, but it closes the old connection before the new one is up, reconnects twice per refresh and failed to
+  acknowledge an event during the swap (slack may re-send it = a possible double reply).
 - `bot/log.py`'s `setup_logging()` attaches a `_QuietLibraryFilter` to every
   log handler, dropping any sub-`WARNING` record whose logger name starts
   with `httpx`, `httpcore`, or `openai` - this is what actually silences
