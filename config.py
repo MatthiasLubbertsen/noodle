@@ -124,13 +124,13 @@ GITHUB_POLL_SECONDS = int(os.getenv("GITHUB_POLL_SECONDS", "300"))
 # reads matthias's uptime kuma over its socket.io feed, nothing is probed by noodle itself. KUMA_URL = a base url
 # noodle can reach kuma on directly (an internal address like http://uptime-kuma:3001 is best: a login proxy in
 # front of the public url would block noodle too). set = on. kuma with auth disabled needs nothing else; with auth
-# on, KUMA_USERNAME + KUMA_PASSWORD (no 2fa). kuma already retries before it calls a monitor down, so
-# UPTIME_FAILS defaults to 1.
+# on, KUMA_USERNAME + KUMA_PASSWORD (no 2fa). a monitor is only announced once it has been
+# down for UPTIME_DOWN_MINUTES in a row (0 = right away), so restarts and short blips send nothing.
 KUMA_URL = os.getenv("KUMA_URL", "").strip().rstrip("/")
 KUMA_USERNAME = os.getenv("KUMA_USERNAME", "").strip()
 KUMA_PASSWORD = os.getenv("KUMA_PASSWORD", "")
 UPTIME_POLL_SECONDS = max(30, int(os.getenv("UPTIME_POLL_SECONDS", "60")))
-UPTIME_FAILS = max(1, int(os.getenv("UPTIME_FAILS", "1")))
+UPTIME_DOWN_MINUTES = max(0.0, float(os.getenv("UPTIME_DOWN_MINUTES", "5")))
 
 # --- hackatime (hack club's wakatime: coding time) ---
 # his hackatime username (or slack id). set = the public `hackatime` tool + the hour

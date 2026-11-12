@@ -1287,9 +1287,13 @@ from `_run_code` if that should change). it needs no credential, so it is always
 - **`KUMA_URL` must be an address noodle can reach kuma on directly**, ideally an internal one
   (`http://uptime-kuma:3001`). with auth off the public `status.matthiaz.dev` sat behind something that answers
   401 (a login proxy), and that would block noodle too.
-- a monitor is down after `UPTIME_FAILS` polls in a row (default 1: kuma retries before it says down). one
+- a monitor only counts as down once every poll has seen it down for `UPTIME_DOWN_MINUTES` in a row (default
+  5, `0` = right away); "since" is still when it actually went down (`first_fail`). anything shorter is never
+  mentioned, neither the outage nor the recovery (real incident: a one-minute 502 on four sites during a
+  restart sent five dms). one
   dm per poll covers everything that went down or came back (a dead server is one message, not twenty),
-  persona-written. the facts say exactly what is down (name, type + url/host:port, the error, since when),
+  persona-written, and always ONE slack message: blank lines in the model's text are collapsed and the plain
+  fallback puts one monitor per line (it used to be a paragraph each, so each became its own dm). the facts say exactly what is down (name, type + url/host:port, the error, since when),
   what came back (and how long it was down), and what is STILL down from earlier, so the dm can always answer
   "what is down right now".
 - state per monitor name in `data/uptime_state.json` (`alerted`, `recovered_at`, `type`, `target`): a dm held
@@ -1409,7 +1413,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |
 | `KUMA_URL` | his uptime kuma, a base url noodle can reach directly (internal address best); set = the uptime watcher is on, see 7o |
 | `KUMA_USERNAME` / `KUMA_PASSWORD` | only if kuma has authentication on (his has it off): a login without 2fa |
-| `UPTIME_POLL_SECONDS` / `UPTIME_FAILS` | how often to read kuma (60), polls in a row before "down" (1, kuma retries itself) |
+| `UPTIME_POLL_SECONDS` / `UPTIME_DOWN_MINUTES` | how often to read kuma (60), minutes a monitor must stay down before the dm (5) |
 | `ADMIN_POLL_SECONDS` | seconds between checks of matthias's slack role (default 300), see 7m |
 | `LOG_LEVEL` | optional, default `INFO` |
 

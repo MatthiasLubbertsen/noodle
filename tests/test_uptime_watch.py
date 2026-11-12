@@ -100,41 +100,60 @@ class FetchTests(unittest.TestCase):
 
 class StateTests(unittest.TestCase):
     def setUp(self):
-        p = mock.patch.object(config, "UPTIME_FAILS", 2)
+        p = mock.patch.object(config, "UPTIME_DOWN_MINUTES", 5)
         p.start()
         self.addCleanup(p.stop)
 
-    def test_needs_n_failures_in_a_row(self):
-        s = step({}, "down", 0)
-        self.assertEqual(u.pending(s), ([], []))
-        s = step(s, "down", 2)
-        self.assertEqual(u.pending(s), ([NAME], []))
+    def _down_for_5(self):
+        s = {}
+        for minute in range(6):
+            s = step(s, "down", minute)
+        return s
 
-    def test_a_blip_never_alerts(self):
-        s = step(step(step({}, "down", 0), "", 2), "down", 4)
+    def test_needs_five_minutes_down_in_a_row(self):
+        s = {}
+        for minute in range(5):
+            s = step(s, "down", minute)
+            self.assertEqual(u.pending(s), ([], []), minute)
+        s = step(s, "down", 5)
+        self.assertEqual(u.pending(s), ([NAME], []))
+        # "since" is when it actually went down, not when the dm became due
+        self.assertEqual(s[NAME]["down_since"], T0.isoformat())
+
+    def test_a_short_outage_is_never_announced_either_way(self):
+        s = step(step(step({}, "down", 0), "down", 1), "", 2)
         self.assertEqual(u.pending(s), ([], []))
+        # and the clock starts over: 4 more minutes down is still not 5 in a row
+        for minute in range(3, 8):
+            s = step(s, "down", minute)
+        self.assertEqual(u.pending(s), ([], []))
+        self.assertEqual(u.pending(step(s, "down", 8)), ([NAME], []))
 
     def test_recovery_only_announced_if_the_outage_was(self):
-        s = step(step({}, "down", 0), "down", 2)
-        s = step(s, "", 10)  # up again before anyone was told: silent
+        s = step(self._down_for_5(), "", 10)  # up again before anyone was told: silent
         self.assertEqual(u.pending(s), ([], []))
-        s = step(step({}, "down", 0), "down", 2)
+        s = self._down_for_5()
         s[NAME]["alerted"] = True
         s = step(s, "", 30)
         self.assertEqual(u.pending(s), ([], [NAME]))
 
     def test_flap_inside_an_outage_stays_one_outage(self):
-        s = step(step({}, "down", 0), "down", 2)
+        s = self._down_for_5()
         s[NAME]["alerted"] = True
-        s = step(s, "", 4)
-        s = step(s, "down", 6)
+        s = step(s, "", 7)
+        s = step(s, "down", 8)
         self.assertEqual(u.pending(s), ([], []))
-        self.assertEqual(s[NAME]["down_since"], (T0 + datetime.timedelta(minutes=2)).isoformat())
+        self.assertEqual(s[NAME]["down_since"], T0.isoformat())
 
     def test_pending_or_maintenance_changes_nothing(self):
-        s = step(step({}, "down", 0), "down", 2)
-        s = u.update(s, {NAME: None}, T0 + datetime.timedelta(minutes=4))
+        s = u.update(self._down_for_5(), {NAME: None}, T0 + datetime.timedelta(minutes=7))
         self.assertEqual(u.pending(s), ([NAME], []))
+
+    def test_state_saved_by_an_older_version_still_works(self):
+        old = {NAME: {"fails": 3, "down_since": T0.isoformat(), "reason": "502", "alerted": True, "recovered_at": None}}
+        self.assertEqual(u.pending(step(old, "", 9)), ([], [NAME]))
+        old = {NAME: {"fails": 0, "down_since": None, "reason": "", "alerted": False, "recovered_at": None}}
+        self.assertEqual(u.pending(step(old, "down", 0)), ([], []))
 
 
 def _mon(status, msg="", type="http", target="https://blog.example.com"):
@@ -146,7 +165,7 @@ class PollTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         p = mock.patch.multiple(config, DATA_DIR=Path(tmp.name), UPTIME_STATE_PATH=Path(tmp.name) / "u.json",
-                                UPTIME_FAILS=1, KUMA_URL="http://k")
+                                UPTIME_DOWN_MINUTES=0, KUMA_URL="http://k")
         p.start()
         self.addCleanup(p.stop)
 
@@ -193,6 +212,17 @@ class PollTests(unittest.TestCase):
              mock.patch("bot.uptime_watch.remember_facts"):
             msg = u.compose_message(d, up)
         self.assertIn("blog (http, https://blog.example.com) went down", msg)  # the model dropped the monitor name -> plain facts
+
+    def test_several_monitors_are_one_slack_message(self):
+        from bot.chunk import chunk_response
+        both = {"blog": _mon(0, "502"), "db": _mon(0, "refused", "port", "db.example.com:5432")}
+        with mock.patch("bot.uptime_watch.fetch", return_value=both):
+            d, up = u.poll()
+        with mock.patch("bot.uptime_watch.remember_facts"):
+            with mock.patch("bot.uptime_watch.complete", return_value=None):  # model call failed
+                self.assertEqual(len(chunk_response(u.compose_message(d, up))), 1)
+            with mock.patch("bot.uptime_watch.complete", return_value="blog is down.\n\ndb is down too."):
+                self.assertEqual(len(chunk_response(u.compose_message(d, up))), 1)
 
 
 if __name__ == "__main__":
