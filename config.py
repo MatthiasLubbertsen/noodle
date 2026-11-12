@@ -140,6 +140,14 @@ HACKATIME_USERNAME = os.getenv("HACKATIME_USERNAME", "").strip()
 HACKATIME_API_KEY = os.getenv("HACKATIME_API_KEY", "")
 HACKATIME_POLL_SECONDS = int(os.getenv("HACKATIME_POLL_SECONDS", "600"))
 
+# --- zermelo (school timetable, bot/zermelo_watch.py) ---
+# dms him when a lesson of today or tomorrow drops out. ZERMELO_SCHOOL = the portal name (the part
+# before .zportal.nl; PRIVATE, only ever set here), ZERMELO_TOKEN = his own access token (exchange
+# a "koppel app" code once at /api/v3/oauth/token). both set = on.
+ZERMELO_SCHOOL = os.getenv("ZERMELO_SCHOOL", "").strip().lower()
+ZERMELO_TOKEN = os.getenv("ZERMELO_TOKEN", "").strip()
+ZERMELO_POLL_SECONDS = max(60, int(os.getenv("ZERMELO_POLL_SECONDS", "300")))
+
 # repo the release notes read their changes from (bot/release_watch.py); the commit this image
 # was built from comes from the GIT_SHA build arg, there is no env var for it
 GITHUB_REPO = os.getenv("GITHUB_REPO", "MatthiasLubbertsen/noodle")
@@ -221,6 +229,7 @@ GITHUB_SEEN_PATH = DATA_DIR / "github_seen.json"
 UPTIME_STATE_PATH = DATA_DIR / "uptime_state.json"
 HACKATIME_SEEN_PATH = DATA_DIR / "hackatime_seen.json"
 ADMIN_SEEN_PATH = DATA_DIR / "admin_seen.json"
+ZERMELO_SEEN_PATH = DATA_DIR / "zermelo_seen.json"
 RELEASE_SEEN_PATH = DATA_DIR / "release_seen.json"
 PROACTIVE_STATE_PATH = DATA_DIR / "proactive_state.json"
 MORNING_STATE_PATH = DATA_DIR / "morning_sent.json"

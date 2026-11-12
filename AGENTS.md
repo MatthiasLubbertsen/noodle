@@ -74,6 +74,8 @@ noodle/
     hackatime.py          # hackatime api calls (hackatime tool, project totals)
     hackatime_watch.py    # hour milestones per project + persisted "seen" state
     admin_watch.py        # dm when matthias's slack role goes up (member -> admin), see 7m
+    zermelo.py            # zermelo (school timetable) api call + the subject code -> real name map
+    zermelo_watch.py      # dm when a lesson of today or tomorrow drops out, see 7p
     release_watch.py      # release notes dm after a new image is deployed, see 7n
     proactive.py          # quiet hours + daily cap for unprompted pings
     oneshot.py            # one-off persona completion for scheduled messages
@@ -1331,6 +1333,35 @@ from `_run_code` if that should change). it needs no credential, so it is always
 - **github ci failures are NOT a separate watcher:** the notification watcher (7c) already dms them, via
   github's own `ci_activity` notifications (a failed workflow run shows up like any other notification).
 
+### 7p. school timetable watcher (zermelo)
+- `bot/zermelo.py` + `bot/zermelo_watch.py` + `scheduler._check_zermelo()` (every `ZERMELO_POLL_SECONDS`,
+  default 300, only when `ZERMELO_SCHOOL` and `ZERMELO_TOKEN` are both set): dms matthias when a lesson, exam
+  or activity of **today or tomorrow** drops out. no tool for the model, only the watcher.
+- **the school is private, like his location.** `ZERMELO_SCHOOL` (the portal name, the part before
+  `.zportal.nl`) is only ever in `.env`: never in code, tests, docs or logs, and the prompt tells the model not
+  to name it. the token is his own student token (all extra permissions 0, read-only use), made once by
+  exchanging a "koppel app" code at `POST /api/v3/oauth/token`; it is valid for about ten years.
+- **how a dropout looks in zermelo.** `GET /api/v3/appointments?user=~me&start&end&valid=true`: every change
+  makes a new version of a lesson and the old one gets `valid=false`; a cancelled lesson is a CURRENT row
+  (`valid=true`) with `cancelled=true` and `changeDescription` "Les vervalt" / "Activiteit vervalt".
+  `appointmentInstance` is the same across versions (`id` is not), so the reported key is
+  `appointmentInstance:start`. only cancellations are reported: a moved lesson or another room is not.
+- **no first-run baseline, on purpose.** each poll reports every cancelled row of today + tomorrow not reported
+  yet, so a lesson cancelled days ago is told the moment its day becomes "tomorrow" (at midnight, which quiet
+  hours hold until the morning). lessons that are already over are skipped. state in `data/zermelo_seen.json`
+  (key -> start), past days pruned.
+- one dm per poll for everything new, persona-written, always ONE slack message (blank lines collapsed; plain
+  one-line-per-lesson fallback if the model call fails or leaves a subject out). the facts list what dropped
+  out per day AND what is still on that day, so the dm can say "you start at 9:05 now" without guessing.
+  unprompted ping: goes through `proactive.can_send()`/`record_sent()`; while held nothing is marked, so it
+  goes out on the next allowed poll. marked reported right before the dm (a crash drops one, never repeats).
+  facts are saved to memory like the other watchers. a failed api call raises and changes nothing.
+- **subject names.** zermelo only has the school's abbreviations; `zermelo.SUBJECTS` maps the ones in his
+  timetable to real names (`ak` geography, `sk` chemistry, `oo` O&O...), `subject_name()` is case-insensitive
+  and keeps an unknown code as it is. not mapped because their meaning isn't known: `LU`, and the `tts` prefix
+  (`ttswi` becomes "maths (tts)").
+- not yet seen running in the deployed container; the logic was run against his real timetable without slack.
+
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
   (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore
@@ -1440,6 +1471,8 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `KUMA_USERNAME` / `KUMA_PASSWORD` | only if kuma has authentication on (his has it off): a login without 2fa |
 | `UPTIME_POLL_SECONDS` / `UPTIME_DOWN_MINUTES` | how often to read kuma (60), minutes a monitor must stay down before the dm (5) |
 | `ADMIN_POLL_SECONDS` | seconds between checks of matthias's slack role (default 300), see 7m |
+| `ZERMELO_SCHOOL` / `ZERMELO_TOKEN` | PRIVATE, no default: his school's zermelo portal name (the part before `.zportal.nl`) + his access token; both set = the timetable watcher is on, see 7p |
+| `ZERMELO_POLL_SECONDS` | seconds between timetable checks (default 300, min 60) |
 | `LOG_LEVEL` | optional, default `INFO`; `DEBUG` also logs full python tracebacks (otherwise a failure is one line) |
 
 everything time-based (both daily dms, "today" in the stats/news checks)

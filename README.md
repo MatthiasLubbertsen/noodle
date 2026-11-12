@@ -167,6 +167,8 @@ noodle/
     uptime_watch.py    # reads your uptime kuma, dms when a monitor goes down or comes back
     hackatime_watch.py # hour milestones per project + persisted "seen" state
     admin_watch.py     # dm when matthias's slack role goes up (member -> admin)
+    zermelo.py         # zermelo (school timetable) api call + subject code -> real name map
+    zermelo_watch.py   # dm when a lesson of today or tomorrow drops out
     release_watch.py   # dm what changed after a new image is deployed (once per build)
     proactive.py       # quiet hours + daily cap for unprompted pings
     oneshot.py         # one-off persona completion + daily-facts memory rows
@@ -265,6 +267,7 @@ logs go to the console either way; the code also tries to write
 | `WEATHER_LOCATIONS` / `WEATHER_DEFAULT_LOCATION` | private, set in `.env` only: morning dm places (comma separated) / default place for `get_weather` |
 | `LASTFM_API_KEY` / `LASTFM_USER` | optional, enables `now_playing` |
 | `KUMA_URL` / `KUMA_USERNAME` / `KUMA_PASSWORD` | optional: your uptime kuma base url (an address noodle can reach directly, e.g. `http://uptime-kuma:3001`). noodle dms what went down (with kuma's real error message), what came back and what is still down, but only once something has been down for `UPTIME_DOWN_MINUTES` (default 5), so restarts and short blips stay quiet. username/password only if kuma has authentication on. unset = off |
+| `ZERMELO_SCHOOL` / `ZERMELO_TOKEN` | optional: your school's zermelo portal name (the part before `.zportal.nl`) and an access token. noodle dms you when a lesson of today or tomorrow drops out, with real subject names. either unset = off |
 | `HACKATIME_USERNAME` / `HACKATIME_API_KEY` | optional: enables the public `hackatime` tool and hour milestones (every hour on a project in `LOGS_CHANNEL_ID`, every 5 in `MATTHIAS_DAY_CHANNEL_ID`); the key is only needed if your stats aren't public |
 | `GITHUB_TOKEN` / `GITHUB_USER` / `GITHUB_POLL_SECONDS` | optional classic token (`repo`, `notifications`): enables the `github` tool and the notification watcher |
 | `LINKS_API_BASE` / `LINKS_API_KEY` | link shortener api base url (e.g. `https://go.example.com/api/v1`, no default) + its `lnk_...` key; both optional, but the `links` tool is only offered when both are set |
