@@ -16,6 +16,7 @@ from bot.memory import dm_conv_key, trim_memory
 from bot.scheduler import start_daily_scheduler
 from bot.reminders import init_table as init_reminders_table
 from bot.rtm import start as start_rtm
+from bot.socket_guard import drop_half_messages
 from bot.watch import handle_member_joined_channel, handle_member_left_channel
 
 logger = logging.getLogger("noodle")
@@ -71,4 +72,6 @@ def build_app() -> App:
 def start_bot() -> None:
     application = build_app()
     logger.info("starting noodle in socket mode...")
-    SocketModeHandler(application, config.SLACK_APP_TOKEN).start()
+    handler = SocketModeHandler(application, config.SLACK_APP_TOKEN)
+    drop_half_messages(handler.client)
+    handler.start()
