@@ -58,6 +58,7 @@ noodle/
     usergroups.py         # add/remove a user from a slack usergroup
     watch.py              # channel join/leave analytics + automations
     matthias_day.py       # clean + persist @matthias-day recap pings into memory
+    fifty_days.py         # links each @matthias-day recap into his 50 days goal thread, see 6c
     reminders.py          # scheduled reminders: sqlite store + recurrence math
     freedom.py            # calls matthias's self-hosted freedom.to focus-session api
     freedom_tool.py       # the full `freedom` tool (devices, blocklists, sessions, schedules)
@@ -775,6 +776,17 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   any failure leaves no trace, and simply re-running the backfill fills
   in whatever was missed.
 
+### 6c. 50 days crosspost (`bot/fifty_days.py`)
+- hack club's "50 days" challenge wants a daily update as a reply to your goal message, also
+  sent to the channel, first line exactly `:50days: Day X/50`. matthias already writes a daily
+  recap, so with `FIFTY_DAYS_THREAD` set (the link to his goal message, or `CHANNEL:TS`) every
+  `@matthias-day` ping makes noodle post that line plus the recap's permalink there
+  (`reply_broadcast`); slack unfurls the link into an embed. the organizer okayed a bot doing this.
+- posted by noodle, not matthias, and deliberately NOT model-written (the first line has to be
+  exact). only a recap with bullets counts, so a re-ping never posts a second one; day number =
+  50 minus the days until dec 31 (nov 12 = day 1), nothing outside 1-50. the channel is joined
+  at startup like the other configured ones. unset = off.
+
 ### 7. morning wakeup dm
 - with the web session configured (see 8b), the morning dm goes out when `USER_ID` first comes
   online each day instead of at a fixed time (`bot/wakeup.py`, details in 8b). without it, a
@@ -1419,6 +1431,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `DAILY_MORNING_DM` | `HH:MM`, when the morning wakeup dm goes out; only used without `SLACK_WEB_TOKEN`/`SLACK_WEB_COOKIE` (with them it goes out when matthias first comes online) |
 | `MATTHIAS_DAY_GROUP_ID` | usergroup id for `@matthias-day` (defaults to the real id, `S0AK8LYJ8FR`) |
 | `MATTHIAS_DAY_CHANNEL_ID` | channel the daily recap pings are posted in (defaults to `#matthias`, `C0A9NJT2BCJ`) |
+| `FIFTY_DAYS_THREAD` | link to matthias's goal message in the 50 days channel; set = each recap is linked into that thread, see 6c |
 | `FREEDOM_API_BASE` | base url of matthias's self-hosted freedom api (defaults to `https://freedom.matthiaz.dev`) |
 | `FREEDOM_API_KEY` | bearer key for that api; optional - unset just disables `start_freedom_session` |
 | `FREEDOM_DEVICE_NAMES` | comma separated device names (as shown in freedom's dashboard) allowed to be blocked - the account is shared, so this is never "all devices" (defaults to `Matthias Windows,mopa5m`) |
