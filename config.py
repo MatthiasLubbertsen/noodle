@@ -160,6 +160,10 @@ MATTHIAS_DAY_GROUP_ID = os.getenv("MATTHIAS_DAY_GROUP_ID", "S0AK8LYJ8FR")
 # bot/matthias_day.py (the live listener) and scripts/backfill_matthias_day.py.
 MATTHIAS_DAY_CHANNEL_ID = os.getenv("MATTHIAS_DAY_CHANNEL_ID", "C0A9NJT2BCJ")
 
+# hack club's "50 days" challenge: link to matthias's goal message there. when
+# set, every @matthias-day recap is linked into that thread (bot/fifty_days.py).
+FIFTY_DAYS_THREAD = os.getenv("FIFTY_DAYS_THREAD", "")
+
 # --- freedom.to focus sessions ---
 # matthias's self-hosted link shortener - see bot/links.py.
 # optional: the tool is only offered when BOTH the base url and the key are set

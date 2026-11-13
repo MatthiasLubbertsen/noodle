@@ -271,6 +271,7 @@ logs go to the console either way; the code also tries to write
 | `FREEDOM_API_BASE` / `FREEDOM_API_KEY` / `FREEDOM_DEVICE_NAMES` | matthias's self-hosted freedom api; key optional (unset disables the freedom tools); device names are the only devices ever blocked |
 | `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
 | `MATTHIAS_DAY_CHANNEL_ID` | channel the daily recap pings are posted in |
+| `FIFTY_DAYS_THREAD` | optional: link to your goal message in Hack Club's 50 days channel; each daily recap is then linked into that thread |
 | `WATCHED_CHANNEL_ID` | channel to watch for joins/leaves; empty disables the feature |
 | `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
 | `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |
