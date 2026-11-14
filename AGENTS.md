@@ -1317,10 +1317,15 @@ from `_run_code` if that should change). it needs no credential, so it is always
   mentioned, neither the outage nor the recovery (real incident: a one-minute 502 on four sites during a
   restart sent five dms). one
   dm per poll covers everything that went down or came back (a dead server is one message, not twenty),
-  persona-written, and always ONE slack message: blank lines in the model's text are collapsed and the plain
-  fallback puts one monitor per line (it used to be a paragraph each, so each became its own dm). the facts say exactly what is down (name, type + url/host:port, the error, since when),
-  what came back (and how long it was down), and what is STILL down from earlier, so the dm can always answer
-  "what is down right now".
+  persona-written, and always ONE slack message, SHORT: the prompt asks for one or two sentences (no urls, no
+  monitor types, no guessing causes, `max_tokens=120`), blank lines in the model's text are collapsed, and the
+  facts/plain fallback group monitors that share a cause or duration into one line ("a, b down since 13:01
+  (timeout)"). the facts also carry the names still down, so the dm can always answer "what is down right now".
+  **one outage = one dm:** when any monitor is due to be announced, `update()` also marks every monitor that is
+  failing right now as down (its `down_since` stays the real start of its failing run). real incident: four sites
+  crossed the 5 minutes, two more crossed one poll later and got their own dm, then the recovery was a third
+  wall of text (all urls and errors repeated each time). each poll with something to announce logs
+  `uptime poll: kuma says down=[...], back=[...]`, so "why did it say that" can be answered from the logs.
 - state per monitor name in `data/uptime_state.json` (`alerted`, `recovered_at`, `type`, `target`): a dm held
   back by quiet hours or the daily cap stays pending and goes out later; an outage that ended before anyone was
   told is dropped silently; a flap inside an outage stays one outage. a kuma that can't be reached (or logs
