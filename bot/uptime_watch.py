@@ -151,6 +151,13 @@ def update(state: dict, results: dict[str, str], now: datetime.datetime) -> dict
                 else:
                     st = _fresh()
         out[url] = st
+    # one outage = one dm: when something is due to be announced, everything that is failing right now
+    # goes in the same message (real incident: two sites crossed the 5 minutes one poll after four others
+    # and got their own dm). their "since" stays the real start of their failing run.
+    if any(s.get("down_since") and not s.get("alerted") and not s.get("recovered_at") for s in out.values()):
+        for s in out.values():
+            if s.get("fails") and s.get("first_fail") and not s.get("down_since"):
+                s["down_since"] = s["first_fail"]
     return out
 
 
@@ -172,7 +179,11 @@ def poll() -> tuple[list[str], list[str]]:
         if name in state:
             state[name]["type"], state[name]["target"] = m["type"], m["target"]
     _save(state)
-    return pending(state)
+    down, up = pending(state)
+    if down or up:  # so the logs can say what noodle saw when a dm looks wrong
+        logger.info("uptime poll: kuma says down=%s, back=%s",
+                    [n for n, m in mons.items() if m["status"] == 0], up)
+    return down, up
 
 
 def mark_sent(down: list[str], up: list[str]) -> None:
@@ -196,23 +207,34 @@ def _what(st: dict) -> str:
     return f" ({', '.join(bits)})" if bits else ""
 
 
+def _since(s: dict) -> str:
+    return datetime.datetime.fromisoformat(s["down_since"]).astimezone(AMSTERDAM_TZ).strftime("%H:%M")
+
+
+def _groups(names: list[str], state: dict, key) -> list[tuple[str, list[str]]]:
+    """names grouped by key(state), in first-seen order: sites that share a cause read as one line."""
+    out: dict[str, list[str]] = {}
+    for n in names:
+        out.setdefault(key(state.get(n, {})), []).append(n)
+    return list(out.items())
+
+
+def _still_down(state: dict, skip: list[str]) -> list[str]:
+    return [u for u, s in state.items() if s.get("down_since") and not s.get("recovered_at") and u not in skip]
+
+
 def format_facts(down: list[str], up: list[str]) -> str:
-    """what just went down / came back, plus everything that is STILL down from earlier (so the dm can
-    always say what is down right now)."""
+    """what just went down / came back (grouped when they share a cause or duration), plus the names of
+    everything that is STILL down. no urls or monitor types: the name is enough in a dm."""
     state, lines = _load(), []
-    for u in down:
-        s = state.get(u, {})
-        since = datetime.datetime.fromisoformat(s["down_since"]).astimezone(AMSTERDAM_TZ).strftime("%H:%M")
-        lines.append(f"- DOWN {u}{_what(s)}: since {since}, error: {s.get('reason') or 'unknown'}")
-    for u in up:
-        s = state.get(u, {})
-        end = datetime.datetime.fromisoformat(s["recovered_at"])
-        lines.append(f"- BACK UP {u}{_what(s)}: was down {_span(s['down_since'], end)}")
-    still = [u for u, s in state.items()
-             if s.get("down_since") and not s.get("recovered_at") and u not in down]
-    for u in still:
-        s = state[u]
-        lines.append(f"- STILL DOWN {u}{_what(s)}: error: {s.get('reason') or 'unknown'}")
+    for key, names in _groups(down, state, lambda s: f"{_since(s)}|{_plain_error(s.get('reason'))}"):
+        since, err = key.split("|", 1)
+        lines.append(f"- DOWN since {since}, error: {err}: {', '.join(names)}")
+    for took, names in _groups(up, state, lambda s: _span(s["down_since"], datetime.datetime.fromisoformat(s["recovered_at"]))):
+        lines.append(f"- BACK UP after {took}: {', '.join(names)}")
+    still = _still_down(state, down)
+    if still:
+        lines.append(f"- STILL DOWN: {', '.join(still)}")
     return "\n".join(lines)
 
 
@@ -220,12 +242,12 @@ def compose_message(down: list[str], up: list[str]) -> str:
     facts = format_facts(down, up)
     remember_facts("uptime", facts)
     text = complete(
-        "some of matthias's sites changed state (from his uptime kuma). tell him in your own voice, short and casual: "
-        "exactly what is down (name, what it points at, the error, since when), what came back (and how long it was "
-        "down), and what is STILL down. if several are down at once, say so in one go, it is probably one cause. "
-        "keep every monitor name and url exactly as given. "
-        "use ONLY these facts.\n\nfacts:\n" + facts,
-        max_tokens=300,
+        "some of matthias's sites changed state (from his uptime kuma). tell him in your own voice, in ONE or TWO "
+        "short sentences, one paragraph, no lists: what went down (names, since when, the error once if it is the "
+        "same for all), what came back (and after how long), and what is still down if anything. do NOT repeat "
+        "yourself, do NOT write urls or monitor types, do NOT speculate about causes. write every monitor name "
+        "exactly as given. use ONLY these facts.\n\nfacts:\n" + facts,
+        max_tokens=120,
     )
     # names are compared case-insensitively: the persona writes in lowercase ("beszel" for "Beszel")
     if text and all(u.lower() in text.lower() for u in down + up):
@@ -245,19 +267,15 @@ def _plain_error(reason: str | None) -> str:
 
 
 def _plain_message(down: list[str], up: list[str]) -> str:
-    """lowercase, human fallback for when the model call fails (no raw fact dump). one line per
-    monitor and no blank lines, so it stays ONE slack message (real incident: four sites coming back
-    arrived as four dms)."""
+    """lowercase, human fallback for when the model call fails. one short line per group of monitors that
+    share a cause or duration, no blank lines, so it stays ONE slack message and a few lines at most."""
     state, parts = _load(), []
-    for u in down:
-        s = state.get(u, {})
-        since = datetime.datetime.fromisoformat(s["down_since"]).astimezone(AMSTERDAM_TZ).strftime("%H:%M")
-        parts.append(f"{u}{_what(s)} went down at {since}: {_plain_error(s.get('reason'))}")
-    for u in up:
-        s = state.get(u, {})
-        end = datetime.datetime.fromisoformat(s["recovered_at"])
-        parts.append(f"{u}{_what(s)} is back up after {_span(s['down_since'], end)}")
-    still = [u for u, s in state.items() if s.get("down_since") and not s.get("recovered_at") and u not in down]
+    for key, names in _groups(down, state, lambda s: f"{_since(s)}|{_plain_error(s.get('reason'))}"):
+        since, err = key.split("|", 1)
+        parts.append(f"{', '.join(names)} down since {since} ({err})")
+    for took, names in _groups(up, state, lambda s: _span(s["down_since"], datetime.datetime.fromisoformat(s["recovered_at"]))):
+        parts.append(f"{', '.join(names)} back up after {took}")
+    still = _still_down(state, down)
     if still:
         parts.append("still down: " + ", ".join(still))
     return "\n".join(parts)

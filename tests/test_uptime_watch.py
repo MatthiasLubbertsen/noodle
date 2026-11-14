@@ -149,6 +149,14 @@ class StateTests(unittest.TestCase):
         s = u.update(self._down_for_5(), {NAME: None}, T0 + datetime.timedelta(minutes=7))
         self.assertEqual(u.pending(s), ([NAME], []))
 
+    def test_one_outage_is_one_announcement(self):
+        # a is down 6 minutes, b only 2: when a is due, b (failing right now) goes in the same dm
+        s = {}
+        for minute in range(6):
+            s = u.update(s, {"a": "timeout", "b": "" if minute < 4 else "timeout"}, T0 + datetime.timedelta(minutes=minute))
+        self.assertEqual(sorted(u.pending(s)[0]), ["a", "b"])
+        self.assertEqual(s["b"]["down_since"], (T0 + datetime.timedelta(minutes=4)).isoformat())
+
     def test_state_saved_by_an_older_version_still_works(self):
         old = {NAME: {"fails": 3, "down_since": T0.isoformat(), "reason": "502", "alerted": True, "recovered_at": None}}
         self.assertEqual(u.pending(step(old, "", 9)), ([], [NAME]))
@@ -174,14 +182,13 @@ class PollTests(unittest.TestCase):
             d, up = u.poll()
             self.assertEqual((d, up), (["blog"], []))
             facts = u.format_facts(d, up)
-            self.assertIn("DOWN blog (http, https://blog.example.com)", facts)
-            self.assertIn("error: Request failed with status code 502", facts)
+            self.assertIn("error: Request failed with status code 502: blog", facts)
             u.mark_sent(d, up)
             self.assertEqual(u.poll(), ([], []))  # already announced
         with mock.patch("bot.uptime_watch.fetch", return_value={"blog": _mon(1)}):
             d, up = u.poll()
             self.assertEqual((d, up), ([], ["blog"]))
-            self.assertIn("was down", u.format_facts(d, up))
+            self.assertIn("BACK UP after", u.format_facts(d, up))
 
     def test_the_dm_always_says_what_is_still_down(self):
         with mock.patch("bot.uptime_watch.fetch", return_value={
@@ -193,8 +200,8 @@ class PollTests(unittest.TestCase):
             d, up = u.poll()
             self.assertEqual(d, ["db"])
             facts = u.format_facts(d, up)
-        self.assertIn("DOWN db (port, db.example.com:5432)", facts)
-        self.assertIn("STILL DOWN blog", facts)
+        self.assertIn(": db", facts)
+        self.assertIn("STILL DOWN: blog", facts)
 
     def test_unreachable_kuma_raises_and_changes_nothing(self):
         with mock.patch("bot.uptime_watch.fetch", return_value={"blog": _mon(0, "502")}):
@@ -211,7 +218,7 @@ class PollTests(unittest.TestCase):
         with mock.patch("bot.uptime_watch.complete", return_value="something broke"), \
              mock.patch("bot.uptime_watch.remember_facts"):
             msg = u.compose_message(d, up)
-        self.assertIn("blog (http, https://blog.example.com) went down", msg)  # the model dropped the monitor name -> plain facts
+        self.assertIn("blog down since", msg)  # the model dropped the monitor name -> plain facts
 
     def test_several_monitors_are_one_slack_message(self):
         from bot.chunk import chunk_response
