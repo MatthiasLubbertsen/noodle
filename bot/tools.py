@@ -9,7 +9,7 @@ import config
 from bot import reminders, state
 from bot.directory import flaron_query, lookup_display_name
 from bot.embeddings import embed_text
-from bot import features, games, hackatime, repo_fetch, sandbox, webfetch
+from bot import features, games, hackatime, repo_fetch, sandbox, webfetch, zermelo
 from bot import github as github_api
 from bot import links as links_api
 from bot.channels import with_join
@@ -691,6 +691,39 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "timetable",
+            "description": (
+                "matthias's school timetable, live from zermelo (matthias only, checked on the "
+                "server). actions: day (one day in full: every lesson with hour, times, subject, "
+                "room, teacher, what dropped out or changed, when the day starts and ends, free "
+                "hours in between; date = YYYY-MM-DD, today or tomorrow, default today), week "
+                "(monday to friday of the week of date, default this week), next (what he has "
+                "right now, what comes next and in how long, when school is out today), changes "
+                "(everything that dropped out, moved or changed room in the next days, default "
+                "7), exams (tests coming up in the next days, default 60) and stats (for "
+                "start_date..end_date, default this school year so far: lessons planned, each "
+                "one's share of all lessons, how many dropped out and the hours that went on, "
+                "grouped `by` subject (default), week, weekday or hour of the day; for one week "
+                "give that week's monday and friday as the dates). subjects come back with their real dutch names. only call it when "
+                "he asks about school, lessons, his timetable, free hours or tests."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": list(zermelo.ACTIONS)},
+                    "date": {"type": "string", "description": "for day/week: YYYY-MM-DD, today or tomorrow"},
+                    "days": {"type": "integer", "description": "for changes/exams: how many days ahead"},
+                    "start_date": {"type": "string", "description": "for stats: YYYY-MM-DD, inclusive"},
+                    "end_date": {"type": "string", "description": "for stats: YYYY-MM-DD, inclusive"},
+                    "by": {"type": "string", "enum": list(zermelo.STATS_BY), "description": "for stats: what to group by"},
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "links",
             "description": (
                 "manage matthias's short links on his own link shortener (matthias "
@@ -965,6 +998,16 @@ def _get_weather(location: str | None, days, origin: dict | None) -> str:
     hide = not in_dm and asked.lower() in private
     log_tool("get_weather", _CURRENT_LOCATION if hide else asked, "success")
     return forecast_text(asked, days or 1, label=_CURRENT_LOCATION if hide else None)
+
+
+def _timetable(args: dict, user_id: str | None) -> str:
+    detail = f"{args.get('action', '')} {args.get('date') or ''}".strip()
+    if not _is_matthias(user_id):
+        log_tool("timetable", detail, "unauthorized")
+        return "only matthias can see his timetable."
+    result = zermelo.query(args)
+    log_tool("timetable", detail, "failed" if result.startswith("zermelo could not") else "success")
+    return result
 
 
 def _now_playing(user_id: str | None) -> str:
@@ -1682,6 +1725,8 @@ def run_tool(name: str, args: dict, user_prompt: str = "", user_id: str | None =
         return holidays_text(country, args.get("year"))
     if name == "now_playing":
         return _now_playing(user_id)
+    if name == "timetable":
+        return _timetable(args, user_id)
     if name == "run_code":
         return _run_code(args, user_id, origin)
     if name == "play_game":

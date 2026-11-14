@@ -18,6 +18,7 @@ TOOL_FEATURE = {
     "start_freedom_session": "freedom",
     "schedule_freedom_session": "freedom",
     "hackatime": "hackatime",
+    "timetable": "zermelo",
 }
 
 
@@ -42,6 +43,8 @@ def enabled(feature: str) -> bool:
         return bool(config.LINKS_API_KEY and config.LINKS_API_BASE)
     if feature == "uptime":
         return bool(config.KUMA_URL)
+    if feature == "zermelo":
+        return bool(config.ZERMELO_SCHOOL and config.ZERMELO_TOKEN)
     raise KeyError(feature)
 
 

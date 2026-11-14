@@ -74,6 +74,8 @@ noodle/
     hackatime.py          # hackatime api calls (hackatime tool, project totals)
     hackatime_watch.py    # hour milestones per project + persisted "seen" state
     admin_watch.py        # dm when matthias's slack role goes up (member -> admin), see 7m
+    zermelo.py            # zermelo (school timetable): api call, subject code -> real name map, the `timetable` tool
+    zermelo_watch.py      # dm when a lesson of today or tomorrow drops out, see 7p
     release_watch.py      # release notes dm after a new image is deployed, see 7n
     proactive.py          # quiet hours + daily cap for unprompted pings
     oneshot.py            # one-off persona completion for scheduled messages
@@ -250,6 +252,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `github` | read-only: his repos, a repo + branches/releases/ci runs, readme, file tree, read any file, commits + one commit, issues/prs + one with comments and changed files, stars + starred, issue/repo/code search, profiles, notifications, commits today | matthias only |
 | `hackatime` | his coding time, whole history: summary/today/projects/project (anyone), days/sessions (matthias only: they show when he codes) | anyone / matthias only |
 | `links` | create/list/get/update/delete his short links + click stats (link shortener api) | matthias only |
+| `timetable` | his school timetable, live from zermelo: a day or week in full, now/next, changes, tests coming up, dropout stats per subject | matthias only |
 | `get_journal` | his `@matthias-day` recaps for a date range (plain date filter, not vector search) | matthias only |
 | `summarize_thread` | reads a whole thread (link or current thread) so the model can tl;dr it; same auto-join rule as `fetch_slack_message` | anyone |
 | `freedom` | the full freedom.to toolbox: devices, blocklists, sessions, schedules, history (13 actions); only ever touches matthias's own devices | matthias only |
@@ -259,7 +262,7 @@ memory/web/freedom, 7b reminders + freedom scheduling, 7c-7e the rest).
 | `list_scheduled` | list scheduled reminders and freedom sessions | matthias only |
 | `cancel_scheduled` | cancel one reminder or freedom session by id | matthias only |
 
-**no credential, no tool.** nine of these need a credential, and without it they are
+**no credential, no tool.** ten of these need a credential, and without it they are
 not just broken but absent: `bot/features.py` decides from the env alone, `tools.available_tools()`
 drops them from the list the model is sent, `prompt.load_prompt()` removes their sections of the
 system prompt (wrapped in `<!-- if:NAME -->...<!-- endif:NAME -->` in `prompts/system_prompt.md`)
@@ -269,6 +272,7 @@ jobs that need them don't start. so the model never offers or promises something
 - `LASTFM_API_KEY` + `LASTFM_USER` -> `now_playing`, `music_stats`
 - `FREEDOM_API_KEY` -> `freedom`, `start_freedom_session`, `schedule_freedom_session`
 - `LINKS_API_BASE` + `LINKS_API_KEY` (both) -> `links`
+- `ZERMELO_SCHOOL` + `ZERMELO_TOKEN` (both) -> `timetable` (and the dropout watcher)
 - `HACKATIME_USERNAME` -> `hackatime` (and the milestone watcher); `HACKATIME_API_KEY` only if his stats aren't public
 - `SANDBOX_TOKEN` (16+ chars) -> `run_code`
 everything else (search, flaron, memory, weather, journal, threads, reminders, games, web search)
@@ -1336,6 +1340,45 @@ from `_run_code` if that should change). it needs no credential, so it is always
 - **github ci failures are NOT a separate watcher:** the notification watcher (7c) already dms them, via
   github's own `ci_activity` notifications (a failed workflow run shows up like any other notification).
 
+### 7p. school timetable watcher (zermelo)
+- `bot/zermelo.py` + `bot/zermelo_watch.py` + `scheduler._check_zermelo()` (every `ZERMELO_POLL_SECONDS`,
+  default 300, only when `ZERMELO_SCHOOL` and `ZERMELO_TOKEN` are both set): dms matthias when a lesson, exam
+  or activity of **today or tomorrow** drops out.
+- **the school is private, like his location.** `ZERMELO_SCHOOL` (the portal name, the part before
+  `.zportal.nl`) is only ever in `.env`: never in code, tests, docs or logs, and the prompt tells the model not
+  to name it. the token is his own student token (all extra permissions 0, read-only use), made once by
+  exchanging a "koppel app" code at `POST /api/v3/oauth/token`; it is valid for about ten years.
+- **how a dropout looks in zermelo.** `GET /api/v3/appointments?user=~me&start&end&valid=true`: every change
+  makes a new version of a lesson and the old one gets `valid=false`; a cancelled lesson is a CURRENT row
+  (`valid=true`) with `cancelled=true` and `changeDescription` "Les vervalt" / "Activiteit vervalt".
+  `appointmentInstance` is the same across versions (`id` is not), so the reported key is
+  `appointmentInstance:start`. only cancellations are reported: a moved lesson or another room is not.
+- **no first-run baseline, on purpose.** each poll reports every cancelled row of today + tomorrow not reported
+  yet, so a lesson cancelled days ago is told the moment its day becomes "tomorrow" (at midnight, which quiet
+  hours hold until the morning). lessons that are already over are skipped. state in `data/zermelo_seen.json`
+  (key -> start), past days pruned.
+- one dm per poll for everything new, persona-written, always ONE slack message (blank lines collapsed; plain
+  one-line-per-lesson fallback if the model call fails or leaves a subject out). the facts list what dropped
+  out per day AND what is still on that day, so the dm can say "you start at 9:05 now" without guessing.
+  unprompted ping: goes through `proactive.can_send()`/`record_sent()`; while held nothing is marked, so it
+  goes out on the next allowed poll. marked reported right before the dm (a crash drops one, never repeats).
+  facts are saved to memory like the other watchers. a failed api call raises and changes nothing.
+- **subject names, in dutch (his choice).** zermelo only has the school's abbreviations; `zermelo.SUBJECTS`
+  maps the ones in his timetable to real names (`ak` aardrijkskunde, `sk` scheikunde, `bo` bewegingsonderwijs,
+  `LU` leesuur...), `subject_name()` is case-insensitive, turns a `tts` prefix into a test (`ttswi` = "toets
+  wiskunde") and keeps an unknown code as it is. `mt` = "mentoruur" is a guess.
+- **the `timetable` tool** (`zermelo.query()`, matthias only, checked in `tools._timetable()` against the real
+  sender id; not dm-only). actions: `day` (one day in full: hour, times, subject, room, teacher code, what
+  dropped out/changed with zermelo's own sentence, start/end of the day, free hours in between; `date` =
+  YYYY-MM-DD / today / tomorrow), `week` (monday-friday of the week of `date`), `next` (what is on now, what
+  is next and in how long, when school is out today; looks 10 days ahead), `changes` (dropped out, moved or
+  another room in the next `days`, default 7, max 60), `exams` (type `exam` plus `tts` activities, next `days`,
+  default 60) and `stats` (for a date range, default this school year so far from 1 august: lessons planned,
+  their share of all lessons, how many dropped out, hours that went on; grouped `by` subject, week, weekday or
+  hour of the day; only rows of type `lesson`, so exams and activities are not counted). bad input and a dead api come back as a plain sentence. teacher codes are the school's
+  abbreviations, zermelo gives a student token no names.
+- not yet seen running in the deployed container; the logic was run against his real timetable without slack.
+
 ### 8. channel join/leave analytics
 - `application.event("member_joined_channel")` / `"member_left_channel")`
   (wired in `build_app()`) call into `bot/watch.py`. both handlers ignore
@@ -1445,6 +1488,8 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `KUMA_USERNAME` / `KUMA_PASSWORD` | only if kuma has authentication on (his has it off): a login without 2fa |
 | `UPTIME_POLL_SECONDS` / `UPTIME_DOWN_MINUTES` | how often to read kuma (60), minutes a monitor must stay down before the dm (5) |
 | `ADMIN_POLL_SECONDS` | seconds between checks of matthias's slack role (default 300), see 7m |
+| `ZERMELO_SCHOOL` / `ZERMELO_TOKEN` | PRIVATE, no default: his school's zermelo portal name (the part before `.zportal.nl`) + his access token; both set = the timetable watcher is on, see 7p |
+| `ZERMELO_POLL_SECONDS` | seconds between timetable checks (default 300, min 60) |
 | `LOG_LEVEL` | optional, default `INFO`; `DEBUG` also logs full python tracebacks (otherwise a failure is one line) |
 
 everything time-based (both daily dms, "today" in the stats/news checks)
