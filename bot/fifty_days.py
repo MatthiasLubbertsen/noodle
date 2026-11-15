@@ -34,7 +34,7 @@ def day_number(date: datetime.date) -> int | None:
     return day if 1 <= day <= 50 else None
 
 
-def crosspost(client, channel: str, ts: str, raw_text: str) -> None:
+def crosspost(client, channel: str, ts: str, raw_text: str, blocks=None) -> None:
     """reply in the goal thread (also sent to the channel) with the required
     ":50days: Day X/50" first line and a link to the recap. only a real recap
     (has bullets) counts, so a contentless re-ping never posts a second one."""
@@ -42,7 +42,7 @@ def crosspost(client, channel: str, ts: str, raw_text: str) -> None:
         where = target()
         if not where:
             return
-        if not recap_content(client, channel, ts, raw_text):
+        if not recap_content(client, channel, ts, raw_text, blocks):
             logger.info("50 days: %s has no recap bullets, not posting", ts)
             return
         day = day_number(datetime.datetime.fromtimestamp(float(ts), AMSTERDAM_TZ).date())

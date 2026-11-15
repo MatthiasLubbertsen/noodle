@@ -170,3 +170,26 @@ class SignatureStripTests(unittest.TestCase):
         self.assertTrue(clean_ping_text(raw))
         raw = "<!subteam^S0AK8LYJ8FR> today:\n• a\n• b\nplease talk in the thread below! • join this usergroup with `/se`"
         self.assertEqual(clean_ping_text(raw), "• a\n• b")
+
+
+class BlocksRecapTests(unittest.TestCase):
+    # real shape: the event text is only the header, the body lives in rich_text blocks
+    BLOCKS = [{"type": "rich_text", "elements": [
+        {"type": "rich_text_section", "elements": [
+            {"type": "usergroup", "usergroup_id": "S0AK8LYJ8FR"}, {"type": "text", "text": " today:\n"}]},
+        {"type": "rich_text_list", "style": "bullet", "indent": 0, "elements": [
+            {"type": "rich_text_section", "elements": [{"type": "text", "text": "Cleaning my room "},
+                                                       {"type": "emoji", "name": "woa"}]},
+            {"type": "rich_text_section", "elements": [{"type": "text", "text": "Melon"}]}]},
+        {"type": "rich_text_list", "style": "bullet", "indent": 1, "elements": [
+            {"type": "rich_text_section", "elements": [{"type": "text", "text": "nested"}]}]},
+    ]}]
+
+    def test_header_only_text_uses_the_blocks(self):
+        from bot.matthias_day import message_recap
+        got = message_recap("<!subteam^S0AK8LYJ8FR> today:", self.BLOCKS)
+        self.assertEqual(got, "• Cleaning my room :woa:\n• Melon\n    ◦ nested")
+
+    def test_no_bullets_anywhere_is_none(self):
+        from bot.matthias_day import message_recap
+        self.assertIsNone(message_recap("<!subteam^S0AK8LYJ8FR> ^^", None))

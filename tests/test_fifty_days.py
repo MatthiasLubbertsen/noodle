@@ -52,6 +52,15 @@ class CrosspostTests(unittest.TestCase):
             fifty_days.crosspost(client, "C0A9NJT2BCJ", TS, "<!subteam^S0AK8LYJ8FR> today:")
         self.assertTrue(client.chat_postMessage.called)
 
+    def test_bullets_only_in_blocks_still_post(self):
+        blocks = [{"type": "rich_text", "elements": [{"type": "rich_text_list", "style": "bullet",
+                   "elements": [{"type": "rich_text_section", "elements": [{"type": "text", "text": "x"}]}]}]}]
+        client = mock.Mock()
+        client.chat_getPermalink.return_value = {"permalink": "https://x/recap"}
+        with mock.patch.object(config, "FIFTY_DAYS_THREAD", LINK):
+            fifty_days.crosspost(client, "C0A9NJT2BCJ", TS, "<!subteam^S0AK8LYJ8FR> today:", blocks)
+        self.assertTrue(client.chat_postMessage.called)
+
     def test_off_when_unset(self):
         client = self.run_it("<!subteam^S0AK8LYJ8FR> today:\n• x", thread="")
         self.assertFalse(client.chat_postMessage.called)

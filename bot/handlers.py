@@ -247,13 +247,13 @@ def handle_message(event: dict) -> None:
         # so it's searchable later and linked back to the original message.
         threading.Thread(
             target=matthias_day.persist_ping,
-            args=(state.app.client, channel, event.get("ts"), text),
+            args=(state.app.client, channel, event.get("ts"), text, event.get("blocks")),
             daemon=True,
         ).start()
         # and link it into his 50 days goal thread (no-op unless configured)
         threading.Thread(
             target=fifty_days.crosspost,
-            args=(state.app.client, channel, event.get("ts"), text),
+            args=(state.app.client, channel, event.get("ts"), text, event.get("blocks")),
             daemon=True,
         ).start()
         return

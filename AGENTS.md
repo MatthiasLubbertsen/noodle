@@ -776,12 +776,16 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   any failure leaves no trace, and simply re-running the backfill fills
   in whatever was missed.
 
-- **the event's text is not always the message's text.** on nov 15 a real recap pinged correctly but
-  `clean_ping_text(event text)` came out empty, so it was logged as a "re-ping", never journaled, and the
-  50 days post silently returned (no bullets, no log). `matthias_day.recap_content()` now falls back to
-  re-reading the message itself (`conversations_history`, `latest=ts`, inclusive) before giving up, and
-  both `persist_ping()` and `fifty_days.crosspost()` use it. the "non-bullet" log line carries the raw
-  text, and the signature stripping can no longer swallow a recap that has no line breaks.
+- **the recap can live in `blocks`, not `text`.** from oct 16 to nov 15 every recap was logged as
+  "non-bullet ... '' - no recap found" and never journaled (the journal in the db stopped at oct 21,
+  nothing in data/ for 3+ weeks), and the 50 days post silently skipped: the event's `text` was only the
+  header (`<!subteam^...> today:`) with the bullets in the message's rich_text `blocks`. nothing in the
+  noodle code changed on oct 16, so the site that posts the ping is what changed. `matthias_day.message_recap()`
+  now reads text first, then `blocks` (`text_from_blocks()`: bullets, nested "◦", emoji, links), and
+  `recap_content()` re-reads the stored message as a last resort. `persist_ping()`, `fifty_days.crosspost()`,
+  the re-ping recovery and `scripts/backfill_matthias_day.py` all use it. the "non-bullet" log line now
+  carries the raw text and block types. **after deploying, run `python -m scripts.backfill_matthias_day`**
+  to fill the gap (dedup by permalink makes it safe to re-run).
 
 ### 6c. 50 days crosspost (`bot/fifty_days.py`)
 - hack club's "50 days" challenge wants a daily update as a reply to your goal message, also

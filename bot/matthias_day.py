@@ -42,6 +42,67 @@ _TRAILING_RE = re.compile(
 _THREAD_NOTE_RE = re.compile(r"please talk in the thread below.*$", re.IGNORECASE | re.DOTALL)
 
 
+def _element_text(el: dict) -> str:
+    kind = el.get("type")
+    if kind == "text":
+        return el.get("text", "")
+    if kind == "link":
+        url, label = el.get("url", ""), el.get("text")
+        return f"<{url}|{label}>" if label else url
+    if kind == "emoji":
+        return f":{el.get('name', '')}:"
+    if kind == "user":
+        return f"<@{el.get('user_id', '')}>"
+    if kind == "usergroup":
+        return f"<!subteam^{el.get('usergroup_id', '')}>"
+    if kind == "channel":
+        return f"<#{el.get('channel_id', '')}>"
+    if kind == "broadcast":
+        return f"<!{el.get('range', 'here')}>"
+    return ""
+
+
+def text_from_blocks(blocks) -> str:
+    """slack's rich_text blocks as slack-style text, bullets included ("• ", nested
+    "◦ "). a message posted with `blocks` can carry its whole body there while its
+    plain `text` is only the header (real incident: every recap since oct 16 had
+    event text "<!subteam^...> today:" and the bullets only in the blocks)."""
+    lines: list[str] = []
+
+    def section(elements) -> str:
+        return "".join(_element_text(e) for e in elements or [])
+
+    for block in blocks or []:
+        if block.get("type") != "rich_text":
+            continue
+        for el in block.get("elements", []):
+            kind = el.get("type")
+            if kind == "rich_text_section":
+                lines.append(section(el.get("elements")))
+            elif kind == "rich_text_list":
+                ordered = el.get("style") == "ordered"
+                indent = int(el.get("indent", 0) or 0)
+                for i, item in enumerate(el.get("elements", []), 1):
+                    mark = f"{i}." if ordered else ("◦" if indent else "•")
+                    lines.append(f"{'    ' * indent}{mark} {section(item.get('elements'))}")
+            elif kind in ("rich_text_preformatted", "rich_text_quote"):
+                lines.append(section(el.get("elements")))
+    return "\n".join(lines)
+
+
+def message_recap(text: str, blocks=None) -> str | None:
+    """the cleaned bulleted recap in a message (its text first, then its blocks),
+    or None when there is none."""
+    content = clean_ping_text(text)
+    if content and _HAS_BULLET_RE.search(content):
+        return content
+    if blocks:
+        content = clean_ping_text(text_from_blocks(blocks))
+        if content and _HAS_BULLET_RE.search(content):
+            return content
+    return None
+
+
 def clean_ping_text(raw: str) -> str:
     """strip the @matthias-day ping, the "today:" lead-in, and the trailing
     thread/join signature off a daily recap message, leaving just the day's
@@ -75,28 +136,25 @@ def _normalize_bullets(text: str) -> str:
     return "\n".join(fixed)
 
 
-def recap_content(client, channel: str, ts: str, event_text: str) -> str | None:
+def recap_content(client, channel: str, ts: str, event_text: str, blocks=None) -> str | None:
     """the cleaned bulleted recap for the message at `ts`, or None when it has none.
-    tries the text of the slack event first; if that has no bullets it re-reads the
-    message itself from slack (the text of record), because the event's text can differ
-    from the stored message (real incident, nov 15: the event text cleaned to '' so
-    neither the journal nor the 50 days post happened, with nothing in the logs).
-    shared by persist_ping() and fifty_days.crosspost() so they can't disagree."""
-    content = clean_ping_text(event_text)
-    if content and _HAS_BULLET_RE.search(content):
+    reads the event's text, then the event's blocks, and if neither has bullets re-reads
+    the message itself from slack (text, then blocks). the event's text can be only the
+    header (real incident: every recap since oct 16 was journaled as "no recap", and the
+    50 days post silently skipped). shared by persist_ping() and fifty_days.crosspost()
+    so they can't disagree."""
+    content = message_recap(event_text, blocks)
+    if content:
         return content
     try:
         resp = client.conversations_history(
             channel=channel, latest=ts, inclusive=True, limit=1
         )
-        msgs = resp.get("messages") or [] if resp.get("ok") else []
+        msgs = (resp.get("messages") or []) if resp.get("ok") else []
         if msgs and msgs[0].get("ts") == ts:
-            stored = clean_ping_text(msgs[0].get("text", "") or "")
-            if stored and _HAS_BULLET_RE.search(stored):
-                logger.info(
-                    "matthias-day %s: event text had no bullets (%r), stored message does",
-                    ts, (event_text or "")[:80],
-                )
+            stored = message_recap(msgs[0].get("text", "") or "", msgs[0].get("blocks"))
+            if stored:
+                logger.info("matthias-day %s: recap found on re-reading the message", ts)
                 return stored
     except Exception:  # noqa: BLE001
         logger.exception("could not re-read matthias-day message %s", ts)
@@ -107,7 +165,7 @@ def conv_key(channel: str) -> str:
     return f"matthias_day:{channel}"
 
 
-def persist_ping(client, channel: str, ts: str, raw_text: str) -> None:
+def persist_ping(client, channel: str, ts: str, raw_text: str, blocks=None) -> None:
     """clean + persist one @matthias-day ping into memory, timestamped to
     the day it actually happened (the message's own ts) and linked back to
     the original slack message so it can be read later. used by both the
@@ -120,14 +178,15 @@ def persist_ping(client, channel: str, ts: str, raw_text: str) -> None:
     treated as a pointer to the real recap right above it, which gets
     persisted in its place (see _recover_recap_before()).
     """
-    content = recap_content(client, channel, ts, raw_text)
+    content = recap_content(client, channel, ts, raw_text, blocks)
     if content:
         _persist_recap(client, channel, ts, content)
         return
     logger.info(
-        "non-bullet @matthias-day match (re-ping, not a recap itself): raw=%r - "
-        "looking for the recap above it",
+        "non-bullet @matthias-day match (re-ping, not a recap itself): raw=%r "
+        "block_types=%r - looking for the recap above it",
         (raw_text or "")[:120],
+        [b.get("type") for b in (blocks or [])],
     )
     _recover_recap_before(client, channel, ts)
 
@@ -162,8 +221,8 @@ def _recover_recap_before(client, channel: str, ts: str) -> None:
         if msg.get("user") != config.USER_ID:
             continue
         text = msg.get("text", "") or ""
-        content = clean_ping_text(text)
-        if content and _HAS_BULLET_RE.search(content):
+        content = message_recap(text, msg.get("blocks"))
+        if content:
             logger.info("recovered recap above re-ping %s: %r", ts, content[:60])
             _persist_recap(client, channel, msg["ts"], content)
             return
