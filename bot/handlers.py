@@ -5,7 +5,7 @@ import time
 import config
 from openai import APIConnectionError
 
-from bot import matthias_day, state
+from bot import fifty_days, matthias_day, state
 from bot.chunk import chunk_response
 from bot.gate import should_reply_unprompted
 from bot.llm import ask_noodle
@@ -247,6 +247,12 @@ def handle_message(event: dict) -> None:
         # so it's searchable later and linked back to the original message.
         threading.Thread(
             target=matthias_day.persist_ping,
+            args=(state.app.client, channel, event.get("ts"), text),
+            daemon=True,
+        ).start()
+        # and link it into his 50 days goal thread (no-op unless configured)
+        threading.Thread(
+            target=fifty_days.crosspost,
             args=(state.app.client, channel, event.get("ts"), text),
             daemon=True,
         ).start()
