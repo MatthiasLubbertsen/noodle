@@ -776,6 +776,13 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   any failure leaves no trace, and simply re-running the backfill fills
   in whatever was missed.
 
+- **the event's text is not always the message's text.** on nov 15 a real recap pinged correctly but
+  `clean_ping_text(event text)` came out empty, so it was logged as a "re-ping", never journaled, and the
+  50 days post silently returned (no bullets, no log). `matthias_day.recap_content()` now falls back to
+  re-reading the message itself (`conversations_history`, `latest=ts`, inclusive) before giving up, and
+  both `persist_ping()` and `fifty_days.crosspost()` use it. the "non-bullet" log line carries the raw
+  text, and the signature stripping can no longer swallow a recap that has no line breaks.
+
 ### 6c. 50 days crosspost (`bot/fifty_days.py`)
 - hack club's "50 days" challenge wants a daily update as a reply to your goal message, also
   sent to the channel, first line exactly `:50days: Day X/50`. matthias already writes a daily

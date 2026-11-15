@@ -36,9 +36,10 @@ _TODAY_RE = re.compile(r"^\s*today\s*(?:i\s+did)?\s*:?\s*\n?", re.IGNORECASE)
 # ..." while on vacation - so match the whole last line containing "join
 # this usergroup with", whatever comes before it.
 _TRAILING_RE = re.compile(
-    r"\n?(?:please talk in the thread below.*|[^\n]*join this usergroup with[^\n]*)$",
-    re.IGNORECASE | re.DOTALL,
+    r"(?:^|\n)[^\n]*join this usergroup with[^\n]*$",
+    re.IGNORECASE,
 )
+_THREAD_NOTE_RE = re.compile(r"please talk in the thread below.*$", re.IGNORECASE | re.DOTALL)
 
 
 def clean_ping_text(raw: str) -> str:
@@ -49,6 +50,7 @@ def clean_ping_text(raw: str) -> str:
     text = (raw or "").strip()
     text = _PING_PREFIX_RE.sub("", text, count=1)
     text = _TODAY_RE.sub("", text, count=1)
+    text = _THREAD_NOTE_RE.sub("", text)
     text = _TRAILING_RE.sub("", text)
     text = _normalize_bullets(text.strip())
     return text
@@ -73,6 +75,34 @@ def _normalize_bullets(text: str) -> str:
     return "\n".join(fixed)
 
 
+def recap_content(client, channel: str, ts: str, event_text: str) -> str | None:
+    """the cleaned bulleted recap for the message at `ts`, or None when it has none.
+    tries the text of the slack event first; if that has no bullets it re-reads the
+    message itself from slack (the text of record), because the event's text can differ
+    from the stored message (real incident, nov 15: the event text cleaned to '' so
+    neither the journal nor the 50 days post happened, with nothing in the logs).
+    shared by persist_ping() and fifty_days.crosspost() so they can't disagree."""
+    content = clean_ping_text(event_text)
+    if content and _HAS_BULLET_RE.search(content):
+        return content
+    try:
+        resp = client.conversations_history(
+            channel=channel, latest=ts, inclusive=True, limit=1
+        )
+        msgs = resp.get("messages") or [] if resp.get("ok") else []
+        if msgs and msgs[0].get("ts") == ts:
+            stored = clean_ping_text(msgs[0].get("text", "") or "")
+            if stored and _HAS_BULLET_RE.search(stored):
+                logger.info(
+                    "matthias-day %s: event text had no bullets (%r), stored message does",
+                    ts, (event_text or "")[:80],
+                )
+                return stored
+    except Exception:  # noqa: BLE001
+        logger.exception("could not re-read matthias-day message %s", ts)
+    return None
+
+
 def conv_key(channel: str) -> str:
     return f"matthias_day:{channel}"
 
@@ -90,14 +120,14 @@ def persist_ping(client, channel: str, ts: str, raw_text: str) -> None:
     treated as a pointer to the real recap right above it, which gets
     persisted in its place (see _recover_recap_before()).
     """
-    content = clean_ping_text(raw_text)
-    if content and _HAS_BULLET_RE.search(content):
+    content = recap_content(client, channel, ts, raw_text)
+    if content:
         _persist_recap(client, channel, ts, content)
         return
     logger.info(
-        "non-bullet @matthias-day match (re-ping, not a recap itself): %r - "
+        "non-bullet @matthias-day match (re-ping, not a recap itself): raw=%r - "
         "looking for the recap above it",
-        content[:60],
+        (raw_text or "")[:120],
     )
     _recover_recap_before(client, channel, ts)
 

@@ -161,3 +161,12 @@ class RepeatedReplies(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SignatureStripTests(unittest.TestCase):
+    def test_signature_never_eats_a_single_line_recap(self):
+        from bot.matthias_day import clean_ping_text
+        raw = "<!subteam^S0AK8LYJ8FR> today: • a • b please talk in the thread below! • join this usergroup with `/se group join X`!"
+        self.assertTrue(clean_ping_text(raw))
+        raw = "<!subteam^S0AK8LYJ8FR> today:\n• a\n• b\nplease talk in the thread below! • join this usergroup with `/se`"
+        self.assertEqual(clean_ping_text(raw), "• a\n• b")

@@ -9,7 +9,7 @@ import logging
 import re
 
 import config
-from bot.matthias_day import _HAS_BULLET_RE, clean_ping_text
+from bot.matthias_day import recap_content
 from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
@@ -42,7 +42,8 @@ def crosspost(client, channel: str, ts: str, raw_text: str) -> None:
         where = target()
         if not where:
             return
-        if not _HAS_BULLET_RE.search(clean_ping_text(raw_text)):
+        if not recap_content(client, channel, ts, raw_text):
+            logger.info("50 days: %s has no recap bullets, not posting", ts)
             return
         day = day_number(datetime.datetime.fromtimestamp(float(ts), AMSTERDAM_TZ).date())
         if day is None:
