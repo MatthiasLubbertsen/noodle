@@ -1,5 +1,6 @@
 """post the 50 days updates noodle missed (it wasn't deployed on day 1, or a recap failed to
-link), one per day, into the goal thread and the channel (`reply_broadcast`), in order.
+link), one per day, into the goal thread only (NOT also sent to the channel, so a burst of old days doesn't land in
+#50-days), in order.
 
 for each day of the challenge so far it takes the LAST bulleted @matthias-day recap of that
 day from #matthias and posts ":50days: Day X/50" + its link, exactly like the live feature.
@@ -78,7 +79,7 @@ def main() -> None:
         if dry:
             logger.info("50 days (dry run): would post %r", fifty_days.day_text(day, link))
             continue
-        fifty_days.post_day(client, where, day, link)
+        fifty_days.post_day(client, where, day, link, broadcast=False)
         logger.info("50 days: posted day %d (%s)", day, link)
         posted += 1
     missing = [d for d in range(1, (datetime.date.today() - START).days + 2) if d not in recaps and d not in done]

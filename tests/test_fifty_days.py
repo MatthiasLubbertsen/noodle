@@ -84,6 +84,13 @@ class BackfillHelpers(unittest.TestCase):
         ]}
         self.assertEqual(fifty_days.days_already_posted(client, ("C1", "1.1")), {2, 4})
 
+    def test_backfill_post_is_not_broadcast(self):
+        client = mock.Mock()
+        fifty_days.post_day(client, ("C1", "1.1"), 2, "https://x", broadcast=False)
+        self.assertFalse(client.chat_postMessage.call_args.kwargs["reply_broadcast"])
+        fifty_days.post_day(client, ("C1", "1.1"), 2, "https://x")
+        self.assertTrue(client.chat_postMessage.call_args.kwargs["reply_broadcast"])
+
     def test_day_text_first_line_is_exact(self):
         self.assertEqual(fifty_days.day_text(5, "https://x"), ":50days: Day 5/50\n<https://x>")
 

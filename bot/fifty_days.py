@@ -39,12 +39,13 @@ def day_text(day: int, link: str) -> str:
     return f":50days: Day {day}/50\n<{link}>"
 
 
-def post_day(client, where: tuple[str, str], day: int, link: str) -> None:
-    """reply in the goal thread, ticked "also send to the channel" (reply_broadcast)."""
+def post_day(client, where: tuple[str, str], day: int, link: str, broadcast: bool = True) -> None:
+    """reply in the goal thread; the live post is ticked "also send to the channel"
+    (reply_broadcast), the backfill is not (it would be a burst of old days in the channel)."""
     client.chat_postMessage(
         channel=where[0],
         thread_ts=where[1],
-        reply_broadcast=True,
+        reply_broadcast=broadcast,
         text=day_text(day, link),
         unfurl_links=True,
     )
