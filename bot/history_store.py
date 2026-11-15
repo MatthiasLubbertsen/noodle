@@ -157,6 +157,24 @@ def replace_content(old: str, new: str) -> int:
         conn.close()
 
 
+def has_permalink(permalink: str) -> bool:
+    """is a row with this permalink stored? (append_message never raises or returns
+    anything, so this is how a caller finds out whether a save actually happened)"""
+    try:
+        conn = sqlite3.connect(config.MEMORY_DB_PATH)
+        try:
+            return bool(
+                conn.execute(
+                    "SELECT 1 FROM messages WHERE permalink = ? LIMIT 1", (permalink,)
+                ).fetchone()
+            )
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to check for a stored permalink")
+        return False
+
+
 def append_message_async(
     conv_key: str, kind: str, role: str, content: str, user_id: str | None = None
 ) -> None:

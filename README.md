@@ -238,6 +238,15 @@ exists.
 logs go to the console either way; the code also tries to write
 `logs/noodle.log` and falls back to console only if that's not writable.
 
+### backfilling the @matthias-day journal
+
+if recaps were missed (it stopped saving them once), fill the gap from the channel's history. it skips
+days that are already saved, so it is safe to run again:
+
+```bash
+docker compose exec noodle python -m scripts.backfill_matthias_day
+```
+
 ## .env reference
 
 | var | meaning |

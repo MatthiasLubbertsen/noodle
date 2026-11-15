@@ -787,6 +787,13 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   carries the raw text and block types. **after deploying, run `python -m scripts.backfill_matthias_day`**
   to fill the gap (dedup by permalink makes it safe to re-run).
 
+- **failures tell him.** `persist_ping()` dms matthias (plain text, `matthias_day.alert()`) when a real recap
+  can't be saved (no permalink, or the embedding failed), or when a message that looks like a recap (a
+  rich_text list, or more than a few words after the ping) has no bullets anywhere; a short "^^" re-ping stays
+  silent. `fifty_days.crosspost()` dms when its post fails. the backfill script passes `notify=False` (one dm
+  per failed old day would be spam). backfill in docker: `docker compose exec noodle python -m
+  scripts.backfill_matthias_day` (the container is `noodle`, cwd `/app`, `./data` is the bind mount).
+
 ### 6c. 50 days crosspost (`bot/fifty_days.py`)
 - hack club's "50 days" challenge wants a daily update as a reply to your goal message, also
   sent to the channel, first line exactly `:50days: Day X/50`. matthias already writes a daily

@@ -68,7 +68,8 @@ def main() -> None:
     count = 0
     for msg in _iter_matthias_day_messages(client):
         persist_ping(
-            client, config.MATTHIAS_DAY_CHANNEL_ID, msg["ts"], msg.get("text", "") or "", msg.get("blocks")
+            client, config.MATTHIAS_DAY_CHANNEL_ID, msg["ts"], msg.get("text", "") or "", msg.get("blocks"),
+            notify=False,
         )
         count += 1
     logger.info("matthias-day backfill done: processed %d ping(s)", count)

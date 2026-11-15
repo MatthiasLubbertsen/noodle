@@ -9,7 +9,7 @@ import logging
 import re
 
 import config
-from bot.matthias_day import recap_content
+from bot.matthias_day import alert, recap_content
 from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
@@ -59,3 +59,4 @@ def crosspost(client, channel: str, ts: str, raw_text: str, blocks=None) -> None
         logger.info("50 days: linked day %d into %s", day, where[0])
     except Exception:  # noqa: BLE001
         logger.exception("50 days crosspost failed")
+        alert("i couldn't post today's recap in your 50 days thread (check the logs). you may need to post it by hand.")

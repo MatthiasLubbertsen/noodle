@@ -3,7 +3,7 @@ import logging
 import re
 
 import config
-from bot.history_store import append_message
+from bot.history_store import append_message, has_permalink
 from bot.slack_text import _matthias_day_pinged
 from bot.tz import AMSTERDAM_TZ
 
@@ -165,7 +165,9 @@ def conv_key(channel: str) -> str:
     return f"matthias_day:{channel}"
 
 
-def persist_ping(client, channel: str, ts: str, raw_text: str, blocks=None) -> None:
+def persist_ping(
+    client, channel: str, ts: str, raw_text: str, blocks=None, notify: bool = True
+) -> None:
     """clean + persist one @matthias-day ping into memory, timestamped to
     the day it actually happened (the message's own ts) and linked back to
     the original slack message so it can be read later. used by both the
@@ -177,10 +179,19 @@ def persist_ping(client, channel: str, ts: str, raw_text: str, blocks=None) -> N
     :)", "yeah this one Slack") is never stored itself - instead it's
     treated as a pointer to the real recap right above it, which gets
     persisted in its place (see _recover_recap_before()).
+
+    when a real recap can't be saved, or a message that looks like one has no bullets,
+    matthias gets a dm (`notify`; the backfill script turns it off, it would send one
+    per failed old day).
     """
     content = recap_content(client, channel, ts, raw_text, blocks)
     if content:
-        _persist_recap(client, channel, ts, content)
+        if not _persist_recap(client, channel, ts, content) and notify:
+            alert(
+                "i couldn't save today's @matthias-day recap to my journal (no permalink "
+                "or the embedding failed, check the logs). `python -m scripts.backfill_matthias_day` "
+                "will pick it up later."
+            )
         return
     logger.info(
         "non-bullet @matthias-day match (re-ping, not a recap itself): raw=%r "
@@ -188,10 +199,41 @@ def persist_ping(client, channel: str, ts: str, raw_text: str, blocks=None) -> N
         (raw_text or "")[:120],
         [b.get("type") for b in (blocks or [])],
     )
-    _recover_recap_before(client, channel, ts)
+    if _recover_recap_before(client, channel, ts):
+        return
+    if notify and _looks_like_recap(raw_text, blocks):
+        alert(
+            "your @matthias-day message looked like a real recap but i found no bullets in it, "
+            "so it's not in my journal (and not in the 50 days thread). check the logs, then "
+            "`python -m scripts.backfill_matthias_day` once it's fixed."
+        )
 
 
-def _recover_recap_before(client, channel: str, ts: str) -> None:
+def _looks_like_recap(raw_text: str, blocks) -> bool:
+    """a real recap, as opposed to a short "^^" re-ping: it has a rich_text list or
+    more than a few words once the ping is stripped."""
+    if any(
+        el.get("type") == "rich_text_list"
+        for b in blocks or []
+        for el in b.get("elements", [])
+    ):
+        return True
+    return len(clean_ping_text(raw_text)) > 25
+
+
+def alert(text: str) -> None:
+    """tell matthias in his dm that the recap pipeline failed. plain text on purpose
+    (like the error fallbacks in handlers.py: this is the thing reporting a failure).
+    never raises."""
+    try:
+        from bot.scheduler import _post_dm  # late import: scheduler imports half the bot
+
+        _post_dm(text)
+    except Exception:  # noqa: BLE001
+        logger.exception("could not dm the matthias-day failure alert")
+
+
+def _recover_recap_before(client, channel: str, ts: str) -> bool:
     """a re-ping exists because the real recap right above it didn't notify
     (its own ping didn't fire/expand) - so that recap may never have been
     matched as a ping at all. walk back through the messages just before
@@ -211,10 +253,10 @@ def _recover_recap_before(client, channel: str, ts: str) -> None:
         )
     except Exception:  # noqa: BLE001
         logger.exception("failed to fetch history before matthias-day re-ping %s", ts)
-        return
+        return False
     if not resp.get("ok"):
         logger.error("conversations_history failed: %s", resp.get("error"))
-        return
+        return False
     for msg in resp.get("messages", []):  # newest first
         if float(ts) - float(msg.get("ts", 0)) > _RECOVER_MAX_GAP_SECONDS:
             break
@@ -224,15 +266,15 @@ def _recover_recap_before(client, channel: str, ts: str) -> None:
         content = message_recap(text, msg.get("blocks"))
         if content:
             logger.info("recovered recap above re-ping %s: %r", ts, content[:60])
-            _persist_recap(client, channel, msg["ts"], content)
-            return
+            return _persist_recap(client, channel, msg["ts"], content)
         if _matthias_day_pinged(text):
             continue  # another re-ping - keep looking further up
         break
     logger.info("no recap found above re-ping %s, skipping", ts)
+    return False
 
 
-def _persist_recap(client, channel: str, ts: str, content: str) -> None:
+def _persist_recap(client, channel: str, ts: str, content: str) -> bool:
     """store one cleaned recap, dated to its own ts, with its permalink."""
     permalink = None
     try:
@@ -246,7 +288,7 @@ def _persist_recap(client, channel: str, ts: str, content: str) -> None:
         # get inserted again on every backfill. skip it instead; the next
         # backfill run retries it.
         logger.warning("skipping matthias-day ping %s (no permalink) - safe to retry later", ts)
-        return
+        return False
     created_at = datetime.datetime.fromtimestamp(float(ts), AMSTERDAM_TZ).isoformat()
     append_message(
         conv_key(channel),
@@ -264,3 +306,4 @@ def _persist_recap(client, channel: str, ts: str, content: str) -> None:
         # cleanly on the next backfill run instead of being silently lost.
         require_embedding=True,
     )
+    return has_permalink(permalink)
