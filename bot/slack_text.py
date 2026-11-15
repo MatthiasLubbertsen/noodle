@@ -1,3 +1,4 @@
+import difflib
 import logging
 import re
 
@@ -5,6 +6,34 @@ import config
 from bot import state
 
 logger = logging.getLogger("noodle")
+
+# a reply this close to one of noodle's own recent messages is a repeat
+REPEAT_RATIO = 0.9
+REPEAT_WINDOW = 8
+_MIN_REPEAT_CHARS = 25
+
+
+def _comparable(text: str) -> str:
+    return " ".join(re.sub(r"[^\w]+", " ", (text or "").lower()).split())
+
+
+def repeats_recent_reply(text: str, history: list[dict]) -> bool:
+    """true when `text` repeats (or nearly repeats) one of noodle's own recent
+    assistant messages. real incident: "ow I did not make that" and "nah I won't
+    do it rn" were both answered with the end-of-day wrap-up, word for word, from
+    the last assistant turn in history. short replies are never flagged."""
+    new = _comparable(text)
+    if len(new) < _MIN_REPEAT_CHARS:
+        return False
+    for message in history[-REPEAT_WINDOW:]:
+        if message.get("role") != "assistant":
+            continue
+        old = _comparable(message.get("content") or "")
+        if not old:
+            continue
+        if old == new or difflib.SequenceMatcher(None, old, new).ratio() >= REPEAT_RATIO:
+            return True
+    return False
 
 
 def _is_dm(event: dict) -> bool:
