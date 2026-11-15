@@ -805,6 +805,13 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   50 minus the days until dec 31 (nov 12 = day 1), nothing outside 1-50. the channel is joined
   at startup like the other configured ones. unset = off.
 
+- **backfilling missed days:** `scripts/backfill_fifty_days.py` (docker: `docker compose exec noodle python
+  -m scripts.backfill_fifty_days`, `--dry-run` first to see it) posts one `:50days: Day X/50` + recap link per
+  missed day into the goal thread, with `reply_broadcast` (also sent to the channel), oldest first, taking the
+  last bulleted recap of each day from #matthias. days that already have a `:50days: Day X/50` first line in
+  the thread (by anyone) are skipped, so it is safe to re-run. day 1 is nov 12 (the organizers' "50 days left"
+  post), so nov 15 is day 4; the organizers allow backfilling.
+
 ### 7. morning wakeup dm
 - with the web session configured (see 8b), the morning dm goes out when `USER_ID` first comes
   online each day instead of at a fixed time (`bot/wakeup.py`, details in 8b). without it, a

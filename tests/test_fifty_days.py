@@ -73,5 +73,20 @@ class CrosspostTests(unittest.TestCase):
             fifty_days.crosspost(client, "C0A9NJT2BCJ", TS, "<!subteam^S0AK8LYJ8FR>\n• x")
 
 
+class BackfillHelpers(unittest.TestCase):
+    def test_days_already_posted_reads_the_first_line_only(self):
+        client = mock.Mock()
+        client.conversations_replies.return_value = {"messages": [
+            {"text": ":50days: Day 2/50\n<https://x>"},
+            {"text": "nice! :50days: Day 3/50"},   # not a day post
+            {"text": ":50days: Day 4/50"},
+            {"text": "hello"},
+        ]}
+        self.assertEqual(fifty_days.days_already_posted(client, ("C1", "1.1")), {2, 4})
+
+    def test_day_text_first_line_is_exact(self):
+        self.assertEqual(fifty_days.day_text(5, "https://x"), ":50days: Day 5/50\n<https://x>")
+
+
 if __name__ == "__main__":
     unittest.main()
