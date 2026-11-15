@@ -8,11 +8,18 @@ from bot import features, games, state
 from bot.history_store import append_message_async
 from bot.memory import trim_memory
 from bot.netlog import log_hcai
-from bot.slack_text import _clean_reply
+from bot.slack_text import _clean_reply, repeats_recent_reply
 from bot.tools import TOOLS, available_tools, run_tool
 from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
+
+REPEAT_NOTE = (
+    "your reply just repeated a message you already sent earlier in this chat (probably "
+    "your last one, or the end-of-day wrap-up). do not resend it or paraphrase it. answer "
+    "what he actually wrote just now, in new words; if he is correcting you, own it in a "
+    "line or two."
+)
 
 # each round the model can call several tools at once (run in order); results go
 # back and it can call more, e.g. list devices -> list blocklists -> start session.
@@ -220,6 +227,7 @@ def ask_noodle(
 
     messages = [{"role": "system", "content": system_content}] + history
     leak_retried = False
+    repeat_guard_used = False
     game_guard_used = False
     force_tool = None
     for _ in range(MAX_TOOL_ROUNDS):
@@ -252,6 +260,14 @@ def ask_noodle(
                 )
                 continue
             final = _strip_group_ping(_strip_leaked_tool_names(_clean_reply(raw_content)))
+            if not repeat_guard_used and repeats_recent_reply(final, history):
+                # it sent one of its own earlier messages again (the wrap-up, a
+                # reply from a few turns back). give it one chance to answer what
+                # he actually wrote before sending anything.
+                repeat_guard_used = True
+                logger.warning("reply repeated an earlier message of noodle's - retrying once")
+                messages = messages + [{"role": "system", "content": REPEAT_NOTE}]
+                continue
             if not game_guard_used and games.looks_like_fake_turn(final, user_text, user_id, origin):
                 # it narrated a game turn without running the game: make it call the tool once
                 game_guard_used = True

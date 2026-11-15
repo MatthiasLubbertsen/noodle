@@ -122,5 +122,42 @@ class ChannelLink(unittest.TestCase):
             self.assertEqual(slack_text._channel_link("C1"), "<#C1>")
 
 
+class RepeatedReplies(unittest.TestCase):
+    WRAPUP = (
+        "you kept it low key today: 23 slack messages, one commit, and 75 tracks. "
+        "that's a nice end-of-day rhythm."
+    )
+
+    def history(self, *turns):
+        return [{"role": role, "content": text} for role, text in turns]
+
+    def test_word_for_word_repeat_is_caught(self):
+        history = self.history(("user", "Lowkey yes"), ("assistant", self.WRAPUP))
+        self.assertTrue(slack_text.repeats_recent_reply(self.WRAPUP, history))
+
+    def test_near_repeat_with_a_small_change_is_caught(self):
+        history = self.history(("assistant", self.WRAPUP))
+        self.assertTrue(slack_text.repeats_recent_reply(self.WRAPUP + " nice.", history))
+
+    def test_a_new_answer_is_not_flagged(self):
+        history = self.history(("assistant", self.WRAPUP))
+        answer = "ah sorry, you're right, i got that wrong. what did you actually mean?"
+        self.assertFalse(slack_text.repeats_recent_reply(answer, history))
+
+    def test_short_replies_are_never_flagged(self):
+        history = self.history(("assistant", "lol"), ("assistant", self.WRAPUP))
+        self.assertFalse(slack_text.repeats_recent_reply("lol", history))
+
+    def test_only_assistant_turns_count(self):
+        history = self.history(("user", self.WRAPUP))
+        self.assertFalse(slack_text.repeats_recent_reply(self.WRAPUP, history))
+
+    def test_old_messages_outside_the_window_are_ignored(self):
+        history = self.history(("assistant", self.WRAPUP))
+        history += [("user", "x"), ("assistant", "something else entirely")] * slack_text.REPEAT_WINDOW
+        history = [{"role": r, "content": c} for r, c in history]
+        self.assertFalse(slack_text.repeats_recent_reply(self.WRAPUP, history))
+
+
 if __name__ == "__main__":
     unittest.main()
