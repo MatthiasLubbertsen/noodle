@@ -1,5 +1,6 @@
 import logging
 import threading
+import random
 import time
 
 import config
@@ -129,6 +130,15 @@ def _should_respond(event: dict):
     return False, None, None, False
 
 
+# hand-written (the model is what just failed), in noodle's own voice
+BLANK_REPLIES = [
+    "uhh, my brain came up blank on that one. try again?",
+    "i opened my mouth and nothing came out. say that again?",
+    "oops, i stared at that and forgot how words work. one more time?",
+    "huh, i totally blanked. poke me again?",
+]
+
+
 def _process(channel: str, prompt: str, thread_ts: str | None, key: str,
              location: str | None = None, persist: bool = False,
              user_id: str | None = None, origin: dict | None = None) -> None:
@@ -159,7 +169,7 @@ def _process_locked(channel: str, prompt: str, thread_ts: str | None, key: str,
         fragments = [f for f in chunk_response(reply) if f.strip()][:8]
         if not fragments:
             logger.warning("empty reply for %s, sending a fallback instead", key)
-            fragments = ["uhh, my brain came up blank on that one. try again?"]
+            fragments = [random.choice(BLANK_REPLIES)]
         for fragment in fragments:
             payload = {"channel": channel, "text": fragment}
             if thread_ts:

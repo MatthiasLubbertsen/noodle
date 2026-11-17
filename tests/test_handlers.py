@@ -237,7 +237,7 @@ class Failures(HandlerTestCase):
         self.settle()
         texts = [t for _, t, _ in self.fake.posted()]
         self.assertEqual(len(texts), 1)
-        self.assertIn("came up blank", texts[0])
+        self.assertIn(texts[0], handlers.BLANK_REPLIES)
 
 class EmptyReplyRetry(unittest.TestCase):
     """llm.ask_noodle retries once when the model's reply is empty after cleanup."""
