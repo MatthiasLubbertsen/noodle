@@ -776,6 +776,24 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   any failure leaves no trace, and simply re-running the backfill fills
   in whatever was missed.
 
+- **the recap can live in `blocks`, not `text`.** from oct 16 to nov 15 every recap was logged as
+  "non-bullet ... '' - no recap found" and never journaled (the journal in the db stopped at oct 21,
+  nothing in data/ for 3+ weeks), and the 50 days post silently skipped: the event's `text` was only the
+  header (`<!subteam^...> today:`) with the bullets in the message's rich_text `blocks`. nothing in the
+  noodle code changed on oct 16, so the site that posts the ping is what changed. `matthias_day.message_recap()`
+  now reads text first, then `blocks` (`text_from_blocks()`: bullets, nested "◦", emoji, links), and
+  `recap_content()` re-reads the stored message as a last resort. `persist_ping()`, `fifty_days.crosspost()`,
+  the re-ping recovery and `scripts/backfill_matthias_day.py` all use it. the "non-bullet" log line now
+  carries the raw text and block types. **after deploying, run `python -m scripts.backfill_matthias_day`**
+  to fill the gap (dedup by permalink makes it safe to re-run).
+
+- **failures tell him.** `persist_ping()` dms matthias (plain text, `matthias_day.alert()`) when a real recap
+  can't be saved (no permalink, or the embedding failed), or when a message that looks like a recap (a
+  rich_text list, or more than a few words after the ping) has no bullets anywhere; a short "^^" re-ping stays
+  silent. `fifty_days.crosspost()` dms when its post fails. the backfill script passes `notify=False` (one dm
+  per failed old day would be spam). backfill in docker: `docker compose exec noodle python -m
+  scripts.backfill_matthias_day` (the container is `noodle`, cwd `/app`, `./data` is the bind mount).
+
 ### 6c. 50 days crosspost (`bot/fifty_days.py`)
 - hack club's "50 days" challenge wants a daily update as a reply to your goal message, also
   sent to the channel, first line exactly `:50days: Day X/50`. matthias already writes a daily
@@ -786,6 +804,14 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   exact). only a recap with bullets counts, so a re-ping never posts a second one; day number =
   50 minus the days until dec 31 (nov 12 = day 1), nothing outside 1-50. the channel is joined
   at startup like the other configured ones. unset = off.
+
+- **backfilling missed days:** `scripts/backfill_fifty_days.py` (docker: `docker compose exec noodle python
+  -m scripts.backfill_fifty_days`, `--dry-run` first to see it) posts one `:50days: Day X/50` + recap link per
+  missed day into the goal thread only (no `reply_broadcast`: the live post is also sent to the channel, the
+  backfill is not), oldest first, taking the
+  last bulleted recap of each day from #matthias. days that already have a `:50days: Day X/50` first line in
+  the thread (by anyone) are skipped, so it is safe to re-run. day 1 is nov 12 (the organizers' "50 days left"
+  post), so nov 15 is day 4; the organizers allow backfilling.
 
 ### 7. morning wakeup dm
 - with the web session configured (see 8b), the morning dm goes out when `USER_ID` first comes

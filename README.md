@@ -238,6 +238,25 @@ exists.
 logs go to the console either way; the code also tries to write
 `logs/noodle.log` and falls back to console only if that's not writable.
 
+### backfilling the @matthias-day journal
+
+if recaps were missed (it stopped saving them once), fill the gap from the channel's history. it skips
+days that are already saved, so it is safe to run again:
+
+```bash
+docker compose exec noodle python -m scripts.backfill_matthias_day
+```
+
+### backfilling the 50 days thread
+
+noodle links each recap into your 50 days goal thread (`FIFTY_DAYS_THREAD`). for days it missed, this posts
+`:50days: Day X/50` + the recap link for each one in the thread only (not also sent to the channel), skipping days already posted:
+
+```bash
+docker compose exec noodle python -m scripts.backfill_fifty_days --dry-run   # look first
+docker compose exec noodle python -m scripts.backfill_fifty_days             # post
+```
+
 ## .env reference
 
 | var | meaning |
