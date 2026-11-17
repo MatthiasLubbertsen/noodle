@@ -154,7 +154,12 @@ def _process_locked(channel: str, prompt: str, thread_ts: str | None, key: str,
                 key, prompt, location=location, persist=persist, user_id=user_id, origin=origin
             )
         # cap fragments so noodle never spams the channel
-        fragments = chunk_response(reply)[:8]
+        # never post an empty message: slack rejects it (no_text) and the reply turned
+        # into "oops, something went wrong". ask_noodle already retried once.
+        fragments = [f for f in chunk_response(reply) if f.strip()][:8]
+        if not fragments:
+            logger.warning("empty reply for %s, sending a fallback instead", key)
+            fragments = ["uhh, my brain came up blank on that one. try again?"]
         for fragment in fragments:
             payload = {"channel": channel, "text": fragment}
             if thread_ts:

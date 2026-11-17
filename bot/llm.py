@@ -14,6 +14,11 @@ from bot.tz import AMSTERDAM_TZ
 
 logger = logging.getLogger("noodle")
 
+EMPTY_NOTE = (
+    "your last reply came out empty, so nothing was sent. answer his message now with an "
+    "actual short reply, even if it's just a quick reaction."
+)
+
 REPEAT_NOTE = (
     "your reply just repeated a message you already sent earlier in this chat (probably "
     "your last one, or the end-of-day wrap-up). do not resend it or paraphrase it. answer "
@@ -229,6 +234,7 @@ def ask_noodle(
     leak_retried = False
     repeat_guard_used = False
     game_guard_used = False
+    empty_retried = False
     force_tool = None
     for _ in range(MAX_TOOL_ROUNDS):
         if force_tool:
@@ -260,6 +266,22 @@ def ask_noodle(
                 )
                 continue
             final = _strip_group_ping(_strip_leaked_tool_names(_clean_reply(raw_content)))
+            if not final.strip():
+                # nothing left to send: the model answered with no text at all, or our
+                # cleanup stripped all of it. log which, then give it one more go
+                # (real incident: a pasted log line got an empty reply and slack
+                # rejected the post with no_text).
+                logger.warning(
+                    "model reply was empty after cleanup (finish_reason=%s, raw=%r)%s",
+                    response.choices[0].finish_reason,
+                    raw_content[:300],
+                    "" if not empty_retried else " - giving up",
+                )
+                if not empty_retried:
+                    empty_retried = True
+                    messages = messages + [{"role": "system", "content": EMPTY_NOTE}]
+                    continue
+                return ""
             if not repeat_guard_used and repeats_recent_reply(final, history):
                 # it sent one of its own earlier messages again (the wrap-up, a
                 # reply from a few turns back). give it one chance to answer what
@@ -315,6 +337,12 @@ def ask_noodle(
     final = _strip_group_ping(
         _strip_leaked_tool_names(_clean_reply(final_resp.choices[0].message.content or ""))
     )
+    if not final.strip():
+        logger.warning(
+            "model reply was empty after the tool round cap (finish_reason=%s)",
+            final_resp.choices[0].finish_reason,
+        )
+        return ""
     history.append({"role": "assistant", "content": final})
     _remember(conv_key, "assistant", final, persist)
     state.LAST_REPLY[conv_key] = (time.time(), final)
