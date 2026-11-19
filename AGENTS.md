@@ -58,6 +58,7 @@ noodle/
     usergroups.py         # add/remove a user from a slack usergroup
     watch.py              # channel join/leave analytics + automations
     matthias_day.py       # clean + persist @matthias-day recap pings into memory
+    fifty_days.py         # links each @matthias-day recap into his 50 days goal thread, see 6c
     reminders.py          # scheduled reminders: sqlite store + recurrence math
     freedom.py            # calls matthias's self-hosted freedom.to focus-session api
     freedom_tool.py       # the full `freedom` tool (devices, blocklists, sessions, schedules)
@@ -444,6 +445,17 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   tools" section's explicit instruction not to write a tool's name in a
   reply at all.
 
+### 4c-ii. an empty reply is retried once, never posted
+- real incident: matthias pasted a log line in `#matthias`, the model came back with no text,
+  `chunk_response()` turned that into `[""]` and slack refused the post (`no_text`), so he got
+  "oops, something went wrong on my end".
+- `ask_noodle()` now checks the reply after cleanup (`_clean_reply`, leaked-name and group-ping
+  stripping): if nothing is left it logs `finish_reason` and the raw text (so the logs say whether
+  the model sent nothing or our cleanup ate it), adds `EMPTY_NOTE` and asks once more. a second
+  empty reply returns `""`.
+- `handlers._process_locked()` drops blank fragments and, if none are left, posts a short
+  hand-written "came up blank" line instead of an empty message.
+
 ### 4d. memory: live context (in-memory) + persisted, embedded history
 - **live context.** noodle keeps a per-conversation history (`state.MEMORY`,
   keyed by `bot.memory.conv_key()`) of the last ~12 user turns, including
@@ -774,6 +786,43 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   inserted again on every backfill. same idea as `require_embedding`:
   any failure leaves no trace, and simply re-running the backfill fills
   in whatever was missed.
+
+- **the recap can live in `blocks`, not `text`.** from oct 16 to nov 15 every recap was logged as
+  "non-bullet ... '' - no recap found" and never journaled (the journal in the db stopped at oct 21,
+  nothing in data/ for 3+ weeks), and the 50 days post silently skipped: the event's `text` was only the
+  header (`<!subteam^...> today:`) with the bullets in the message's rich_text `blocks`. nothing in the
+  noodle code changed on oct 16, so the site that posts the ping is what changed. `matthias_day.message_recap()`
+  now reads text first, then `blocks` (`text_from_blocks()`: bullets, nested "◦", emoji, links), and
+  `recap_content()` re-reads the stored message as a last resort. `persist_ping()`, `fifty_days.crosspost()`,
+  the re-ping recovery and `scripts/backfill_matthias_day.py` all use it. the "non-bullet" log line now
+  carries the raw text and block types. **after deploying, run `python -m scripts.backfill_matthias_day`**
+  to fill the gap (dedup by permalink makes it safe to re-run).
+
+- **failures tell him.** `persist_ping()` dms matthias (plain text, `matthias_day.alert()`) when a real recap
+  can't be saved (no permalink, or the embedding failed), or when a message that looks like a recap (a
+  rich_text list, or more than a few words after the ping) has no bullets anywhere; a short "^^" re-ping stays
+  silent. `fifty_days.crosspost()` dms when its post fails. the backfill script passes `notify=False` (one dm
+  per failed old day would be spam). backfill in docker: `docker compose exec noodle python -m
+  scripts.backfill_matthias_day` (the container is `noodle`, cwd `/app`, `./data` is the bind mount).
+
+### 6c. 50 days crosspost (`bot/fifty_days.py`)
+- hack club's "50 days" challenge wants a daily update as a reply to your goal message, also
+  sent to the channel, first line exactly `:50days: Day X/50`. matthias already writes a daily
+  recap, so with `FIFTY_DAYS_THREAD` set (the link to his goal message, or `CHANNEL:TS`) every
+  `@matthias-day` ping makes noodle post that line plus the recap's permalink there
+  (`reply_broadcast`); slack unfurls the link into an embed. the organizer okayed a bot doing this.
+- posted by noodle, not matthias, and deliberately NOT model-written (the first line has to be
+  exact). only a recap with bullets counts, so a re-ping never posts a second one; day number =
+  50 minus the days until dec 31 (nov 12 = day 1), nothing outside 1-50. the channel is joined
+  at startup like the other configured ones. unset = off.
+
+- **backfilling missed days:** `scripts/backfill_fifty_days.py` (docker: `docker compose exec noodle python
+  -m scripts.backfill_fifty_days`, `--dry-run` first to see it) posts one `:50days: Day X/50` + recap link per
+  missed day into the goal thread only (no `reply_broadcast`: the live post is also sent to the channel, the
+  backfill is not), oldest first, taking the
+  last bulleted recap of each day from #matthias. days that already have a `:50days: Day X/50` first line in
+  the thread (by anyone) are skipped, so it is safe to re-run. day 1 is nov 12 (the organizers' "50 days left"
+  post), so nov 15 is day 4; the organizers allow backfilling.
 
 ### 7. morning wakeup dm
 - with the web session configured (see 8b), the morning dm goes out when `USER_ID` first comes
@@ -1424,6 +1473,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `DAILY_MORNING_DM` | `HH:MM`, when the morning wakeup dm goes out; only used without `SLACK_WEB_TOKEN`/`SLACK_WEB_COOKIE` (with them it goes out when matthias first comes online) |
 | `MATTHIAS_DAY_GROUP_ID` | usergroup id for `@matthias-day` (defaults to the real id, `S0AK8LYJ8FR`) |
 | `MATTHIAS_DAY_CHANNEL_ID` | channel the daily recap pings are posted in (defaults to `#matthias`, `C0A9NJT2BCJ`) |
+| `FIFTY_DAYS_THREAD` | link to matthias's goal message in the 50 days channel; set = each recap is linked into that thread, see 6c |
 | `FREEDOM_API_BASE` | base url of matthias's self-hosted freedom api (defaults to `https://freedom.matthiaz.dev`) |
 | `FREEDOM_API_KEY` | bearer key for that api; optional - unset just disables `start_freedom_session` |
 | `FREEDOM_DEVICE_NAMES` | comma separated device names (as shown in freedom's dashboard) allowed to be blocked - the account is shared, so this is never "all devices" (defaults to `Matthias Windows,mopa5m`) |

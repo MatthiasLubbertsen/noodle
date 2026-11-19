@@ -1,11 +1,12 @@
 import logging
 import threading
+import random
 import time
 
 import config
 from openai import APIConnectionError
 
-from bot import matthias_day, state
+from bot import fifty_days, matthias_day, state
 from bot.chunk import chunk_response
 from bot.gate import should_reply_unprompted
 from bot.llm import ask_noodle
@@ -129,6 +130,15 @@ def _should_respond(event: dict):
     return False, None, None, False
 
 
+# hand-written (the model is what just failed), in noodle's own voice
+BLANK_REPLIES = [
+    "uhh, my brain came up blank on that one. try again?",
+    "i opened my mouth and nothing came out. say that again?",
+    "oops, i stared at that and forgot how words work. one more time?",
+    "huh, i totally blanked. poke me again?",
+]
+
+
 def _process(channel: str, prompt: str, thread_ts: str | None, key: str,
              location: str | None = None, persist: bool = False,
              user_id: str | None = None, origin: dict | None = None) -> None:
@@ -154,7 +164,12 @@ def _process_locked(channel: str, prompt: str, thread_ts: str | None, key: str,
                 key, prompt, location=location, persist=persist, user_id=user_id, origin=origin
             )
         # cap fragments so noodle never spams the channel
-        fragments = chunk_response(reply)[:8]
+        # never post an empty message: slack rejects it (no_text) and the reply turned
+        # into "oops, something went wrong". ask_noodle already retried once.
+        fragments = [f for f in chunk_response(reply) if f.strip()][:8]
+        if not fragments:
+            logger.warning("empty reply for %s, sending a fallback instead", key)
+            fragments = [random.choice(BLANK_REPLIES)]
         for fragment in fragments:
             payload = {"channel": channel, "text": fragment}
             if thread_ts:
@@ -247,7 +262,13 @@ def handle_message(event: dict) -> None:
         # so it's searchable later and linked back to the original message.
         threading.Thread(
             target=matthias_day.persist_ping,
-            args=(state.app.client, channel, event.get("ts"), text),
+            args=(state.app.client, channel, event.get("ts"), text, event.get("blocks")),
+            daemon=True,
+        ).start()
+        # and link it into his 50 days goal thread (no-op unless configured)
+        threading.Thread(
+            target=fifty_days.crosspost,
+            args=(state.app.client, channel, event.get("ts"), text, event.get("blocks")),
             daemon=True,
         ).start()
         return

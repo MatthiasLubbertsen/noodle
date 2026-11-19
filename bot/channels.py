@@ -55,6 +55,11 @@ def configured_channel_ids() -> list[str]:
         config.LOGS_CHANNEL_ID,
         *config.ALLOWED_CHANNELS,
     ]
+    from bot import fifty_days
+
+    fifty = fifty_days.target()
+    if fifty:
+        ids.append(fifty[0])
     seen: list[str] = []
     for cid in ids:
         if cid and cid != "*" and cid.startswith("C") and cid not in seen:

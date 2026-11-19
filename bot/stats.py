@@ -111,7 +111,8 @@ def build_daily_summary(user_id: str) -> str:
     if count < 0:
         facts = "the search for today's message count failed, so you don't know the number"
     else:
-        facts = f"matthias has sent {count} slack message{'' if count == 1 else 's'} today"
+        today = datetime.datetime.now(AMSTERDAM_TZ).strftime("%A")
+        facts = f"today is {today}\nmatthias has sent {count} slack message{'' if count == 1 else 's'} today"
         avg = average_fact(user_id)
         if avg:
             facts += f"\n{avg}"

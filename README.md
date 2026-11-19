@@ -238,6 +238,25 @@ exists.
 logs go to the console either way; the code also tries to write
 `logs/noodle.log` and falls back to console only if that's not writable.
 
+### backfilling the @matthias-day journal
+
+if recaps were missed (it stopped saving them once), fill the gap from the channel's history. it skips
+days that are already saved, so it is safe to run again:
+
+```bash
+docker compose exec noodle python -m scripts.backfill_matthias_day
+```
+
+### backfilling the 50 days thread
+
+noodle links each recap into your 50 days goal thread (`FIFTY_DAYS_THREAD`). for days it missed, this posts
+`:50days: Day X/50` + the recap link for each one in the thread only (not also sent to the channel), skipping days already posted:
+
+```bash
+docker compose exec noodle python -m scripts.backfill_fifty_days --dry-run   # look first
+docker compose exec noodle python -m scripts.backfill_fifty_days             # post
+```
+
 ## .env reference
 
 | var | meaning |
@@ -271,6 +290,7 @@ logs go to the console either way; the code also tries to write
 | `FREEDOM_API_BASE` / `FREEDOM_API_KEY` / `FREEDOM_DEVICE_NAMES` | matthias's self-hosted freedom api; key optional (unset disables the freedom tools); device names are the only devices ever blocked |
 | `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
 | `MATTHIAS_DAY_CHANNEL_ID` | channel the daily recap pings are posted in |
+| `FIFTY_DAYS_THREAD` | optional: link to your goal message in Hack Club's 50 days channel; each daily recap is then linked into that thread |
 | `WATCHED_CHANNEL_ID` | channel to watch for joins/leaves; empty disables the feature |
 | `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
 | `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |
