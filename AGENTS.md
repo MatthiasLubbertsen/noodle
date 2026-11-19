@@ -415,6 +415,14 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   touched, since they separate slack messages. the prompt rule alone wasn't enough,
   the model kept using them.
 
+### 4c-iii. slack formatting, not github markdown; noodle jokes stay jokes
+- `slack_text._slack_markdown()` (part of `_clean_reply()`) turns `**x**`/`__x__` into slack's `*x*`/`_x_`,
+  `~~x~~` into `~x~`, `[label](url)` into `<url|label>` and `# heading` lines into a bold line; code is left
+  alone. real incident: the `@matthias-day` count reply went out as "sent **130** messages", stars visible.
+- people ask noodle to make spaghetti / cook / be eaten every day. the persona prompt says to answer that (and
+  anything else it physically can't do) with one sarcastic in-character line: no "i can't actually", no recipe
+  offer, no "want me to...?" closer. real incident: "make me spageit" got "i can't actually cook... want a recipe?".
+
 ### 4c. never send reasoning to slack
 - noodle only ever forwards the model's final `content` to slack. any
   chain-of-thought / `<think:6124c78e>...</think:6124c78e>` blocks are stripped before chunking,
