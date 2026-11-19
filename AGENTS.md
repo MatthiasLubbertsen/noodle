@@ -445,6 +445,17 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   tools" section's explicit instruction not to write a tool's name in a
   reply at all.
 
+### 4c-ii. an empty reply is retried once, never posted
+- real incident: matthias pasted a log line in `#matthias`, the model came back with no text,
+  `chunk_response()` turned that into `[""]` and slack refused the post (`no_text`), so he got
+  "oops, something went wrong on my end".
+- `ask_noodle()` now checks the reply after cleanup (`_clean_reply`, leaked-name and group-ping
+  stripping): if nothing is left it logs `finish_reason` and the raw text (so the logs say whether
+  the model sent nothing or our cleanup ate it), adds `EMPTY_NOTE` and asks once more. a second
+  empty reply returns `""`.
+- `handlers._process_locked()` drops blank fragments and, if none are left, posts a short
+  hand-written "came up blank" line instead of an empty message.
+
 ### 4d. memory: live context (in-memory) + persisted, embedded history
 - **live context.** noodle keeps a per-conversation history (`state.MEMORY`,
   keyed by `bot.memory.conv_key()`) of the last ~12 user turns, including

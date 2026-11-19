@@ -228,6 +228,56 @@ class Failures(HandlerTestCase):
         self.send(user=ME, channel=DM, channel_type="im")
         self.assertTrue(wait_for(lambda: len(self.fake.posted()) >= 2))  # the reply, then the apology
 
+    def test_empty_reply_posts_a_fallback_instead_of_no_text(self):
+        # real incident: the model returned nothing, slack refused the post (no_text) and
+        # he got "oops, something went wrong"
+        with mock.patch.object(handlers, "ask_noodle", return_value="  \n\n  "):
+            self.send(user=ME, channel=DM, channel_type="im")
+            self.assertTrue(wait_for(self.fake.posted))
+        self.settle()
+        texts = [t for _, t, _ in self.fake.posted()]
+        self.assertEqual(len(texts), 1)
+        self.assertIn(texts[0], handlers.BLANK_REPLIES)
+
+class EmptyReplyRetry(unittest.TestCase):
+    """llm.ask_noodle retries once when the model's reply is empty after cleanup."""
+
+    def _resp(self, content):
+        msg = types.SimpleNamespace(content=content, tool_calls=None)
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg, finish_reason="stop")])
+
+    def _run(self, replies):
+        from bot import llm
+        calls = []
+
+        def fake_chat(messages, **kw):
+            calls.append(messages)
+            return self._resp(replies[len(calls) - 1])
+
+        state.MEMORY = {}
+        state.LAST_REPLY = {}
+        logging.disable(logging.CRITICAL)
+        self.addCleanup(logging.disable, logging.NOTSET)
+        with mock.patch.object(llm, "_call_chat", side_effect=fake_chat), \
+                mock.patch.object(llm, "_remember"), \
+                mock.patch.object(llm, "_runtime_context", return_value=""), \
+                mock.patch.object(llm, "available_tools", return_value=[]), \
+                mock.patch.object(llm.games, "auto", return_value=None):
+            out = llm.ask_noodle("dm:test", "some pasted log line")
+        return out, calls
+
+    def test_empty_reply_is_retried_once_with_a_note(self):
+        from bot import llm
+        out, calls = self._run(["", "lol nice, backfill done"])
+        self.assertEqual(out, "lol nice, backfill done")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1][-1], {"role": "system", "content": llm.EMPTY_NOTE})
+
+    def test_gives_up_after_one_retry(self):
+        out, calls = self._run(["", "   "])
+        self.assertEqual(out, "")
+        self.assertEqual(len(calls), 2)
+
 
 class Ordering(HandlerTestCase):
     def test_messages_in_one_conversation_are_handled_one_at_a_time(self):
