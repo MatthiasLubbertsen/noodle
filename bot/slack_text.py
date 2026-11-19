@@ -90,7 +90,24 @@ def _clean_reply(text: str) -> str:
         return ""
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<reasoning>.*?</reasoning>", "", text, flags=re.DOTALL | re.IGNORECASE)
-    return _tidy_links(_no_dashes(text.strip()))
+    return _tidy_links(_slack_markdown(_no_dashes(text.strip())))
+
+
+def _slack_markdown(text: str) -> str:
+    """the model writes github markdown out of habit, slack shows it raw (real incident:
+    "matthias just sent **130** messages" with the stars visible). `**x**`/`__x__` become
+    slack's `*x*`, `~~x~~` becomes `~x~`, `[label](url)` becomes `<url|label>` and a
+    `# heading` line becomes a bold line. code spans and code blocks are left alone."""
+
+    def fix(part: str) -> str:
+        part = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"*\1*", part)
+        part = re.sub(r"(?<!\w)__(?=\S)(.+?)(?<=\S)__(?!\w)", r"_\1_", part)
+        part = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"~\1~", part)
+        part = re.sub(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)", r"<\2|\1>", part)
+        return re.sub(r"(?m)^#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$", r"*\1*", part)
+
+    parts = re.split(r"(```.*?```|`[^`\n]*`)", text, flags=re.DOTALL)
+    return "".join(p if p.startswith("`") else fix(p) for p in parts)
 
 
 _URL = re.compile(r"<(https?://[^|>\s]+)(?:\|([^>]*))?>|(?<![<|/\w])(https?://[^\s<>|`]+)")

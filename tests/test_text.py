@@ -51,6 +51,17 @@ class CleanReply(unittest.TestCase):
     def test_space_before_punctuation_after_a_link_is_closed(self):
         self.assertEqual(self.clean("<https://a.dev|a.dev> . ok"), "<https://a.dev|a.dev>. ok")
 
+    def test_github_markdown_becomes_slack_formatting(self):
+        # real incident: "matthias just sent **130** messages" went out with the stars visible
+        self.assertEqual(self.clean("sent **130** messages"), "sent *130* messages")
+        self.assertEqual(self.clean("## big news"), "*big news*")
+        self.assertEqual(self.clean("a ~~b~~ c __d__"), "a ~b~ c _d_")
+        self.assertEqual(self.clean("see [docs](https://a.dev/x)"), "see <https://a.dev/x|docs>")
+        self.assertEqual(self.clean("snake_case_name and *bold*"), "snake_case_name and *bold*")
+
+    def test_markdown_inside_code_is_left_alone(self):
+        self.assertEqual(self.clean("`**x**` ```\n**y**\n```"), "`**x**` ```\n**y**\n```")
+
 
 class IncomingText(unittest.TestCase):
     def setUp(self):
