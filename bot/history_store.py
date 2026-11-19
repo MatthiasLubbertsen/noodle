@@ -215,6 +215,26 @@ def load_history(conv_key: str, limit: int = 48) -> list[dict]:
     return [{"role": role, "content": content} for role, content in rows]
 
 
+def load_assistant_replies(conv_key: str, limit: int = 300) -> list[dict]:
+    """noodle's own stored messages for one conversation, newest first. unlike
+    load_history() this is not the live context window: it reaches back to
+    everything persisted, so a repeat of an old scheduled dm is still caught."""
+    try:
+        conn = sqlite3.connect(config.MEMORY_DB_PATH)
+        try:
+            rows = conn.execute(
+                "SELECT content FROM messages WHERE conv_key = ? AND role = 'assistant' "
+                "ORDER BY julianday(created_at) DESC, id DESC LIMIT ?",
+                (conv_key, limit),
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to load stored replies (conv_key=%s)", conv_key)
+        return []
+    return [{"role": "assistant", "content": content} for (content,) in rows]
+
+
 def load_kind_between(kind: str, start_date: str, end_date: str) -> list[dict]:
     """rows of one kind whose local date is in [start_date, end_date]
     (inclusive, 'YYYY-MM-DD'), oldest first. created_at is stored as an

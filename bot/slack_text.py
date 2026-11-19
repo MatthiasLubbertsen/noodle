@@ -9,7 +9,6 @@ logger = logging.getLogger("noodle")
 
 # a reply this close to one of noodle's own recent messages is a repeat
 REPEAT_RATIO = 0.9
-REPEAT_WINDOW = 8
 _MIN_REPEAT_CHARS = 25
 
 
@@ -25,7 +24,10 @@ def repeats_recent_reply(text: str, history: list[dict]) -> bool:
     new = _comparable(text)
     if len(new) < _MIN_REPEAT_CHARS:
         return False
-    for message in history[-REPEAT_WINDOW:]:
+    # the whole live history, not just the last few turns: scheduled dms (the
+    # wrap-up, morning messages) flood the dm, so a repeat of an older one slid
+    # out of a small window and got sent again.
+    for message in history:
         if message.get("role") != "assistant":
             continue
         old = _comparable(message.get("content") or "")

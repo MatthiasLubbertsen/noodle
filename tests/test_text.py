@@ -152,11 +152,13 @@ class RepeatedReplies(unittest.TestCase):
         history = self.history(("user", self.WRAPUP))
         self.assertFalse(slack_text.repeats_recent_reply(self.WRAPUP, history))
 
-    def test_old_messages_outside_the_window_are_ignored(self):
+    def test_an_old_wrapup_buried_under_scheduled_dms_is_still_caught(self):
+        # real incident: the nov 15 wrap-up came back on nov 19, after a pile of
+        # scheduled dms had pushed it out of a short window
         history = self.history(("assistant", self.WRAPUP))
-        history += [("user", "x"), ("assistant", "something else entirely")] * slack_text.REPEAT_WINDOW
-        history = [{"role": r, "content": c} for r, c in history]
-        self.assertFalse(slack_text.repeats_recent_reply(self.WRAPUP, history))
+        history += self.history(*[("assistant", f"scheduled message number {i}, all different")
+                                  for i in range(20)])
+        self.assertTrue(slack_text.repeats_recent_reply(self.WRAPUP, history))
 
 
 if __name__ == "__main__":

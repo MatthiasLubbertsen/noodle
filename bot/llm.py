@@ -5,7 +5,7 @@ import time
 
 import config
 from bot import features, games, state
-from bot.history_store import append_message_async
+from bot.history_store import append_message_async, load_assistant_replies
 from bot.memory import trim_memory
 from bot.netlog import log_hcai
 from bot.slack_text import _clean_reply, repeats_recent_reply
@@ -282,7 +282,9 @@ def ask_noodle(
                     messages = messages + [{"role": "system", "content": EMPTY_NOTE}]
                     continue
                 return ""
-            if not repeat_guard_used and repeats_recent_reply(final, history):
+            if not repeat_guard_used and repeats_recent_reply(
+                final, history + load_assistant_replies(conv_key)
+            ):
                 # it sent one of its own earlier messages again (the wrap-up, a
                 # reply from a few turns back). give it one chance to answer what
                 # he actually wrote before sending anything.
