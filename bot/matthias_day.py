@@ -42,6 +42,46 @@ _TRAILING_RE = re.compile(
 _THREAD_NOTE_RE = re.compile(r"please talk in the thread below.*$", re.IGNORECASE | re.DOTALL)
 
 
+def _cutoff() -> datetime.time:
+    try:
+        h, m = config.RECAP_DAY_CUTOFF.strip().split(":")
+        return datetime.time(int(h), int(m))
+    except (ValueError, AttributeError):
+        return datetime.time(5, 0)
+
+
+def recap_date(ts: str | float | None = None) -> datetime.date:
+    """the day a recap posted at `ts` (slack ts, or now when None) is ABOUT. he writes it at
+    night, so one posted after midnight but before RECAP_DAY_CUTOFF is yesterday's recap."""
+    when = (
+        datetime.datetime.now(AMSTERDAM_TZ)
+        if ts is None
+        else datetime.datetime.fromtimestamp(float(ts), AMSTERDAM_TZ)
+    )
+    if when.time() < _cutoff():
+        return when.date() - datetime.timedelta(days=1)
+    return when.date()
+
+
+def is_late(ts: str | float | None = None) -> bool:
+    """posted after midnight, about the day before."""
+    when = (
+        datetime.datetime.now(AMSTERDAM_TZ)
+        if ts is None
+        else datetime.datetime.fromtimestamp(float(ts), AMSTERDAM_TZ)
+    )
+    return recap_date(ts) != when.date()
+
+
+def recap_created_at(ts: str) -> str:
+    """the journal timestamp for a recap: its own time, or for a late one the last second of
+    the day it is about, so date filters (get_journal, the weekly recap) file it there."""
+    if is_late(ts):
+        day = recap_date(ts)
+        return datetime.datetime.combine(day, datetime.time(23, 59, 59), AMSTERDAM_TZ).isoformat()
+    return datetime.datetime.fromtimestamp(float(ts), AMSTERDAM_TZ).isoformat()
+
+
 def _element_text(el: dict) -> str:
     kind = el.get("type")
     if kind == "text":
@@ -275,7 +315,7 @@ def _recover_recap_before(client, channel: str, ts: str) -> bool:
 
 
 def _persist_recap(client, channel: str, ts: str, content: str) -> bool:
-    """store one cleaned recap, dated to its own ts, with its permalink."""
+    """store one cleaned recap, dated to the day it is about (recap_created_at), with its permalink."""
     permalink = None
     try:
         resp = client.chat_getPermalink(channel=channel, message_ts=ts)
@@ -289,7 +329,7 @@ def _persist_recap(client, channel: str, ts: str, content: str) -> bool:
         # backfill run retries it.
         logger.warning("skipping matthias-day ping %s (no permalink) - safe to retry later", ts)
         return False
-    created_at = datetime.datetime.fromtimestamp(float(ts), AMSTERDAM_TZ).isoformat()
+    created_at = recap_created_at(ts)
     append_message(
         conv_key(channel),
         "matthias_day",

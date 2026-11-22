@@ -8,6 +8,8 @@ from bot import fifty_days
 LINK = "https://hackclub.slack.com/archives/C09SWT5DCGY/p1794600000000100"
 # 2026-11-13 14:50 amsterdam
 TS = "1794577854.332879"
+# 2026-11-22 00:23 amsterdam: saturday's recap, posted late
+LATE_TS = "1795303419.239739"
 
 
 class DayNumberTests(unittest.TestCase):
@@ -19,12 +21,13 @@ class DayNumberTests(unittest.TestCase):
 
 
 class CrosspostTests(unittest.TestCase):
-    def run_it(self, text: str, thread: str = LINK) -> mock.Mock:
+    def run_it(self, text: str, thread: str = LINK, ts: str = TS, replies=None) -> mock.Mock:
         client = mock.Mock()
         client.chat_getPermalink.return_value = {"permalink": "https://x/recap"}
         client.conversations_history.return_value = {"ok": True, "messages": []}
+        client.conversations_replies.return_value = {"messages": replies or []}
         with mock.patch.object(config, "FIFTY_DAYS_THREAD", thread):
-            fifty_days.crosspost(client, "C0A9NJT2BCJ", TS, text)
+            fifty_days.crosspost(client, "C0A9NJT2BCJ", ts, text)
         return client
 
     def test_links_recap_into_goal_thread(self):
@@ -37,6 +40,15 @@ class CrosspostTests(unittest.TestCase):
             unfurl_links=True,
         )
 
+    def test_recap_after_midnight_is_the_day_before(self):
+        # real incident: saturday nov 21's recap at 00:23 on sunday was posted as day 11
+        client = self.run_it("<!subteam^S0AK8LYJ8FR> today:\n• work", ts=LATE_TS)
+        self.assertTrue(client.chat_postMessage.call_args.kwargs["text"].startswith(":50days: Day 10/50\n"))
+
+    def test_day_already_in_thread_is_not_posted_again(self):
+        client = self.run_it("<!subteam^S0AK8LYJ8FR> today:\n• x", replies=[{"text": ":50days: Day 2/50\n<https://x>"}])
+        self.assertFalse(client.chat_postMessage.called)
+
     def test_reping_without_bullets_posts_nothing(self):
         self.assertFalse(self.run_it("<!subteam^S0AK8LYJ8FR> ^^").chat_postMessage.called)
 
@@ -44,6 +56,7 @@ class CrosspostTests(unittest.TestCase):
         # real incident: the event text cleaned to "" although the message had bullets
         client = mock.Mock()
         client.chat_getPermalink.return_value = {"permalink": "https://x/recap"}
+        client.conversations_replies.return_value = {"messages": []}
         client.conversations_history.return_value = {
             "ok": True,
             "messages": [{"ts": TS, "text": "<!subteam^S0AK8LYJ8FR> today:\n• real recap"}],
@@ -57,6 +70,7 @@ class CrosspostTests(unittest.TestCase):
                    "elements": [{"type": "rich_text_section", "elements": [{"type": "text", "text": "x"}]}]}]}]
         client = mock.Mock()
         client.chat_getPermalink.return_value = {"permalink": "https://x/recap"}
+        client.conversations_replies.return_value = {"messages": []}
         with mock.patch.object(config, "FIFTY_DAYS_THREAD", LINK):
             fifty_days.crosspost(client, "C0A9NJT2BCJ", TS, "<!subteam^S0AK8LYJ8FR> today:", blocks)
         self.assertTrue(client.chat_postMessage.called)

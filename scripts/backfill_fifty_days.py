@@ -3,7 +3,7 @@ link), one per day, into the goal thread only (NOT also sent to the channel, so 
 #50-days), in order.
 
 for each day of the challenge so far it takes the LAST bulleted @matthias-day recap of that
-day from #matthias and posts ":50days: Day X/50" + its link, exactly like the live feature.
+day (one posted after midnight, before RECAP_DAY_CUTOFF, counts for the day before) from #matthias and posts ":50days: Day X/50" + its link, exactly like the live feature.
 days that already have a ":50days: Day X/50" post in the thread (by anyone) are skipped,
 so it is safe to run again. needs FIFTY_DAYS_THREAD in .env.
 
@@ -21,7 +21,7 @@ from slack_sdk import WebClient
 import config
 from bot import fifty_days
 from bot.log import setup_logging
-from bot.matthias_day import message_recap
+from bot.matthias_day import message_recap, recap_date
 from bot.slack_text import _matthias_day_pinged
 from bot.tz import AMSTERDAM_TZ
 
@@ -48,9 +48,7 @@ def recaps_by_day(client: WebClient) -> dict[int, dict]:
                 continue
             if not message_recap(text, msg.get("blocks")):
                 continue  # a "^^" re-ping, not a recap
-            day = fifty_days.day_number(
-                datetime.datetime.fromtimestamp(float(msg["ts"]), AMSTERDAM_TZ).date()
-            )
+            day = fifty_days.day_number(recap_date(msg["ts"]))
             if day is None:
                 continue
             if day not in found or float(msg["ts"]) > float(found[day]["ts"]):

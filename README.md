@@ -257,6 +257,17 @@ docker compose exec noodle python -m scripts.backfill_fifty_days --dry-run   # l
 docker compose exec noodle python -m scripts.backfill_fifty_days             # post
 ```
 
+### fixing recaps posted after midnight
+
+a recap posted after midnight (before `RECAP_DAY_CUTOFF`, default 05:00) is about the day before. older noodle
+got that wrong: the count reply in #matthias counted the new day and the 50 days post had the next day's number.
+this edits those messages of noodle's in place (nothing new is posted) and re-dates the journal entries; safe to re-run:
+
+```bash
+docker compose exec noodle python -m scripts.fix_late_recaps --dry-run   # look first
+docker compose exec noodle python -m scripts.fix_late_recaps             # fix
+```
+
 ## .env reference
 
 | var | meaning |
@@ -291,6 +302,7 @@ docker compose exec noodle python -m scripts.backfill_fifty_days             # p
 | `MATTHIAS_DAY_GROUP_ID` | optional usergroup id for `@matthias-day` |
 | `MATTHIAS_DAY_CHANNEL_ID` | channel the daily recap pings are posted in |
 | `FIFTY_DAYS_THREAD` | optional: link to your goal message in Hack Club's 50 days channel; each daily recap is then linked into that thread |
+| `RECAP_DAY_CUTOFF` | `HH:MM` (default `05:00`): a recap posted after midnight but before this is about the day before |
 | `WATCHED_CHANNEL_ID` | channel to watch for joins/leaves; empty disables the feature |
 | `LOGS_CHANNEL_ID` | where join/leave + usergroup changes get logged |
 | `JOIN_EPHEMERAL_MESSAGE` | ephemeral nudge template, `{user}` = the new member |
