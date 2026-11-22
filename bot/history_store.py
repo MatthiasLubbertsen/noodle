@@ -157,6 +157,21 @@ def replace_content(old: str, new: str) -> int:
         conn.close()
 
 
+def set_created_at(permalink: str, created_at: str) -> int:
+    """re-date the rows stored with this permalink, returning how many changed - used by
+    scripts/fix_late_recaps.py to move a recap posted after midnight to the day it is about."""
+    conn = sqlite3.connect(config.MEMORY_DB_PATH)
+    try:
+        cur = conn.execute(
+            "UPDATE messages SET created_at = ? WHERE permalink = ? AND created_at != ?",
+            (created_at, permalink, created_at),
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 def has_permalink(permalink: str) -> bool:
     """is a row with this permalink stored? (append_message never raises or returns
     anything, so this is how a caller finds out whether a save actually happened)"""

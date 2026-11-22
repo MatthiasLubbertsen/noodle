@@ -205,10 +205,11 @@ def _process_locked(channel: str, prompt: str, thread_ts: str | None, key: str,
             pass
 
 
-def _send_daily_stats_reply(channel: str) -> None:
-    # always a fresh top-level message, never a thread reply
+def _send_daily_stats_reply(channel: str, ts: str | None = None) -> None:
+    # always a fresh top-level message, never a thread reply. `ts` is the ping's own, so a
+    # recap posted after midnight counts the day it is about (see stats.build_daily_summary)
     try:
-        summary = build_daily_summary(config.USER_ID)
+        summary = build_daily_summary(config.USER_ID, ts)
         state.app.client.chat_postMessage(channel=channel, text=summary)
     except Exception:  # noqa: BLE001
         logger.exception("failed to send daily stats reply in %s", channel)
@@ -255,7 +256,7 @@ def handle_message(event: dict) -> None:
         channel = event.get("channel")
         threading.Thread(
             target=_send_daily_stats_reply,
-            args=(channel,),
+            args=(channel, event.get("ts")),
             daemon=True,
         ).start()
         # also persist the cleaned ping into memory (see bot/matthias_day.py)

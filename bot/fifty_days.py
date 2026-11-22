@@ -4,13 +4,11 @@ recap, so the update itself stays in his own channel. off unless
 FIFTY_DAYS_THREAD is set. posted by noodle (the organizer okayed that).
 """
 
-import datetime
 import logging
 import re
 
 import config
-from bot.matthias_day import alert, recap_content
-from bot.tz import AMSTERDAM_TZ
+from bot.matthias_day import alert, recap_content, recap_date
 
 logger = logging.getLogger("noodle")
 
@@ -28,9 +26,9 @@ def target() -> tuple[str, str] | None:
     return (m.group(1), m.group(2)) if m else None
 
 
-def day_number(date: datetime.date) -> int | None:
+def day_number(date) -> int | None:
     """dec 31 is day 50, so nov 12 is day 1. None outside the challenge."""
-    day = 50 - (datetime.date(date.year, 12, 31) - date).days
+    day = 50 - (date.replace(month=12, day=31) - date).days
     return day if 1 <= day <= 50 else None
 
 
@@ -83,8 +81,18 @@ def crosspost(client, channel: str, ts: str, raw_text: str, blocks=None) -> None
         if not recap_content(client, channel, ts, raw_text, blocks):
             logger.info("50 days: %s has no recap bullets, not posting", ts)
             return
-        day = day_number(datetime.datetime.fromtimestamp(float(ts), AMSTERDAM_TZ).date())
+        # the day the recap is ABOUT: one posted after midnight is yesterday's (real
+        # incident: saturday's recap at 00:23 was posted as day 11 instead of 10)
+        day = day_number(recap_date(ts))
         if day is None:
+            return
+        try:
+            done = days_already_posted(client, where)
+        except Exception:  # noqa: BLE001
+            logger.exception("50 days: couldn't read the goal thread, posting without the duplicate check")
+            done = set()
+        if day in done:
+            logger.info("50 days: day %d is already in the thread, not posting %s again", day, ts)
             return
         link = client.chat_getPermalink(channel=channel, message_ts=ts)["permalink"]
         post_day(client, where, day, link)

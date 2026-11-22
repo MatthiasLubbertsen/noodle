@@ -97,6 +97,7 @@ noodle/
   scripts/
     backfill_matthias_day.py  # one-time: backfill historical pings into memory
     purge_morning.py      # delete a noodle message from slack + memory, optionally resend the morning dm
+    fix_late_recaps.py    # one-off: edit noodle's messages about recaps posted after midnight, see 6d
   sandbox/                # the code sandbox: its OWN container (node + wasm + simulated shell), see 7g
     test.js               # `node --test sandbox/test.js`: shell tier, isolation + limits
     server.js             # http runner: pool, timeouts, memory watchdog, auth
@@ -831,6 +832,22 @@ is derived from `TOOLS`, so that one is automatic), the matthias-only line in
   last bulleted recap of each day from #matthias. days that already have a `:50days: Day X/50` first line in
   the thread (by anyone) are skipped, so it is safe to re-run. day 1 is nov 12 (the organizers' "50 days left"
   post), so nov 15 is day 4; the organizers allow backfilling.
+- the live post skips a day that already has a `:50days: Day X/50` post in the thread (same check as the backfill).
+
+### 6d. a recap posted after midnight is about the day before
+- real incident (issue #64): his saturday recap at 00:23 on sunday got "zero messages, taking a sunday off" (the
+  count searched `on:<sunday>`, the prompt said "today is sunday"; he had sent 95 on saturday) and the 50 days post
+  said day 11 instead of 10.
+- `matthias_day.recap_date(ts)` is the one rule: posted before `RECAP_DAY_CUTOFF` (default 05:00, amsterdam) = the
+  day before. used by `stats.build_daily_summary(user_id, ts)` (count + weekday + the average window; the prompt says
+  it's that day's recap, posted late), `fifty_days.crosspost()` and `scripts/backfill_fifty_days.py` (day number),
+  and `_persist_recap()` (journal `created_at` = `recap_created_at()`: 23:59:59 of that day, so `get_journal` and the
+  weekly recap file it there). `handlers._send_daily_stats_reply()` passes the ping's own ts.
+- **`scripts/fix_late_recaps.py`** fixes what older noodle already sent, editing in place with `chat.update` (noodle's
+  own token, nothing new posted): the count reply right after each late ping (model-written again; one already
+  edited is skipped unless `--force`), every noodle 50 days post whose day number doesn't match its linked recap,
+  and the journal row's date (`history_store.set_created_at()`). `--dry-run` first, `--since YYYY-MM-DD`; safe to
+  re-run. docker: `docker compose exec noodle python -m scripts.fix_late_recaps`.
 
 ### 7. morning wakeup dm
 - with the web session configured (see 8b), the morning dm goes out when `USER_ID` first comes
@@ -1482,6 +1499,7 @@ in the console. then DM noodle from the `USER_ID` account to test the persona.
 | `MATTHIAS_DAY_GROUP_ID` | usergroup id for `@matthias-day` (defaults to the real id, `S0AK8LYJ8FR`) |
 | `MATTHIAS_DAY_CHANNEL_ID` | channel the daily recap pings are posted in (defaults to `#matthias`, `C0A9NJT2BCJ`) |
 | `FIFTY_DAYS_THREAD` | link to matthias's goal message in the 50 days channel; set = each recap is linked into that thread, see 6c |
+| `RECAP_DAY_CUTOFF` | `HH:MM` (default `05:00`): a recap posted after midnight but before this is about the day before, see 6d |
 | `FREEDOM_API_BASE` | base url of matthias's self-hosted freedom api (defaults to `https://freedom.matthiaz.dev`) |
 | `FREEDOM_API_KEY` | bearer key for that api; optional - unset just disables `start_freedom_session` |
 | `FREEDOM_DEVICE_NAMES` | comma separated device names (as shown in freedom's dashboard) allowed to be blocked - the account is shared, so this is never "all devices" (defaults to `Matthias Windows,mopa5m`) |

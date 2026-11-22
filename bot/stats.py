@@ -6,6 +6,7 @@ from slack_sdk import WebClient
 
 import config
 from bot import state
+from bot.matthias_day import is_late, recap_date
 from bot.oneshot import complete
 from bot.tz import AMSTERDAM_TZ
 
@@ -68,13 +69,13 @@ def _load_counts() -> dict[str, int]:
         return {}
 
 
-def average_per_day(user_id: str) -> float | None:
-    """his average slack messages per day over the last AVERAGE_WINDOW_DAYS full days
-    (today excluded, it isn't finished). finished days never change, so each is counted
-    once and kept in data/message_counts.json; only missing days cost a search (the
-    first call fills the window, after that it is one search a day). None if there's
-    nothing to average."""
-    today = datetime.datetime.now(AMSTERDAM_TZ).date()
+def average_per_day(user_id: str, day: datetime.date | None = None) -> float | None:
+    """his average slack messages per day over the AVERAGE_WINDOW_DAYS full days before
+    `day` (default today; `day` itself is excluded, it may not be finished). finished days
+    never change, so each is counted once and kept in data/message_counts.json; only
+    missing days cost a search (the first call fills the window, after that it is one
+    search a day). None if there's nothing to average."""
+    today = day or datetime.datetime.now(AMSTERDAM_TZ).date()
     window = [(today - datetime.timedelta(days=i)).isoformat() for i in range(1, AVERAGE_WINDOW_DAYS + 1)]
     counts = _load_counts()
     changed = False
@@ -95,29 +96,44 @@ def average_per_day(user_id: str) -> float | None:
     return sum(values) / len(values) if values else None
 
 
-def average_fact(user_id: str) -> str | None:
+def average_fact(user_id: str, day: datetime.date | None = None) -> str | None:
     """the average as a fact line for the model, or None."""
-    avg = average_per_day(user_id)
+    avg = average_per_day(user_id, day)
     if avg is None:
         return None
     return f"his usual average is about {avg:.0f} slack messages a day (last {AVERAGE_WINDOW_DAYS} days)"
 
 
-def build_daily_summary(user_id: str) -> str:
-    """the "messages sent today" message, written by the model (never a
-    templated line). it is posted publicly in a channel, so it only ever
-    contains the number."""
-    count = messages_sent_today(user_id)
+def build_daily_summary(user_id: str, ts: str | None = None) -> str:
+    """the message count for the day a @matthias-day recap (posted at slack `ts`, default
+    now) is about, written by the model (never a templated line). it is posted publicly in
+    a channel, so it only ever contains the number.
+
+    a recap posted after midnight (before RECAP_DAY_CUTOFF) is about YESTERDAY: real
+    incident, his saturday recap at 00:23 was answered with sunday's count ("zero messages,
+    taking a sunday off") while he had sent 95 on saturday."""
+    day = recap_date(ts)
+    late = is_late(ts)
+    weekday = day.strftime("%A")
+    count = messages_sent_on(user_id, day.isoformat())
     if count < 0:
-        facts = "the search for today's message count failed, so you don't know the number"
+        facts = "the search for the message count failed, so you don't know the number"
+    elif late:
+        facts = (
+            f"the recap is for {weekday}: he posted it just after midnight, so it's technically "
+            f"already the next day, but it's {weekday}'s recap and these are {weekday}'s numbers. "
+            f"never say today is a different day or that he took the day off because of the hour\n"
+            f"matthias sent {count} slack message{'' if count == 1 else 's'} on {weekday}"
+        )
     else:
-        today = datetime.datetime.now(AMSTERDAM_TZ).strftime("%A")
-        facts = f"today is {today}\nmatthias has sent {count} slack message{'' if count == 1 else 's'} today"
-        avg = average_fact(user_id)
+        facts = f"today is {weekday}\nmatthias has sent {count} slack message{'' if count == 1 else 's'} today"
+    if count >= 0:
+        avg = average_fact(user_id, day)
         if avg:
             facts += f"\n{avg}"
+    when = f"{weekday}'s" if late else "today's"
     text = complete(
-        "someone just pinged matthias's daily recap group, so you're posting today's "
+        f"someone just pinged matthias's daily recap group, so you're posting {when} "
         "message count in the channel for everyone to see. say it in your own voice, "
         "1-2 short sentences, a bit playful. mention the number. if you're given his "
         "average you may play with it however you like (above, below, right on it, "
@@ -127,4 +143,6 @@ def build_daily_summary(user_id: str) -> str:
     )
     if text:
         return text
-    return "i couldn't count today's messages, sorry" if count < 0 else f"{count} messages today"
+    if count < 0:
+        return "i couldn't count the messages, sorry"
+    return f"{count} messages on {weekday.lower()}" if late else f"{count} messages today"

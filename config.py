@@ -159,6 +159,10 @@ MATTHIAS_DAY_GROUP_ID = os.getenv("MATTHIAS_DAY_GROUP_ID", "S0AK8LYJ8FR")
 # the one channel matthias posts his daily @matthias-day recap in - used by
 # bot/matthias_day.py (the live listener) and scripts/backfill_matthias_day.py.
 MATTHIAS_DAY_CHANNEL_ID = os.getenv("MATTHIAS_DAY_CHANNEL_ID", "C0A9NJT2BCJ")
+# "HH:MM": a @matthias-day recap posted after midnight but before this is the PREVIOUS
+# day's recap (message count, 50 days day number, journal date). real incident: his
+# saturday recap at 00:23 got "zero messages, sunday off" and a 50 days post one day ahead.
+RECAP_DAY_CUTOFF = os.getenv("RECAP_DAY_CUTOFF", "05:00")
 
 # hack club's "50 days" challenge: link to matthias's goal message there. when
 # set, every @matthias-day recap is linked into that thread (bot/fifty_days.py).
